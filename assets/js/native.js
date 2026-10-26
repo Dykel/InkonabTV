@@ -41,6 +41,20 @@
     if (isText(a)) { a.blur(); a.focus(); }
   }
 
+  // VPN status badge in the top bar (green when connected, amber while connecting).
+  const pill = document.getElementById('vpnPill');
+  const paintVpn = v => {
+    if (!pill || !v) return;
+    const country = (v.server || '').split(' · ')[0];
+    pill.className = 'vpn-pill ' + v.state;
+    pill.innerHTML = v.state === 'connected' ? `<i></i>VPN · ${country}` : v.state === 'connecting' ? '<i></i>VPN connecting…' : '<i></i>VPN off';
+    pill.title = v.state === 'connected' ? 'Connected to ' + v.server : v.detail || '';
+    if (v.mode === 'off' && v.state !== 'connected') pill.classList.add('hidden');
+  };
+  NativePlayer.vpnStatus().then(paintVpn).catch(() => {});
+  NativePlayer.addListener('vpn', paintVpn);
+  if (pill) pill.addEventListener('click', () => window.App && App.openSettings());
+
   // Remote / phone Back: same as Escape in the web app (close dialog, go Home); exit from Home or sign-in.
   AppPlugin.addListener('backButton', () => {
     const target = document.activeElement || document.body;

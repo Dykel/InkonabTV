@@ -719,3 +719,14 @@ img.broken { visibility: hidden; }
 .kv .bad { color: var(--danger); }
 .vpn-actions { margin: 8px 0 4px; }
 .small-note { font-size: .82rem; margin: 10px 0 0; }
+
+/* VPN status badge (Android app) */
+.vpn-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; font-size: .88rem; font-weight: 600; background: rgba(255,255,255,.08); border: 1px solid var(--line); color: #cfdadd; white-space: nowrap; }
+.vpn-pill i { width: 9px; height: 9px; border-radius: 50%; background: #7d8c90; }
+.vpn-pill.connected { background: rgba(31,143,85,.22); border-color: rgba(103,224,163,.45); color: #bff3d6; }
+.vpn-pill.connected i { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.vpn-pill.connecting { background: rgba(176,122,16,.25); border-color: rgba(251,197,12,.45); color: #ffe08a; }
+.vpn-pill.connecting i { background: var(--accent); animation: blink 1s ease-in-out infinite; }
+.vpn-pill:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+@keyframes blink { 50% { opacity: .3; } }
+@media (max-width: 860px) { .vpn-pill { padding: 6px 10px; font-size: .78rem; } }

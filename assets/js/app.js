@@ -1460,6 +1460,7 @@
         const label = { connected: `Connected · ${v.server || ''}`, connecting: v.detail || 'Connecting…', failed: v.detail || 'Failed', disconnected: 'Off' }[v.state] || v.state;
         el.textContent = label;
         el.className = v.state === 'connected' ? 'ok' : v.state === 'failed' ? 'bad' : '';
+        $('#vpnGood', m).textContent = v.remembered ? v.remembered + (v.need ? ' · used for provider channels' : '') : 'None yet — found automatically when a channel needs it';
         $('#vpnMode', m).value = v.mode;
         $('#vpnCountry', m).value = v.country || '';
       };
@@ -1476,6 +1477,7 @@
           .catch(err => this.toast(err.message || 'VPN not allowed'));
       });
       $('#vpnOff', m).addEventListener('click', () => P.vpnDisconnect().then(paint));
+      $('#vpnForget', m).addEventListener('click', () => P.vpnSettings({ forget: true }).then(v => { paint(v); this.toast('Forgot the remembered VPN server'); }));
     },
 
     // ---------- settings ----------
@@ -1512,7 +1514,8 @@
           <label class="set"><span>Preferred server country<small>Free VPN Gate servers are mostly in Japan and Korea.</small></span>
             <select class="field" id="vpnCountry"><option value="">Best available</option><option value="JP">Japan</option><option value="KR">South Korea</option><option value="US">United States</option><option value="TH">Thailand</option><option value="VN">Vietnam</option><option value="RU">Russia</option></select></label>
           <div class="kv"><span>Status</span><b id="vpnState">…</b></div>
-          <div class="set-row vpn-actions"><button class="btn ghost" id="vpnConnect">Connect now</button><button class="btn ghost" id="vpnOff">Disconnect</button></div>
+          <div class="kv"><span>Remembered server</span><b id="vpnGood">—</b></div>
+          <div class="set-row vpn-actions"><button class="btn ghost" id="vpnConnect">Connect now</button><button class="btn ghost" id="vpnOff">Disconnect</button><button class="btn ghost" id="vpnForget">Forget server</button></div>
           <p class="muted small-note">Servers come from the VPN Gate academic project and are run by volunteers: they can be slow, and their operators could see unencrypted traffic. Use it to unblock channels, not for privacy.</p>
         </section>` : ''}
         <section class="set-group">

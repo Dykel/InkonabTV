@@ -40,7 +40,26 @@ public final class VpnGate {
             this.config = config;
         }
 
-        public String label() { return country + " · " + ip; }
+        /** A server remembered from an earlier session (it may have left today's list). */
+        Server(String host, String ip, String country, String countryCode, String config) {
+            this.host = host; this.ip = ip; this.country = country; this.countryCode = countryCode; this.config = config;
+            score = 0; speed = 0; ping = 0; sessions = 0;
+        }
+
+        public String label() { return shortCountry() + " · " + ip; }
+
+        /** "Korea Republic of" → "Korea", "United States" → "USA"… */
+        public String shortCountry() {
+            switch (country) {
+                case "Korea Republic of": return "Korea";
+                case "Viet Nam": return "Vietnam";
+                case "United States": return "USA";
+                case "United Kingdom": return "UK";
+                case "Russian Federation": return "Russia";
+                case "Iran Islamic Republic of": return "Iran";
+                default: return country.replace(" Republic of", "");
+            }
+        }
         public String id() { return ip; }
     }
 

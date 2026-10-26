@@ -87,7 +87,10 @@ public class PlayerActivity extends AppCompatActivity {
     // Automatic recovery: copies (version × format) already tried for the current channel.
     private final HashSet<String> tried = new HashSet<>();
     private boolean altFormat, readyOnce;
-    private boolean vpnTried, vpnSwitched, directTried;
+    private int vpnAttempts;             // VPN servers (countries) tried for the current channel
+    private boolean vpnTried, directTried, vpnWatch;
+    private TextView vpnChip;
+    private final VpnManager.Listener vpnListener = (st, detail) -> runOnUiThread(() -> paintVpn(st, detail));
     private static final int REQ_VPN = 42;
     private final JSONObject favChanges = new JSONObject();
 
@@ -163,6 +166,7 @@ public class PlayerActivity extends AppCompatActivity {
                     readyOnce = true;
                     main.removeCallbacks(watchdog);
                     errorView.setVisibility(View.GONE);
+                    onPlaying();
                 }
                 if (state == Player.STATE_ENDED && !live) {
                     ended = true;
@@ -185,6 +189,10 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
 
+        VpnManager vpn = VpnManager.get();
+        vpn.init(this);
+        vpn.addListener(vpnListener);
+        paintVpn(vpn.state(), vpn.detail());
         load(startAtMs);
     }
 
@@ -220,7 +228,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (live && autoRetry()) return;
         if (tryVpn()) return;
         showError(live
-            ? "Can't play this channel (tried every copy and format" + (vpnTried || vpnSwitched ? ", and the free VPN" : "") + ").\n▲ ▼ change channel · OK channel list"
+            ? "Can't play this channel (tried every copy and format" + (vpnTried ? ", and VPN servers in " + vpnAttempts + " countries" : "") + ").\n▲ ▼ change channel · OK channel list"
             : "Can't play this file (" + why + ").");
     }
 
@@ -254,41 +262,69 @@ public class PlayerActivity extends AppCompatActivity {
         tried.clear();
         altFormat = false;
         vpnTried = false;
-        vpnSwitched = false;
+        vpnAttempts = 0;
         directTried = false;
     }
 
-    // ---------- free VPN fallback ----------
+    // ---------- free VPN ----------
+    // MBC PLAY (free channels) refuse VPN addresses and always play directly. Provider streams go
+    // through the VPN once it has been needed (the working server is remembered); a stream that
+    // won't play tries VPN servers country by country until one works.
 
-    /**
-     * Last resort for a stream that won't play. Some services refuse VPN addresses, so with the
-     * VPN on we first retry directly; with it off we connect it; then we switch server once.
-     * In automatic mode a VPN that didn't help is turned off again.
-     */
+    private static final int MAX_COUNTRIES = 6;
+
+    private boolean isFree(JSONObject ch) { return ch.optBoolean("free", false); }
+
+    /** Before playing: drop the VPN for MBC PLAY, or bring it up for provider streams that need it. */
+    private boolean gateVpn(long startAtMs) {
+        VpnManager vpn = VpnManager.get();
+        vpn.init(this);
+        JSONObject ch = current();
+        titleView.setText(live && !ch.optString("num").isEmpty() ? ch.optString("num") + "  " + ch.optString("title") : ch.optString("title"));
+        String gname = groups.get(group).name;
+        subView.setText(live && !gname.isEmpty() ? gname : ch.optString("subtitle"));
+        if (qualityView.getText().length() == 0) qualityView.setVisibility(View.GONE);
+        if (isFree(ch)) {
+            if (!vpn.busy()) return false;
+            showInfo("MBC PLAY plays without the VPN — disconnecting…");
+            vpn.pauseForDirect();
+            main.postDelayed(() -> startPlayback(startAtMs), 1200);
+            return true;
+        }
+        if (vpn.isUp() || !vpn.shouldUseForProvider() || vpn.consentIntent(this) != null) return false;
+        String next = vpn.nextLabel();
+        showInfo("Connecting to VPN" + (next.isEmpty() ? "…" : " · " + next + "…"));
+        vpnWatch = true;
+        vpn.connectForPlayback((ok, detail) -> runOnUiThread(() -> { if (!isFinishing() && player != null) startPlayback(startAtMs); }));
+        return true;
+    }
+
+    /** A provider stream that won't play: VPN on → try a server in another country, up to 6. */
     private boolean tryVpn() {
         VpnManager vpn = VpnManager.get();
         vpn.init(this);
         String mode = vpn.mode();
-        if ("off".equals(mode)) return false;
-        if (vpn.busy()) {
-            if (!directTried && !"always".equals(mode)) {
+        if ("off".equals(mode) || isFree(current())) return false;
+        if (vpnAttempts >= MAX_COUNTRIES) {
+            // None of them helped: a last direct try, then give up.
+            if (vpn.busy() && !directTried && !"always".equals(mode)) {
                 directTried = true;
                 showInfo("Trying without the VPN…");
                 vpn.disconnect();
-                main.postDelayed(() -> { tried.clear(); altFormat = false; load(live ? 0 : player.getCurrentPosition()); }, 1500);
+                main.postDelayed(() -> { tried.clear(); altFormat = false; startPlayback(live ? 0 : player.getCurrentPosition()); }, 1500);
                 return true;
             }
-            if (vpn.isUp() && !vpnSwitched) {
-                vpnSwitched = true;
-                showInfo("Trying another free VPN server…");
-                vpn.switchServer(this::afterVpn);
-                return true;
-            }
-            if (vpn.autoStarted() && "auto".equals(mode)) vpn.disconnect(); // it didn't help
+            if (vpn.autoStarted() && !vpn.needVpn()) vpn.disconnect();
             return false;
         }
-        if (vpnTried) return false;
         vpnTried = true;
+        vpnAttempts++;
+        if (vpn.isUp()) {
+            showInfo("Not playing through " + vpn.serverLabel() + "\nTrying a VPN server in another country…");
+            vpnWatch = true;
+            vpn.switchServer(this::afterVpn);
+            return true;
+        }
         Intent consent = vpn.consentIntent(this);
         if (consent != null) {
             showInfo("Allow InkonabTV's VPN to play this channel");
@@ -300,7 +336,9 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void connectVpn() {
-        showInfo("Connecting through a free VPN server…");
+        String next = VpnManager.get().nextLabel();
+        showInfo("Connecting to VPN" + (next.isEmpty() ? "…" : " · " + next + "…"));
+        vpnWatch = true;
         VpnManager.get().connectForPlayback(this::afterVpn);
     }
 
@@ -308,16 +346,43 @@ public class PlayerActivity extends AppCompatActivity {
         runOnUiThread(() -> {
             if (isFinishing() || player == null) return;
             if (!ok) {
+                vpnWatch = false;
+                if ("Disconnected".equals(detail)) return; // we dropped it ourselves (e.g. switched to MBC PLAY)
                 VpnManager vpn = VpnManager.get();
-                if (vpn.autoStarted() || !vpn.isUp()) vpn.disconnect();
+                if (vpn.autoStarted() && !vpn.needVpn()) vpn.disconnect();
                 showError("Can't play this " + (live ? "channel" : "file") + ", even through the free VPN (" + detail + ").");
                 return;
             }
-            Toast.makeText(this, "VPN connected · " + detail, Toast.LENGTH_SHORT).show();
             tried.clear();
             altFormat = false;
-            load(live ? 0 : player.getCurrentPosition());
+            startPlayback(live ? 0 : player.getCurrentPosition());
         });
+    }
+
+    /** Playback started: if it went through the VPN, remember that server for next time. */
+    private void onPlaying() {
+        VpnManager vpn = VpnManager.get();
+        if (isFree(current()) || !vpn.isUp()) return;
+        vpn.markGood();
+        if (vpnWatch) Toast.makeText(this, "Playing through VPN · " + vpn.serverLabel() + " — remembered for next time", Toast.LENGTH_LONG).show();
+        vpnWatch = false;
+    }
+
+    // Live VPN status in the top bar; while connecting for this channel, also in the message.
+    private void paintVpn(VpnManager.State st, String detail) {
+        if (vpnChip == null) return;
+        VpnManager vpn = VpnManager.get();
+        String label;
+        int bg;
+        switch (st) {
+            case CONNECTED: label = "VPN · " + vpn.serverLabel().split(" · ")[0]; bg = 0xFF1F8F55; break;
+            case CONNECTING: label = "VPN connecting…"; bg = 0xFFB07A10; break;
+            default: label = "VPN off"; bg = 0x33FFFFFF;
+        }
+        vpnChip.setText(label);
+        vpnChip.setBackground(rounded(bg, 24));
+        vpnChip.setVisibility("off".equals(vpn.mode()) && st != VpnManager.State.CONNECTED ? View.GONE : View.VISIBLE);
+        if (vpnWatch && st == VpnManager.State.CONNECTING && detail != null && detail.startsWith("Connecting to VPN")) showInfo(detail + "…");
     }
 
     @Override
@@ -379,6 +444,9 @@ public class PlayerActivity extends AppCompatActivity {
         qualityView = chip("", true);
         qualityView.setOnClickListener(v -> switchVersion(1));
         bar.addView(qualityView);
+        vpnChip = chip("VPN off", false);
+        vpnChip.setFocusable(false);
+        bar.addView(vpnChip);
         favChip = chip("☆", false);
         favChip.setOnClickListener(v -> toggleFav(flatIndex()));
         if (live) {
@@ -669,6 +737,11 @@ public class PlayerActivity extends AppCompatActivity {
     // ---------- playback ----------
 
     private void load(long startAtMs) {
+        if (gateVpn(startAtMs)) return;
+        startPlayback(startAtMs);
+    }
+
+    private void startPlayback(long startAtMs) {
         try {
             JSONObject ch = current();
             JSONArray versions = ch.getJSONArray("versions");
@@ -847,9 +920,6 @@ public class PlayerActivity extends AppCompatActivity {
         data.putExtra("version", version);
         data.putExtra("history", new JSONArray(history).toString());
         data.putExtra("fav", favChanges.toString());
-        // Automatic mode: the VPN was only for this viewing; browse directly again.
-        VpnManager vpn = VpnManager.get();
-        if ("auto".equals(vpn.mode()) && vpn.autoStarted()) vpn.disconnect();
         setResult(RESULT_OK, data);
         finish();
     }
@@ -864,6 +934,7 @@ public class PlayerActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         main.removeCallbacksAndMessages(null);
+        VpnManager.get().removeListener(vpnListener);
         logos.shutdown();
         if (player != null) {
             player.release();

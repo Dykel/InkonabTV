@@ -67,6 +67,8 @@ public class NativePlayerPlugin extends Plugin {
         o.put("server", v.serverLabel());
         o.put("mode", v.mode());
         o.put("country", v.country());
+        o.put("remembered", v.rememberedLabel());
+        o.put("need", v.needVpn());
         return o;
     }
 
@@ -78,6 +80,7 @@ public class NativePlayerPlugin extends Plugin {
         VpnManager v = VpnManager.get();
         if (call.hasOption("mode")) v.setMode(call.getString("mode", "auto"));
         if (call.hasOption("country")) v.setCountry(call.getString("country", ""));
+        if (call.getBoolean("forget", false)) v.forget();
         call.resolve(vpnJson());
     }
 
