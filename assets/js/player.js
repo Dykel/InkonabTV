@@ -51,6 +51,7 @@
       this.el.querySelector('.p-sub').textContent = item.subtitle || '';
       this.el.querySelector('.p-zap').classList.toggle('hidden', !item.list);
       this.el.querySelector('.p-epg').innerHTML = '';
+      this.renderVersions(item);
       this.setState('loading');
       this.poke();
 
@@ -98,8 +99,38 @@
       if (!it || !it.list) return;
       const index = (it.index + step + it.list.length) % it.list.length;
       const ch = it.list[index];
-      this.play({ ...it, id: ch.stream_id, title: ch.name, subtitle: it.subtitle, index });
+      const v = (ch.versions || [ch])[0];
+      this.play({ ...it, id: v.stream_id, title: ch.label || ch.name, subtitle: it.subtitle, version: v, index });
       if (it.onZap) it.onZap(ch);
+    },
+
+    // Live channels with several qualities: chips in the top bar, ←/→ to switch.
+    renderVersions(item) {
+      const box = this.el.querySelector('.p-vers');
+      const versions = (item.version && item.version.versions) || [];
+      if (versions.length < 2) { box.innerHTML = ''; return; }
+      const labels = versions.map(v => [v.quality || 'SD', ...v.tags].join(' · '));
+      const seen = {};
+      box.innerHTML = versions.map((v, i) => {
+        const n = labels.filter(l => l === labels[i]).length > 1 ? ' ' + (seen[labels[i]] = (seen[labels[i]] || 0) + 1) : '';
+        return `<button class="p-ver${v === item.version ? ' on' : ''}" data-v="${i}">${App.esc(labels[i] + n)}</button>`;
+      }).join('');
+      box.querySelectorAll('.p-ver').forEach(b => b.addEventListener('click', () => this.switchVersion(versions[b.dataset.v])));
+    },
+
+    switchVersion(v) {
+      const it = this.item;
+      if (!it || !v || v === it.version) return;
+      this.play({ ...it, id: v.stream_id, version: v });
+      App.toast('Quality: ' + [v.quality || 'SD', ...v.tags].join(' · '));
+    },
+
+    stepVersion(step) {
+      const it = this.item, versions = it && it.version && it.version.versions;
+      if (!versions || versions.length < 2) return false;
+      const i = versions.indexOf(it.version);
+      this.switchVersion(versions[(i + step + versions.length) % versions.length]);
+      return true;
     },
 
     saveProgress() {
@@ -145,9 +176,11 @@
         case 'ArrowDown': case 'ChannelDown': case 'PageDown':
           if (live) { e.preventDefault(); e.stopPropagation(); this.zap(1); } break;
         case 'ArrowLeft':
-          if (!live && document.activeElement === v) { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 10); } break;
+          if (live) { if (this.stepVersion(-1)) { e.preventDefault(); e.stopPropagation(); } }
+          else if (document.activeElement === v) { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 10); } break;
         case 'ArrowRight':
-          if (!live && document.activeElement === v) { e.preventDefault(); v.currentTime += 10; } break;
+          if (live) { if (this.stepVersion(1)) { e.preventDefault(); e.stopPropagation(); } }
+          else if (document.activeElement === v) { e.preventDefault(); v.currentTime += 10; } break;
         case ' ': case 'MediaPlayPause':
           if (document.activeElement === v || document.activeElement === document.body) { e.preventDefault(); v.paused ? v.play() : v.pause(); } break;
         case 'f':

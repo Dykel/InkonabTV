@@ -28,6 +28,7 @@
     [/^4K(-Q)?$|^UHD$/i, '4K'], [/^(\d{3,4})p$/i, m => m[1] + 'p'],
     [/^VOSTFR$/i, 'VOSTFR'], [/^MULTI[ -]?AUDIO$/i, 'Multi-audio'], [/^MULTI[ -]?SUB$/i, 'Multi-sub'], [/^MULTI$/i, 'Multi'],
     [/^(?:([A-Z]+) )?ENG[ -]SUB$/i, m => (m[1] ? m[1][0] + m[1].slice(1).toLowerCase() + ' · ' : '') + 'English subs'],
+    [/^FHD$/i, '1080p'], [/^H\.?265$|^HEVC$/i, 'H265'],
     [/^L ?Q$/i, 'Low quality'], [/^HQ$/i, 'HQ'], [/^CAM$/i, 'CAM'], [/^REC$/i, 'Recording'], [/^Бг Аудио$/i, 'Bulgarian audio'],
   ];
   const tagName = t => {
@@ -53,6 +54,21 @@
     const quality = tags.find(t => t in QUALITY_RANK) || '';
     return { title: s || String(raw || ''), lang, year, quality, tags: [...new Set(tags.filter(t => t !== quality))] };
   }
+
+  // Live names look like "FR: TF1 [4K-Q]", "SP: BEIN SPORTS 1 LQ [1080p]".
+  function parseChannel(raw) {
+    let s = String(raw || '').trim();
+    const tags = [];
+    s = s.replace(/\[([^\]]*)(?:\]|$)/g, (_, t) => { t.split(/[/|,]/).map(tagName).forEach(x => x && tags.push(x)); return ''; });
+    s = s.replace(/(^|\s)(H\.?265|HEVC|LQ|4K|UHD|FHD)(?=\s|$)/gi, (_, sp, w) => { tags.push(tagName(w)); return sp; });
+    const label = s.replace(/\s{2,}/g, ' ').trim() || String(raw || '');
+    const quality = tags.find(t => t in QUALITY_RANK) || '';
+    return { label, quality, tags: [...new Set(tags.filter(t => t && t !== quality))] };
+  }
+  // Categories are split by quality ("FR: FRANCE [4K-Q]", "FR: FRANCE [720p]"); merge them.
+  const liveCatKey = name => String(name || '').replace(/\[\s*(?:\d{3,4}p|4K(?:-Q)?|UHD|FHD|HD|SD|H\.?265|HEVC)\s*\]/gi, '').replace(/\s{2,}/g, ' ').trim();
+  // Which copy of a channel plays first: 1080p, then 4K, 720p…; H265 and low quality last.
+  const liveRank = c => ({ '1080p': 0, '4K': 1, '720p': 2, '480p': 3 }[c.quality] ?? 4) + (c.tags.includes('H265') ? 3 : 0) + (c.tags.includes('Low quality') ? 6 : 0);
 
   const LANG_NAMES = { QFR: 'French (Canada)', EX: 'Ex-Yugoslav', IN: 'Indian', SOM: 'Somali', PK: 'Pakistani', MA: 'Moroccan', AL: 'Albanian' };
   let langNamer;
@@ -256,9 +272,19 @@
     },
     loadLive() {
       // Channels named "✶⋆✶ … ✶⋆✶" are the provider's section dividers, not real channels.
-      return this.data.live || (this.data.live = this.api.liveStreams().then(list => list
-        .filter(c => !String(c.name || '').trim().startsWith('✶⋆✶'))
-        .map(c => ({ ...c, key: fold(c.name), adult: Number(c.is_adult) === 1 }))));
+      // Copies of the same channel in other qualities share c.versions (best first).
+      return this.data.live || (this.data.live = this.api.liveStreams().then(list => {
+        const out = list
+          .filter(c => !String(c.name || '').trim().startsWith('✶⋆✶'))
+          .map(c => { const p = parseChannel(c.name); return { ...c, ...p, key: fold(c.name), gkey: fold(p.label), adult: Number(c.is_adult) === 1 }; });
+        const groups = new Map();
+        for (const c of out) { let g = groups.get(c.gkey); if (!g) groups.set(c.gkey, (g = [])); g.push(c); }
+        for (const g of groups.values()) {
+          g.sort((a, b) => liveRank(a) - liveRank(b));
+          for (const c of g) c.versions = g;
+        }
+        return out;
+      }));
     },
     async loadCats(kind) {
       const key = kind + 'Cats';
@@ -485,6 +511,7 @@
       const startCat = picks.byDate.length ? '@top' : '';
 
       main.innerHTML = `
+        <section class="slider" id="slider" aria-roledescription="carousel"></section>
         <div class="browse">
           <aside class="cats">
             <input class="field" type="search" placeholder="Filter categories" id="catFilter">
@@ -551,6 +578,61 @@
       first.classList.add('active');
       show(startCat, '');
       first.focus({ preventScroll: true });
+      this.renderSlider($('#slider', main), kind, picks.byDate);
+    },
+
+    // Banner carousel: newest TMDB top titles that are in the catalog, with their TMDB backdrops.
+    async renderSlider(host, kind, picks) {
+      const type = kind === 'movie' ? 'movie' : 'tv';
+      const cands = picks.slice(0, 14);
+      const details = await Promise.all(cands.map(i => TMDB.details(type, i.tmdb)));
+      const slides = cands.map((item, k) => ({ item, t: details[k] })).filter(s => s.t && s.t.backdrop).slice(0, 8);
+      if (!host.isConnected) return;
+      if (!slides.length) { host.remove(); return; }
+      host.innerHTML = `
+        <div class="slides">${slides.map(({ item, t }, k) => `
+          <div class="slide${k === 0 ? ' on' : ''}"${k === 0 ? '' : ' inert'} style="background-image:url('${esc(t.backdrop.replace('/w1280/', '/original/'))}')">
+            <div class="slide-info">
+              <div class="slide-kicker">${esc(t.genres.slice(0, 2).join(', ') || (kind === 'movie' ? 'Movie' : 'Series'))}</div>
+              <h2 class="slide-title">${t.logo ? `<img src="${esc(t.logo)}" alt="${esc(t.title)}">` : esc(t.title || item.name)}</h2>
+              <div class="hero-meta">${[t.year && `<span>${esc(t.year)}</span>`, t.rating && `<span class="rate">${ICONS.star}${esc(t.rating)}</span>`,
+                ...[...new Set(item.versions.map(v => v.lang).filter(Boolean))].slice(0, 4).map(l => `<span class="chip">${esc(l)}</span>`),
+                item.versions.some(v => v.quality === '4K') && '<span class="chip">4K</span>'].filter(Boolean).join('')}</div>
+              <p class="slide-plot">${esc(t.overview || '')}</p>
+              <div class="hero-actions">
+                <button class="btn primary" data-k="${k}" data-s="play">${ICONS.play}<span>${kind === 'movie' ? 'Watch now' : 'Episodes'}</span></button>
+                <button class="btn ghost" data-k="${k}" data-s="info">${ICONS.info}<span>More info</span></button>
+              </div>
+            </div>
+          </div>`).join('')}</div>
+        ${slides.length > 1 ? `
+        <button class="round-btn slide-nav prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="round-btn slide-nav next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="dots">${slides.map((_, k) => `<button class="dot${k === 0 ? ' on' : ''}" data-dot="${k}" aria-label="Slide ${k + 1}"></button>`).join('')}</div>` : ''}`;
+
+      let at = 0;
+      const els = $$('.slide', host), dots = $$('.dot', host);
+      const go = k => {
+        at = (k + slides.length) % slides.length;
+        els.forEach((el, i) => { el.classList.toggle('on', i === at); el.inert = i !== at; });
+        dots.forEach((d, i) => d.classList.toggle('on', i === at));
+      };
+      host.addEventListener('click', e => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.dot) go(Number(b.dataset.dot));
+        else if (b.classList.contains('prev')) go(at - 1);
+        else if (b.classList.contains('next')) go(at + 1);
+        else if (b.dataset.s) {
+          const item = slides[b.dataset.k].item;
+          kind === 'movie' ? this.openMovie(item, b.dataset.s === 'play') : this.openSeries(item);
+        }
+      });
+      const timer = setInterval(() => {
+        if (!host.isConnected) return clearInterval(timer);
+        if (document.hidden || host.matches(':hover') || host.contains(document.activeElement) || !$('#modal').classList.contains('hidden')) return;
+        go(at + 1);
+      }, 7000);
     },
 
     // ---------- live ----------
@@ -558,16 +640,31 @@
       this.setBackdrop('');
       const [channels, cats] = await Promise.all([this.loadLive(), this.loadCats('live')]);
       const list = this.allowed(channels);
-      const counts = {};
-      for (const c of list) counts[c.category_id] = (counts[c.category_id] || 0) + 1;
-      const usable = cats.filter(c => counts[c.category_id]);
+
+      // Merge quality-split categories; each merged category lists every channel once.
+      const merged = new Map();
+      for (const c of cats) {
+        const key = liveCatKey(c.category_name);
+        let m = merged.get(key);
+        if (!m) merged.set(key, (m = { key, name: key, ids: new Set() }));
+        m.ids.add(String(c.category_id));
+      }
+      const catOf = Object.fromEntries([...merged.values()].flatMap(m => [...m.ids].map(id => [id, m.key])));
+      const catName = Object.fromEntries(cats.map(c => [String(c.category_id), c.category_name]));
+      const perCat = {};
+      for (const c of list) {
+        const k = catOf[String(c.category_id)];
+        if (k) (perCat[k] || (perCat[k] = [])).push(c);
+      }
+      const usable = [...merged.values()].filter(m => perCat[m.key]);
+      for (const m of usable) m.channels = uniq(perCat[m.key]);
 
       main.innerHTML = `
         <div class="live">
           <aside class="cats">
             <input class="field" type="search" placeholder="Filter categories" id="catFilter">
             <div class="cat-list" id="catList">
-              ${usable.map(c => `<button class="cat" data-cat="${esc(c.category_id)}" data-name="${esc(fold(c.category_name))}">${esc(c.category_name)} <span>${counts[c.category_id]}</span></button>`).join('')}
+              ${usable.map(m => `<button class="cat" data-cat="${esc(m.key)}" data-name="${esc(fold(m.name))}">${esc(m.name)} <span>${m.channels.length}</span></button>`).join('')}
             </div>
           </aside>
           <section class="channels">
@@ -577,24 +674,27 @@
           <aside class="guide" id="guide"><div class="guide-empty">Select a channel to see what’s on.</div></aside>
         </div>`;
 
+      const qualities = ch => [...new Set(ch.versions.map(v => v.quality || 'SD'))];
       let current = [];
       const chList = $('#chList', main);
-      const renderChannels = (cat, name, q = '') => {
-        current = list.filter(c => String(c.category_id) === cat && (!q || c.key.includes(q)));
-        $('#chTitle', main).textContent = name;
+      const renderChannels = (key, q = '') => {
+        const cat = merged.get(key);
+        current = cat.channels.filter(c => !q || c.versions.some(v => v.key.includes(q)));
+        $('#chTitle', main).textContent = cat.name;
         chList.innerHTML = current.map((c, i) => `
           <button class="ch" data-i="${i}">
             <span class="ch-num">${esc(c.num)}</span>
             <span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}</span>
-            <span class="ch-name">${esc(c.name)}</span>
-            ${Number(c.tv_archive) ? '<span class="chip">Catch-up</span>' : ''}
+            <span class="ch-name">${esc(c.label)}</span>
+            <span class="ch-q">${qualities(c).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</span>
+            ${c.versions.some(v => Number(v.tv_archive)) ? '<span class="chip">Catch-up</span>' : ''}
           </button>`).join('') || '<div class="empty"><p>No channels.</p></div>';
       };
       const pick = b => {
         $$('.cat', main).forEach(c => c.classList.toggle('active', c === b));
         $('#chFilter', main).value = '';
         this.liveCat = b.dataset.cat;
-        renderChannels(b.dataset.cat, b.firstChild.textContent.trim());
+        renderChannels(b.dataset.cat);
       };
 
       $('#catList', main).addEventListener('click', e => { const b = e.target.closest('.cat'); if (b) pick(b); });
@@ -604,14 +704,31 @@
       });
       $('#chFilter', main).addEventListener('input', debounce(e => {
         const b = $('.cat.active', main);
-        if (b) renderChannels(b.dataset.cat, b.firstChild.textContent.trim(), fold(e.target.value));
+        if (b) renderChannels(b.dataset.cat, fold(e.target.value));
       }, 150));
 
+      const play = (index, version) => {
+        const ch = current[index];
+        const v = version || ch.versions[0];
+        Player.open({
+          kind: 'live', id: v.stream_id, title: ch.label, subtitle: $('#chTitle', main).textContent, version: v, list: current, index,
+          onZap: c => { const btn = chList.querySelector(`[data-i="${current.indexOf(c)}"]`); btn && btn.focus({ preventScroll: true }); },
+        });
+      };
+
       const guide = $('#guide', main);
-      const showGuide = debounce(async ch => {
-        guide.innerHTML = `<div class="guide-head">${ch.stream_icon ? `<img src="${esc(ch.stream_icon)}" alt="">` : ''}<h3>${esc(ch.name)}</h3></div><div class="loader small"><span></span></div>`;
+      const showGuide = debounce(async index => {
+        const ch = current[index];
+        const epgSource = ch.versions.find(v => v.epg_channel_id) || ch.versions[0];
+        guide.innerHTML = `<div class="guide-head">${ch.stream_icon ? `<img src="${esc(ch.stream_icon)}" alt="">` : ''}<h3>${esc(ch.label)}</h3></div>
+          ${ch.versions.length > 1 ? `<div class="guide-vers"><h4>Versions <span class="muted">${ch.versions.length}</span></h4>
+            ${ch.versions.map((v, vi) => `<button class="gver" data-v="${vi}">
+              <span class="chip">${esc(v.quality || 'SD')}</span>${v.tags.map(t => `<span class="chip">${esc(t)}</span>`).join('')}
+              <small>${esc(catName[String(v.category_id)] || '')}</small>${ICONS.play}</button>`).join('')}</div>` : ''}
+          <div class="loader small"><span></span></div>`;
+        $$('.gver', guide).forEach(b => b.addEventListener('click', () => play(index, ch.versions[b.dataset.v])));
         let epg = [];
-        try { epg = await this.api.shortEpg(ch.stream_id, 8); } catch {}
+        try { epg = await this.api.shortEpg(epgSource.stream_id, 8); } catch {}
         if (!guide.isConnected || this.guideFor !== ch) return;
         const now = Date.now();
         const rows = epg.filter(e => e.end > now);
@@ -624,18 +741,8 @@
         }).join('')}</ol>` : '<div class="guide-empty">No guide information for this channel.</div>';
       }, 350);
 
-      chList.addEventListener('focusin', e => { const b = e.target.closest('.ch'); if (b) { this.guideFor = current[b.dataset.i]; showGuide(this.guideFor); } });
-      chList.addEventListener('click', e => {
-        const b = e.target.closest('.ch');
-        if (!b) return;
-        const index = Number(b.dataset.i);
-        const ch = current[index];
-        const catName = $('#chTitle', main).textContent;
-        Player.open({
-          kind: 'live', id: ch.stream_id, title: ch.name, subtitle: catName, list: current, index,
-          onZap: c => { const btn = chList.querySelector(`[data-i="${current.indexOf(c)}"]`); btn && btn.focus({ preventScroll: true }); },
-        });
-      });
+      chList.addEventListener('focusin', e => { const b = e.target.closest('.ch'); if (b) { this.guideFor = current[b.dataset.i]; showGuide(Number(b.dataset.i)); } });
+      chList.addEventListener('click', e => { const b = e.target.closest('.ch'); if (b) play(Number(b.dataset.i)); });
 
       const start = (this.liveCat && $(`.cat[data-cat="${CSS.escape(this.liveCat)}"]`, main)) || $('.cat', main);
       if (start) { pick(start); start.focus({ preventScroll: true }); start.scrollIntoView({ block: 'nearest' }); }
@@ -898,16 +1005,16 @@
         const [vod, series, live] = await Promise.all([this.loadVod(), this.loadSeries(), this.loadLive()]);
         if (fold(q.value.trim()) !== term) return;
         const match = list => list.filter(i => i.key.includes(term)).slice(0, 36);
-        const mv = match(uniq(this.allowed(vod))), sv = match(uniq(series)), lv = match(this.allowed(live)).slice(0, 24);
+        const mv = match(uniq(this.allowed(vod))), sv = match(uniq(series)), lv = match(uniq(this.allowed(live))).slice(0, 24);
         byId = new Map([...mv, ...sv].map(i => [i.kind + i.id, i]));
         res.innerHTML = (mv.length || sv.length || lv.length) ? [
-          lv.length && `<h3>Channels</h3><div class="ch-grid">${lv.map((c, i) => `<button class="ch" data-live="${i}"><span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}</span><span class="ch-name">${esc(c.name)}</span></button>`).join('')}</div>`,
+          lv.length && `<h3>Channels</h3><div class="ch-grid">${lv.map((c, i) => `<button class="ch" data-live="${i}"><span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}</span><span class="ch-name">${esc(c.label)}</span><span class="ch-q">${[...new Set(c.versions.map(v => v.quality || 'SD'))].map(t => `<span class="chip">${esc(t)}</span>`).join('')}</span></button>`).join('')}</div>`,
           mv.length && `<h3>Movies</h3><div class="grid">${mv.map(i => this.card(i)).join('')}</div>`,
           sv.length && `<h3>Series</h3><div class="grid">${sv.map(i => this.card(i)).join('')}</div>`,
         ].filter(Boolean).join('') : '<p class="muted center">No results.</p>';
         res.onclick = e => {
           const ch = e.target.closest('[data-live]');
-          if (ch) { const index = Number(ch.dataset.live); Player.open({ kind: 'live', id: lv[index].stream_id, title: lv[index].name, subtitle: 'Search', list: lv, index }); }
+          if (ch) { const index = Number(ch.dataset.live); const v = lv[index].versions[0]; Player.open({ kind: 'live', id: v.stream_id, title: lv[index].label, subtitle: 'Search', version: v, list: lv, index }); }
         };
       }, 250);
       q.addEventListener('input', run);
