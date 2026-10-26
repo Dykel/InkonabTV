@@ -11,6 +11,7 @@ A web player for InkonabTV (Xtream Codes) that runs entirely in the browser and 
 - **Movies / Series**: every category with filtering and sorting, a details page (backdrop, cast, trailer from TMDB), seasons and episodes, resume where you stopped, and the next episode plays automatically.
 - **MBC PLAY** live TV and radio, free and always available — on the sign-in screen, on Home and pinned first in Live TV (add more playlists in `freePlaylists` in `config.js`).
 - **Search** across movies, series and channels.
+- **Instant start:** the playlists (movies, series, channels, categories) are saved on the device and shown immediately at launch; they refresh themselves in the background when older than 6 hours (Settings → *Refresh now* to force it). Works offline with the last saved copy.
 - Works with a mouse, a touch screen, or a keyboard/TV remote (arrow keys, Enter, Back).
 
 ## Publish on GitHub Pages

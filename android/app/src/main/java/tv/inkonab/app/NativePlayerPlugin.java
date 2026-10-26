@@ -28,10 +28,22 @@ public class NativePlayerPlugin extends Plugin {
         VpnManager.get().addListener((state, detail) -> notifyListeners("vpn", vpnJson()));
     }
 
+    /**
+     * Hand the (possibly multi-megabyte) live payload to the player first, in a call that
+     * resolves at once. play() is then called with { staged: true }: Capacitor saves the data of
+     * a call waiting for an activity result into the activity's saved state, and a full channel
+     * list there crashes the app (TransactionTooLargeException) as soon as the player opens.
+     */
+    @PluginMethod
+    public void stage(PluginCall call) {
+        PlayerActivity.pending = call.getString("payload");
+        call.resolve();
+    }
+
     @PluginMethod
     public void play(PluginCall call) {
-        // Live payloads carry every channel and can exceed the Intent size limit, so hand them over directly.
-        PlayerActivity.pending = call.getData().toString();
+        if (!call.getBoolean("staged", false)) PlayerActivity.pending = call.getData().toString();
+        if (PlayerActivity.pending == null) { call.reject("Nothing to play"); return; }
         Intent intent = new Intent(getContext(), PlayerActivity.class);
         startActivityForResult(call, intent, "onClosed");
     }

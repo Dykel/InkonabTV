@@ -29,6 +29,40 @@
     Store.set('settings', plain);
   };
 
+  // IndexedDB key/value store: the playlists are several MB each (too big for localStorage).
+  const Disk = {
+    open() {
+      if (!this.db) {
+        this.db = new Promise((resolve, reject) => {
+          const req = indexedDB.open('inkonab', 1);
+          req.onupgradeneeded = () => req.result.createObjectStore('kv');
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        }).catch(() => null);
+      }
+      return this.db;
+    },
+    async run(mode, fn) {
+      try {
+        const db = await this.open();
+        if (!db) return null;
+        return await new Promise(resolve => {
+          const tx = db.transaction('kv', mode);
+          const req = fn(tx.objectStore('kv'));
+          tx.oncomplete = () => resolve(req && req.result);
+          tx.onerror = tx.onabort = () => resolve(null);
+        });
+      } catch { return null; }
+    },
+    get(key) { return this.run('readonly', st => st.get(key)); },
+    set(key, value) { return this.run('readwrite', st => st.put(value, key)); },
+    clear() { return this.run('readwrite', st => st.clear()); },
+  };
+
+  // Playlists kept on the device: shown at once on launch, refreshed in the background.
+  const PERSIST = new Set(['get_live_streams', 'get_vod_streams', 'get_series', 'get_live_categories', 'get_vod_categories', 'get_series_categories']);
+  const MAX_AGE = 6 * 3600e3;
+
   class Xtream {
     constructor(server, username, password) {
       this.server = server.replace(/\/+$/, '');
@@ -48,6 +82,7 @@
     call(action, params = {}, { cache = true } = {}) {
       const url = this.apiUrl(action ? { action, ...params } : params);
       if (cache && this.cache.has(url)) return this.cache.get(url);
+      if (cache && PERSIST.has(action) && params.category_id == null) return this.persisted(action, url);
       const p = fetch(url, { cache: 'no-store' }).then(r => {
         if (!r.ok) throw new Error('Server error ' + r.status);
         return r.json();
@@ -59,11 +94,82 @@
       return p;
     }
 
+    // Saved copy first (refreshed in the background when older than 6 hours), network otherwise.
+    persisted(action, url) {
+      const key = `${this.server}|${this.username}|${action}`;
+      this.saved = this.saved || new Map();
+      const net = () => fetch(url, { cache: 'no-store' }).then(r => {
+        if (!r.ok) throw new Error('Server error ' + r.status);
+        return r.json();
+      }).then(d => {
+        const t = Date.now();
+        Disk.set(key, { t, d });
+        this.saved.set(action, { url, key, t });
+        return d;
+      });
+      const p = Disk.get(key).then(hit => {
+        if (!hit || hit.d == null) return net();
+        this.saved.set(action, { url, key, t: hit.t });
+        if (Date.now() - hit.t > MAX_AGE) this.scheduleRefresh();
+        return hit.d;
+      });
+      this.cache.set(url, p);
+      p.catch(() => this.cache.delete(url));
+      return p;
+    }
+
+    // Oldest time any saved playlist was downloaded (null: nothing saved yet).
+    savedAt() {
+      const ts = [...(this.saved || new Map()).values()].map(v => v.t);
+      return ts.length ? Math.min(...ts) : null;
+    }
+
+    scheduleRefresh(delay = 8000) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = setTimeout(() => this.refreshAll(), delay);
+    }
+
+    // Download every saved playlist again, one after another, without blocking the UI.
+    // Fires 'inkonab:catalog' when the new data is stored.
+    async refreshAll() {
+      if (this.refreshing) return this.refreshing;
+      this.refreshing = (async () => {
+        let changed = false;
+        for (const [action, { url, key }] of this.saved || []) {
+          try {
+            const r = await fetch(url, { cache: 'no-store' });
+            if (!r.ok) continue;
+            const d = await r.json();
+            const t = Date.now();
+            await Disk.set(key, { t, d });
+            this.saved.set(action, { url, key, t });
+            this.cache.set(url, Promise.resolve(d));
+            changed = true;
+          } catch {}
+        }
+        this.refreshing = null;
+        if (changed) window.dispatchEvent(new CustomEvent('inkonab:catalog'));
+        return changed;
+      })();
+      return this.refreshing;
+    }
+
     async login() {
-      const data = await this.call('', {}, { cache: false });
+      // Offline or server down: fall back to the last successful sign-in for this account.
+      const savedKey = 'login.' + this.server + '|' + this.username;
+      let data;
+      try {
+        data = await this.call('', {}, { cache: false });
+      } catch (e) {
+        const remembered = Store.get('creds');
+        data = remembered && remembered.u === this.username && remembered.p === this.password ? Store.get(savedKey) : null;
+        if (!data) throw e;
+      }
       if (!data || !data.user_info || Number(data.user_info.auth) !== 1) throw new Error('Wrong username or password');
       if (data.user_info.status && data.user_info.status !== 'Active') throw new Error('Account ' + data.user_info.status.toLowerCase());
       this.info = data;
+      const { password, ...userInfo } = data.user_info;
+      Store.set(savedKey, { user_info: userInfo, server_info: data.server_info });
       return data;
     }
 
@@ -230,6 +336,7 @@
   window.Store = Store;
   window.Settings = Settings;
   window.Xtream = Xtream;
+  window.Disk = Disk;
   window.TMDB = TMDB;
   window.M3U = M3U;
   window.asArray = asArray;

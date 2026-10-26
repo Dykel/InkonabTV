@@ -92,7 +92,10 @@
       }
       const back = document.activeElement;
       let r = {};
-      try { r = await Native.player.play(payload); } catch (e) { App.toast('Can’t open the player'); console.warn('[native player]', e); }
+      try {
+        await Native.player.stage({ payload: JSON.stringify(payload) });
+        r = await Native.player.play({ staged: true });
+      } catch (e) { App.toast('Can’t open the player'); console.warn('[native player]', e); }
       if (item.kind !== 'live') {
         if (r.duration > 0 && item.onProgress) item.onProgress(r.position, r.duration);
         if (r.ended && item.onEnded) return item.onEnded();

@@ -171,6 +171,7 @@
 
     logout() {
       Store.del('creds');
+      Disk.clear();
       this.api = null;
       this.data = {};
       this.closeModal();
@@ -178,7 +179,20 @@
       this.showLogin();
     },
 
+    // Saved playlists were refreshed in the background: drop derived data so the next page uses it.
+    onCatalogRefreshed() {
+      this.data = {};
+      this.epgCache = null;
+      this.toast('Playlist updated');
+    },
+
     start() {
+      if (!this.catalogHooked) {
+        this.catalogHooked = true;
+        window.addEventListener('inkonab:catalog', () => this.onCatalogRefreshed());
+        // Long sessions (a TV left on): refresh the saved playlists every 6 hours.
+        setInterval(() => this.api && this.api.refreshAll(), 6 * 3600e3);
+      }
       $('#login').classList.add('hidden');
       $('#app').classList.remove('hidden');
       $('#avatar').textContent = (this.api.username[0] || '?').toUpperCase();
@@ -1428,6 +1442,15 @@
       this.bindCards(res, (k, id) => byId.get(k + id));
     },
 
+    ago(t) {
+      if (!t) return 'Not saved yet';
+      const min = Math.round((Date.now() - t) / 60000);
+      if (min < 1) return 'Just now';
+      if (min < 60) return `${min} min ago`;
+      const h = Math.round(min / 60);
+      return h < 48 ? `${h} hour${h > 1 ? 's' : ''} ago` : new Date(t).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+    },
+
     // ---------- free VPN (Android app) ----------
     bindVpnSettings(m) {
       const P = Native.player;
@@ -1493,6 +1516,12 @@
           <p class="muted small-note">Servers come from the VPN Gate academic project and are run by volunteers: they can be slow, and their operators could see unencrypted traffic. Use it to unblock channels, not for privacy.</p>
         </section>` : ''}
         <section class="set-group">
+          <h3>Playlist on this device</h3>
+          <div class="kv"><span>Last updated</span><b id="plUpdated">${esc(this.ago(this.api.savedAt()))}</b></div>
+          <p class="muted small-note">Movies, series and channels are saved on this device so the app opens instantly. They refresh by themselves in the background every 6 hours.</p>
+          <div class="set-row vpn-actions"><button class="btn ghost" id="plRefresh">Refresh now</button></div>
+        </section>
+        <section class="set-group">
           <h3>Playlist links</h3>
           <div class="kv link"><span>M3U</span><code>${esc(this.api.m3uUrl())}</code><button class="round-btn sm" data-copy="${esc(this.api.m3uUrl())}" aria-label="Copy M3U link">${ICONS.copy}</button></div>
           <div class="kv link"><span>EPG</span><code>${esc(this.api.epgUrl())}</code><button class="round-btn sm" data-copy="${esc(this.api.epgUrl())}" aria-label="Copy EPG link">${ICONS.copy}</button></div>
@@ -1525,6 +1554,15 @@
       $$('[data-copy]', m).forEach(b => b.addEventListener('click', () => { navigator.clipboard && navigator.clipboard.writeText(b.dataset.copy); this.toast('Copied'); }));
       $('#clearCw', m).addEventListener('click', () => { Store.set('cw', []); this.toast('Cleared'); this.renderContinue(); });
       $('#logout', m).addEventListener('click', () => this.logout());
+      $('#plRefresh', m).addEventListener('click', async e => {
+        const b = e.currentTarget;
+        b.disabled = true; b.textContent = 'Updating…';
+        const changed = await this.api.refreshAll();
+        b.disabled = false; b.textContent = 'Refresh now';
+        $('#plUpdated', m).textContent = this.ago(this.api.savedAt());
+        if (!changed) this.toast('Couldn’t reach the server — keeping the saved playlist');
+        else if (this.view !== 'home') this.route();
+      });
       if (window.Native && $('#vpnGroup', m)) this.bindVpnSettings(m);
       $('[data-close]', m).focus();
     },
