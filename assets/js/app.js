@@ -220,6 +220,32 @@
     },
     allowed(list) { return Settings.showAdult ? list : list.filter(i => !i.adult); },
 
+    // Catalog titles that TMDB currently ranks highly, one copy per title.
+    // byDate: newest release first. byPop: most watched (TMDB popularity) first.
+    tmdbPicks(kind) {
+      const key = kind + 'Picks';
+      if (this.data[key]) return this.data[key];
+      return (this.data[key] = (async () => {
+        const [all, top] = await Promise.all([kind === 'movie' ? this.loadVod() : this.loadSeries(), TMDB.top(kind === 'movie' ? 'movie' : 'tv')]);
+        // Prefer the info language, then French (most of this catalog), English, then untagged copies.
+        const order = [Settings.tmdbLang.split('-')[0].toUpperCase(), 'FR', 'QFR', 'EN', ''];
+        const rank = i => { const r = order.indexOf(i.lang); return r < 0 ? order.length : r; };
+        const best = new Map();
+        for (const i of this.allowed(all)) {
+          const id = String(i.tmdb || '');
+          if (!top.has(id)) continue;
+          const cur = best.get(id);
+          if (!cur || rank(i) < rank(cur)) best.set(id, i);
+        }
+        const picks = [...best.values()];
+        const meta = i => top.get(String(i.tmdb));
+        return {
+          byDate: [...picks].sort((a, b) => meta(b).date.localeCompare(meta(a).date) || meta(b).pop - meta(a).pop),
+          byPop: [...picks].sort((a, b) => meta(b).pop - meta(a).pop),
+        };
+      })().catch(() => ({ byDate: [], byPop: [] })));
+    },
+
     // ---------- continue watching ----------
     cw() { return Store.get('cw', []); },
     cwGet(key) { return this.cw().find(e => e.key === key); },
@@ -321,6 +347,7 @@
         <div class="rows">
           ${this.row('Latest added', latest, 'first')}
           <div id="cwSlot"></div>
+          <div id="popSlot"></div>
           ${this.row('Top rated', topRated)}
           ${this.row('New episodes', recentSeries)}
         </div>`;
@@ -331,6 +358,15 @@
       $('[data-hero="info"]', main).addEventListener('click', () => this.heroItem && (this.heroItem.kind === 'series' ? this.openSeries(this.heroItem) : this.openMovie(this.heroItem)));
       this.renderContinue();
       if (latest[0]) this.setHero(latest[0]);
+
+      // TMDB-ranked rows arrive a moment later so they never hold up the page.
+      Promise.all([this.tmdbPicks('movie'), this.tmdbPicks('series')]).then(([mp, sp]) => {
+        const slot = $('#popSlot', main);
+        if (!slot) return;
+        const pm = mp.byPop.slice(0, 30), ps = sp.byPop.slice(0, 30);
+        for (const i of [...pm, ...ps]) index.set(i.kind + i.id, i);
+        slot.innerHTML = this.row('Most watched movies', pm) + this.row('Most watched series', ps);
+      });
       const first = $('.row.first .card', main);
       if (first && !$('#modal:not(.hidden)')) first.focus({ preventScroll: true });
     },
@@ -387,28 +423,34 @@
 
     async renderBrowse(main, kind) {
       this.setBackdrop('');
-      const [all, cats] = await Promise.all([kind === 'movie' ? this.loadVod() : this.loadSeries(), this.loadCats(kind)]);
+      const [all, cats, picks] = await Promise.all([kind === 'movie' ? this.loadVod() : this.loadSeries(), this.loadCats(kind), this.tmdbPicks(kind)]);
       const items = this.allowed(all);
       const counts = {};
       for (const i of items) counts[i.cat] = (counts[i.cat] || 0) + 1;
       const usable = cats.filter(c => counts[c.category_id]);
       const byId = new Map(items.map(i => [i.kind + i.id, i]));
       const label = kind === 'movie' ? 'Movies' : 'Series';
+      const virtual = { '': items, '@top': picks.byDate, '@popular': picks.byPop };
+      const titles = { '': `<b>Latest</b> ${label.toLowerCase()}`, '@top': `<b>Top</b> picks`, '@popular': `<b>Most</b> watched` };
+      const startCat = picks.byDate.length ? '@top' : '';
 
       main.innerHTML = `
         <div class="browse">
           <aside class="cats">
             <input class="field" type="search" placeholder="Filter categories" id="catFilter">
             <div class="cat-list" id="catList">
-              <button class="cat active" data-cat="">Latest added <span>${items.length}</span></button>
+              ${picks.byDate.length ? `
+              <button class="cat special" data-cat="@top">Top picks <span>${picks.byDate.length}</span></button>
+              <button class="cat special" data-cat="@popular">Most watched <span>${picks.byPop.length}</span></button>` : ''}
+              <button class="cat" data-cat="">Latest added <span>${items.length}</span></button>
               ${usable.map(c => `<button class="cat" data-cat="${esc(c.category_id)}" data-name="${esc(fold(c.category_name))}">${esc(c.category_name)} <span>${counts[c.category_id]}</span></button>`).join('')}
             </div>
           </aside>
           <section class="grid-wrap">
             <div class="grid-head">
-              <h2 id="gridTitle"><b>Latest</b> ${label.toLowerCase()}</h2>
+              <h2 id="gridTitle"></h2>
               <select class="field sort" id="sort">
-                <option value="added">Recently added</option><option value="name">A – Z</option><option value="rating">Top rated</option>
+                <option value="auto">Default order</option><option value="added">Recently added</option><option value="name">A – Z</option><option value="rating">Top rated</option>
               </select>
             </div>
             <div class="grid" id="grid"></div>
@@ -425,12 +467,13 @@
         shown += slice.length;
       };
       const show = (cat, name) => {
-        let list = cat ? items.filter(i => i.cat === cat) : items;
+        let list = cat in virtual ? virtual[cat] : items.filter(i => i.cat === cat);
         const s = sortSel.value;
         if (s === 'name') list = [...list].sort((a, b) => a.name.localeCompare(b.name));
         else if (s === 'rating') list = [...list].sort((a, b) => b.rating - a.rating);
+        else if (s === 'added') list = [...list].sort((a, b) => b.added - a.added);
         current = list; shown = 0; grid.innerHTML = '';
-        $('#gridTitle', main).innerHTML = cat ? esc(name) : `<b>Latest</b> ${label.toLowerCase()}`;
+        $('#gridTitle', main).innerHTML = titles[cat] || esc(name);
         if (!list.length) grid.innerHTML = '<div class="empty"><p>Nothing here yet.</p></div>';
         more();
       };
@@ -454,9 +497,10 @@
 
       new IntersectionObserver(es => { if (es[0].isIntersecting && shown < current.length) more(); }, { rootMargin: '800px' })
         .observe($('#sentinel', main));
-      show('', '');
-      const first = $('.cat.active', main);
-      first && first.focus({ preventScroll: true });
+      const first = $(`.cat[data-cat="${startCat}"]`, main);
+      first.classList.add('active');
+      show(startCat, '');
+      first.focus({ preventScroll: true });
     },
 
     // ---------- live ----------
@@ -820,8 +864,9 @@
       const save = (k, v) => { Settings[k] = v; Settings.save(); };
       $('#setRelay', m).addEventListener('change', e => save('relay', e.target.value.trim()));
       $('#setFormat', m).addEventListener('change', e => save('liveFormat', e.target.value));
-      $('#setLang', m).addEventListener('change', e => { save('tmdbLang', e.target.value); TMDB.cache.clear(); });
-      $('#setAdult', m).addEventListener('change', e => { save('showAdult', e.target.checked); this.route(); });
+      const resetPicks = () => { delete this.data.moviePicks; delete this.data.seriesPicks; };
+      $('#setLang', m).addEventListener('change', e => { save('tmdbLang', e.target.value); TMDB.cache.clear(); resetPicks(); });
+      $('#setAdult', m).addEventListener('change', e => { save('showAdult', e.target.checked); resetPicks(); this.route(); });
       $('#testRelay', m).addEventListener('click', async () => {
         save('relay', $('#setRelay', m).value.trim());
         if (!Settings.relay) return this.toast('Enter a relay URL first');

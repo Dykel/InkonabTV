@@ -111,6 +111,31 @@
       this.cache.set(key, p);
       return p;
     },
+    // Titles TMDB ranks highest right now (trending, popular, top rated, in theaters / on air),
+    // as Map(tmdbId → {date, pop}). Cached for 12 hours so pages open instantly.
+    async top(type) {
+      if (!CFG.tmdbKey) return new Map();
+      const cacheKey = 'tmdbTop.' + type;
+      const cached = Store.get(cacheKey);
+      if (cached && Date.now() - cached.t < 12 * 3600e3) return new Map(cached.list);
+      const lists = type === 'movie'
+        ? [['trending/movie/week', 10], ['movie/popular', 25], ['movie/top_rated', 20], ['movie/now_playing', 5]]
+        : [['trending/tv/week', 10], ['tv/popular', 25], ['tv/top_rated', 20], ['tv/on_the_air', 5]];
+      const jobs = lists.flatMap(([path, pages]) => Array.from({ length: pages }, (_, i) => {
+        const u = new URL('https://api.themoviedb.org/3/' + path);
+        u.searchParams.set('api_key', CFG.tmdbKey);
+        u.searchParams.set('page', i + 1);
+        return fetch(u).then(r => (r.ok ? r.json() : null)).catch(() => null);
+      }));
+      const map = new Map();
+      for (const page of await Promise.all(jobs)) {
+        for (const r of (page && page.results) || []) {
+          map.set(String(r.id), { date: r.release_date || r.first_air_date || '', pop: r.popularity || 0 });
+        }
+      }
+      if (map.size) Store.set(cacheKey, { t: Date.now(), list: [...map] });
+      return map;
+    },
     normalize(d, base) {
       const logos = (d.images && d.images.logos) || [];
       const logo = logos.find(l => l.iso_639_1 === base) || logos.find(l => l.iso_639_1 === 'en') || logos[0];

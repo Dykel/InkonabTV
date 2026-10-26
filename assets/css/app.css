@@ -299,6 +299,9 @@ img.broken { visibility: hidden; }
 .cat:hover { background: rgba(255,255,255,.06); }
 .cat.active { background: var(--tab); color: #fff; }
 .cat.active span { color: rgba(255,255,255,.8); }
+.cat.special { color: var(--accent); font-weight: 600; }
+.cat.special.active { color: #fff; }
+.cat.special + .cat:not(.special) { margin-top: 12px; }
 .cat:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
 .grid-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .grid-head h2 { margin: 0; }
