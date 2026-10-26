@@ -47,6 +47,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import tv.inkonab.app.vpn.VpnManager;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -85,6 +87,8 @@ public class PlayerActivity extends AppCompatActivity {
     // Automatic recovery: copies (version × format) already tried for the current channel.
     private final HashSet<String> tried = new HashSet<>();
     private boolean altFormat, readyOnce;
+    private boolean vpnTried, vpnSwitched, directTried;
+    private static final int REQ_VPN = 42;
     private final JSONObject favChanges = new JSONObject();
 
     private View topBar;
@@ -214,8 +218,9 @@ public class PlayerActivity extends AppCompatActivity {
     private void onFail(String why) {
         main.removeCallbacks(watchdog);
         if (live && autoRetry()) return;
+        if (tryVpn()) return;
         showError(live
-            ? "Can't play this channel (tried every copy and format).\n▲ ▼ change channel · OK channel list"
+            ? "Can't play this channel (tried every copy and format" + (vpnTried || vpnSwitched ? ", and the free VPN" : "") + ").\n▲ ▼ change channel · OK channel list"
             : "Can't play this file (" + why + ").");
     }
 
@@ -248,6 +253,84 @@ public class PlayerActivity extends AppCompatActivity {
     private void freshStart() {
         tried.clear();
         altFormat = false;
+        vpnTried = false;
+        vpnSwitched = false;
+        directTried = false;
+    }
+
+    // ---------- free VPN fallback ----------
+
+    /**
+     * Last resort for a stream that won't play. Some services refuse VPN addresses, so with the
+     * VPN on we first retry directly; with it off we connect it; then we switch server once.
+     * In automatic mode a VPN that didn't help is turned off again.
+     */
+    private boolean tryVpn() {
+        VpnManager vpn = VpnManager.get();
+        vpn.init(this);
+        String mode = vpn.mode();
+        if ("off".equals(mode)) return false;
+        if (vpn.busy()) {
+            if (!directTried && !"always".equals(mode)) {
+                directTried = true;
+                showInfo("Trying without the VPN…");
+                vpn.disconnect();
+                main.postDelayed(() -> { tried.clear(); altFormat = false; load(live ? 0 : player.getCurrentPosition()); }, 1500);
+                return true;
+            }
+            if (vpn.isUp() && !vpnSwitched) {
+                vpnSwitched = true;
+                showInfo("Trying another free VPN server…");
+                vpn.switchServer(this::afterVpn);
+                return true;
+            }
+            if (vpn.autoStarted() && "auto".equals(mode)) vpn.disconnect(); // it didn't help
+            return false;
+        }
+        if (vpnTried) return false;
+        vpnTried = true;
+        Intent consent = vpn.consentIntent(this);
+        if (consent != null) {
+            showInfo("Allow InkonabTV's VPN to play this channel");
+            startActivityForResult(consent, REQ_VPN);
+        } else {
+            connectVpn();
+        }
+        return true;
+    }
+
+    private void connectVpn() {
+        showInfo("Connecting through a free VPN server…");
+        VpnManager.get().connectForPlayback(this::afterVpn);
+    }
+
+    private void afterVpn(boolean ok, String detail) {
+        runOnUiThread(() -> {
+            if (isFinishing() || player == null) return;
+            if (!ok) {
+                VpnManager vpn = VpnManager.get();
+                if (vpn.autoStarted() || !vpn.isUp()) vpn.disconnect();
+                showError("Can't play this " + (live ? "channel" : "file") + ", even through the free VPN (" + detail + ").");
+                return;
+            }
+            Toast.makeText(this, "VPN connected · " + detail, Toast.LENGTH_SHORT).show();
+            tried.clear();
+            altFormat = false;
+            load(live ? 0 : player.getCurrentPosition());
+        });
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_VPN) return;
+        if (VpnManager.get().consentIntent(this) == null) connectVpn();
+        else showError("The VPN wasn't allowed, so this channel can't be retried through it.");
+    }
+
+    private void showInfo(String msg) {
+        errorView.setText(msg);
+        errorView.setVisibility(View.VISIBLE);
     }
 
     // ---------- UI ----------
@@ -764,6 +847,9 @@ public class PlayerActivity extends AppCompatActivity {
         data.putExtra("version", version);
         data.putExtra("history", new JSONArray(history).toString());
         data.putExtra("fav", favChanges.toString());
+        // Automatic mode: the VPN was only for this viewing; browse directly again.
+        VpnManager vpn = VpnManager.get();
+        if ("auto".equals(vpn.mode()) && vpn.autoStarted()) vpn.disconnect();
         setResult(RESULT_OK, data);
         finish();
     }

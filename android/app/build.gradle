@@ -16,6 +16,10 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // The OpenVPN engine (libovpnexec.so) runs as a process, so native libs must be extracted to disk.
+    packagingOptions {
+        jniLibs { useLegacyPackaging true }
+    }
     buildTypes {
         release {
             minifyEnabled false

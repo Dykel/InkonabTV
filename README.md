@@ -55,6 +55,7 @@ The `android/` folder wraps the same web app in a native Android app (Capacitor)
 Differences from the website, all improvements:
 
 - Video plays in Android's native player (ExoPlayer) with FFmpeg audio. That means MKV, HEVC/H265 and Dolby AC3/EAC3/DTS audio work, and **no relay is needed** (plain-HTTP streams are allowed in the app).
+- **Free VPN (built in):** when a channel won't play even after trying its other copies and formats, the app connects an app-only VPN through free [VPN Gate](https://www.vpngate.net) servers and retries — no separate VPN app. Servers are tried best-first with automatic failover; if the VPN doesn't help (some services refuse VPN addresses), the app retries directly and switches it off again. Settings → Free VPN: *Automatic* (default), *Always on* or *Off*, and a preferred server country. Android asks once for permission to create the VPN. Free servers are run by volunteers — use them to unblock channels, not for privacy. See `THIRD_PARTY_NOTICES.md` (OpenVPN is GPL).
 - The remote works everywhere: the D-pad moves around the app, **Back** closes dialogs or goes Home, and in live TV **▲/▼** (or CH+/CH−) change channel and **◀/▶** change quality.
 
 Build it (needs Node, Java 21 and the Android SDK):

@@ -714,3 +714,8 @@ img.broken { visibility: hidden; }
   .gp-ch .ch-num, .gp-ch .ch-logo { display: none; }
 }
 @media (max-width: 520px) { .guide-page { height: calc(100vh - 140px); } }
+
+/* free VPN settings (Android app) */
+.kv .bad { color: var(--danger); }
+.vpn-actions { margin: 8px 0 4px; }
+.small-note { font-size: .82rem; margin: 10px 0 0; }

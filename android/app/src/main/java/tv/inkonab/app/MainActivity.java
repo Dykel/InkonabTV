@@ -14,5 +14,9 @@ public class MainActivity extends BridgeActivity {
         WebSettings s = getBridge().getWebView().getSettings();
         s.setUseWideViewPort(true);
         s.setLoadWithOverviewMode(true);
+        // "Always on" VPN mode: reconnect at start when Android has already allowed it.
+        tv.inkonab.app.vpn.VpnManager vpn = tv.inkonab.app.vpn.VpnManager.get();
+        vpn.init(this);
+        if ("always".equals(vpn.mode()) && vpn.consentIntent(this) == null) vpn.connect(null);
     }
 }

@@ -1428,6 +1428,33 @@
       this.bindCards(res, (k, id) => byId.get(k + id));
     },
 
+    // ---------- free VPN (Android app) ----------
+    bindVpnSettings(m) {
+      const P = Native.player;
+      const paint = v => {
+        const el = $('#vpnState', m);
+        if (!el) return;
+        const label = { connected: `Connected · ${v.server || ''}`, connecting: v.detail || 'Connecting…', failed: v.detail || 'Failed', disconnected: 'Off' }[v.state] || v.state;
+        el.textContent = label;
+        el.className = v.state === 'connected' ? 'ok' : v.state === 'failed' ? 'bad' : '';
+        $('#vpnMode', m).value = v.mode;
+        $('#vpnCountry', m).value = v.country || '';
+      };
+      P.vpnStatus().then(paint).catch(() => {});
+      if (!this.vpnListener) this.vpnListener = P.addListener('vpn', v => { if ($('#vpnState')) paint(v); });
+      $('#vpnMode', m).addEventListener('change', e => P.vpnSettings({ mode: e.target.value }).then(v => {
+        paint(v);
+        if (v.mode === 'always' && v.state !== 'connected') P.vpnConnect().then(paint).catch(err => this.toast(err.message || 'VPN not allowed'));
+      }));
+      $('#vpnCountry', m).addEventListener('change', e => P.vpnSettings({ country: e.target.value }).then(paint));
+      $('#vpnConnect', m).addEventListener('click', () => {
+        this.toast('Connecting to a free VPN server…');
+        P.vpnConnect().then(v => { paint(v); this.toast(v.ok ? 'VPN connected · ' + v.server : 'No free server answered'); })
+          .catch(err => this.toast(err.message || 'VPN not allowed'));
+      });
+      $('#vpnOff', m).addEventListener('click', () => P.vpnDisconnect().then(paint));
+    },
+
     // ---------- settings ----------
     openSettings() {
       const ui = (this.api && this.api.info && this.api.info.user_info) || {};
@@ -1455,6 +1482,16 @@
             <select class="field" id="setShift">${[-2, -1, 0, 1, 2].map(h => `<option value="${h}">${h === 0 ? 'None (server time)' : (h > 0 ? '+' : '−') + Math.abs(h) + ' hour' + (Math.abs(h) > 1 ? 's' : '')}</option>`).join('')}</select></label>
           <label class="set toggle"><span>Show adult categories</span><input type="checkbox" id="setAdult"></label>
         </section>
+        ${window.Native ? `<section class="set-group" id="vpnGroup">
+          <h3>Free VPN</h3>
+          <label class="set"><span>When to use it<small>Only InkonabTV's traffic goes through it — the rest of the device is untouched.</small></span>
+            <select class="field" id="vpnMode"><option value="auto">Automatic — when a channel won’t play</option><option value="always">Always on</option><option value="off">Off</option></select></label>
+          <label class="set"><span>Preferred server country<small>Free VPN Gate servers are mostly in Japan and Korea.</small></span>
+            <select class="field" id="vpnCountry"><option value="">Best available</option><option value="JP">Japan</option><option value="KR">South Korea</option><option value="US">United States</option><option value="TH">Thailand</option><option value="VN">Vietnam</option><option value="RU">Russia</option></select></label>
+          <div class="kv"><span>Status</span><b id="vpnState">…</b></div>
+          <div class="set-row vpn-actions"><button class="btn ghost" id="vpnConnect">Connect now</button><button class="btn ghost" id="vpnOff">Disconnect</button></div>
+          <p class="muted small-note">Servers come from the VPN Gate academic project and are run by volunteers: they can be slow, and their operators could see unencrypted traffic. Use it to unblock channels, not for privacy.</p>
+        </section>` : ''}
         <section class="set-group">
           <h3>Playlist links</h3>
           <div class="kv link"><span>M3U</span><code>${esc(this.api.m3uUrl())}</code><button class="round-btn sm" data-copy="${esc(this.api.m3uUrl())}" aria-label="Copy M3U link">${ICONS.copy}</button></div>
@@ -1488,6 +1525,7 @@
       $$('[data-copy]', m).forEach(b => b.addEventListener('click', () => { navigator.clipboard && navigator.clipboard.writeText(b.dataset.copy); this.toast('Copied'); }));
       $('#clearCw', m).addEventListener('click', () => { Store.set('cw', []); this.toast('Cleared'); this.renderContinue(); });
       $('#logout', m).addEventListener('click', () => this.logout());
+      if (window.Native && $('#vpnGroup', m)) this.bindVpnSettings(m);
       $('[data-close]', m).focus();
     },
   };
