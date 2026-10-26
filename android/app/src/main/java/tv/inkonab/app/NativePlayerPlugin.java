@@ -4,6 +4,8 @@ import android.app.UiModeManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.view.inputmethod.InputMethodManager;
+import android.webkit.WebView;
 
 import androidx.activity.result.ActivityResult;
 
@@ -46,6 +48,19 @@ public class NativePlayerPlugin extends Plugin {
         if (PlayerActivity.pending == null) { call.reject("Nothing to play"); return; }
         Intent intent = new Intent(getContext(), PlayerActivity.class);
         startActivityForResult(call, intent, "onClosed");
+    }
+
+    /** Open the on-screen keyboard for the focused text field (TV remotes can't tap a field). */
+    @PluginMethod
+    public void showKeyboard(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            WebView w = getBridge().getWebView();
+            w.requestFocus();
+            InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+            //noinspection deprecation — SHOW_FORCED is what makes the TV keyboard appear for a WebView field
+            if (imm != null) imm.showSoftInput(w, InputMethodManager.SHOW_FORCED);
+            call.resolve();
+        });
     }
 
     /** { tv: true } on Android TV / Google TV, so the web UI can use its TV-sized layout. */

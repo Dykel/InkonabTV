@@ -102,6 +102,8 @@ public class PlayerActivity extends AppCompatActivity {
     private BaseAdapter groupAdapter, chanAdapter;
     private int previewGroup;
     private boolean swallowCenterUp;
+    private boolean barActive;   // OK menu: the top bar has focus and the remote moves between its buttons
+    private final Runnable barTimeout = this::hideBar;
     private final StringBuilder digits = new StringBuilder();
     private final LogoLoader logos = new LogoLoader();
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -184,6 +186,7 @@ public class PlayerActivity extends AppCompatActivity {
             @Override
             public void handleOnBackPressed() {
                 if (sideShown()) hideSide();
+                else if (barActive) hideBar();
                 else if (controlsShown && !live) view.hideController();
                 else finishWithResult();
             }
@@ -228,7 +231,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (live && autoRetry()) return;
         if (tryVpn()) return;
         showError(live
-            ? "Can't play this channel (tried every copy and format" + (vpnTried ? ", and VPN servers in " + vpnAttempts + " countries" : "") + ").\n▲ ▼ change channel · OK channel list"
+            ? "Can't play this channel (tried every copy and format" + (vpnTried ? ", and VPN servers in " + vpnAttempts + " countries" : "") + ").\n▲ ▼ change channel · ◀ channel list"
             : "Can't play this file (" + why + ").");
     }
 
@@ -452,7 +455,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (live) {
             bar.addView(favChip);
             TextView list = chip("☰", false);
-            list.setOnClickListener(v -> openSide());
+            list.setOnClickListener(v -> { hideBar(); openSide(); });
             bar.addView(list);
             TextView prev = chip("▲", false);
             prev.setOnClickListener(v -> zap(-1));
@@ -464,7 +467,7 @@ public class PlayerActivity extends AppCompatActivity {
         topBar = bar;
         root.addView(bar, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP));
         view.setControllerVisibilityListener((PlayerView.ControllerVisibilityListener) visibility -> {
-            topBar.setVisibility(visibility);
+            if (!barActive) topBar.setVisibility(visibility);
             controlsShown = visibility == View.VISIBLE;
         });
 
@@ -513,7 +516,16 @@ public class PlayerActivity extends AppCompatActivity {
         t.setPadding(dp(14), dp(8), dp(14), dp(8));
         t.setFocusable(true);
         t.setClickable(true);
-        t.setBackground(rounded(accent ? ACCENT : 0x33FFFFFF, 24));
+        android.graphics.drawable.StateListDrawable bg = new android.graphics.drawable.StateListDrawable();
+        GradientDrawable focused = rounded(accent ? ACCENT : 0x66FFFFFF, 24);
+        focused.setStroke(dp(3), Color.WHITE);
+        bg.addState(new int[]{android.R.attr.state_focused}, focused);
+        bg.addState(new int[]{}, rounded(accent ? ACCENT : 0x33FFFFFF, 24));
+        t.setBackground(bg);
+        t.setOnFocusChangeListener((v, has) -> {
+            v.animate().scaleX(has ? 1.12f : 1f).scaleY(has ? 1.12f : 1f).setDuration(120).start();
+            if (has && barActive) { main.removeCallbacks(barTimeout); main.postDelayed(barTimeout, 8000); }
+        });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMarginStart(dp(8));
         t.setLayoutParams(lp);
@@ -537,7 +549,24 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     // Show the channel name for a few seconds after zapping, without the playback controls.
-    private final Runnable hideTopBar = () -> { if (!controlsShown) topBar.setVisibility(View.GONE); };
+    private final Runnable hideTopBar = () -> { if (!controlsShown && !barActive) topBar.setVisibility(View.GONE); };
+
+    /** OK menu: show the top bar and put the focus on ★ Favorite; ◀/▶ move, OK presses, ▼/Back close. */
+    private void showBar() {
+        barActive = true;
+        view.hideController();
+        topBar.setVisibility(View.VISIBLE);
+        favChip.requestFocus();
+        main.removeCallbacks(barTimeout);
+        main.postDelayed(barTimeout, 8000);
+    }
+
+    private void hideBar() {
+        barActive = false;
+        main.removeCallbacks(barTimeout);
+        topBar.setVisibility(View.GONE);
+        view.requestFocus();
+    }
 
     private void flashTopBar() {
         topBar.setVisibility(View.VISIBLE);
@@ -858,6 +887,14 @@ public class PlayerActivity extends AppCompatActivity {
         if (center && !down && swallowCenterUp) { swallowCenterUp = false; return true; }
         if (!live) return super.dispatchKeyEvent(e);
 
+        if (barActive && !sideShown()) {
+            if (down && (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_DPAD_UP)) {
+                if (code == KeyEvent.KEYCODE_DPAD_DOWN) hideBar();
+                return true;
+            }
+            return super.dispatchKeyEvent(e); // ◀/▶ move between buttons, OK presses one
+        }
+
         if (sideShown()) {
             if (down && code == KeyEvent.KEYCODE_DPAD_LEFT && chanList.hasFocus()) {
                 groupList.requestFocus();
@@ -881,7 +918,10 @@ public class PlayerActivity extends AppCompatActivity {
                 case KeyEvent.KEYCODE_NUMPAD_ENTER:
                 case KeyEvent.KEYCODE_GUIDE:
                     if (controlsShown) break; // OK on a visible player button
-                    if (e.getRepeatCount() == 0) { swallowCenterUp = center; openSide(); }
+                    if (e.getRepeatCount() == 0) {
+                        swallowCenterUp = center;
+                        if (code == KeyEvent.KEYCODE_GUIDE) openSide(); else showBar();
+                    }
                     return true;
                 case KeyEvent.KEYCODE_MENU:
                 case KeyEvent.KEYCODE_INFO:
@@ -896,8 +936,9 @@ public class PlayerActivity extends AppCompatActivity {
                 case KeyEvent.KEYCODE_PAGE_DOWN:
                 case KeyEvent.KEYCODE_DPAD_DOWN:
                     zap(1); return true;
+                // ◀ opens the channel list; ▶ switches quality.
                 case KeyEvent.KEYCODE_DPAD_LEFT:
-                    if (!controlsShown && hasVersions()) { switchVersion(-1); return true; } break;
+                    if (!controlsShown) { openSide(); return true; } break;
                 case KeyEvent.KEYCODE_DPAD_RIGHT:
                     if (!controlsShown && hasVersions()) { switchVersion(1); return true; } break;
             }

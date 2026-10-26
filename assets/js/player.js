@@ -409,7 +409,7 @@
         case 'ArrowDown': case 'ChannelDown': case 'PageDown':
           if (live) { e.preventDefault(); e.stopPropagation(); this.zap(1); } break;
         case 'ArrowLeft':
-          if (live) { if (this.stepVersion(-1)) { e.preventDefault(); e.stopPropagation(); } }
+          if (live) { e.preventDefault(); e.stopPropagation(); this.openSide(); }
           else if (document.activeElement === v) { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 10); } break;
         case 'ArrowRight':
           if (live) { if (this.stepVersion(1)) { e.preventDefault(); e.stopPropagation(); } }

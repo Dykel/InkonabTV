@@ -26,15 +26,30 @@
     document.addEventListener('focusout', e => {
       if (isText(e.target)) delete e.target.dataset.typing;
     }, true);
-    document.addEventListener('keydown', e => {
-      const t = e.target;
-      if (e.key !== 'Enter' || !isText(t) || t.getAttribute('inputmode') !== 'none') return;
-      e.preventDefault();
-      e.stopPropagation();
+    const openKeyboard = t => {
       t.dataset.typing = '1';
       t.removeAttribute('inputmode');
-      t.blur();
-      setTimeout(() => { t.dataset.typing = '1'; t.focus(); }, 0);
+      if (document.activeElement !== t) t.focus();
+      NativePlayer.showKeyboard().catch(() => {});
+    };
+    document.addEventListener('keydown', e => {
+      const t = e.target;
+      if (e.key !== 'Enter' || !isText(t)) return;
+      // OK on a field: open the keyboard.
+      if (t.getAttribute('inputmode') === 'none') {
+        e.preventDefault();
+        e.stopPropagation();
+        openKeyboard(t);
+        return;
+      }
+      // Next/Done on the keyboard in Username: go to Password and keep typing.
+      if (t.id === 'loginUser') {
+        e.preventDefault();
+        e.stopPropagation();
+        const pass = document.getElementById('loginPass');
+        pass.dataset.typing = '1';
+        openKeyboard(pass);
+      }
     }, true);
     // A field focused before we knew this is a TV (sign-in screen): re-focus it so the rule applies.
     const a = document.activeElement;
