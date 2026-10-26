@@ -225,14 +225,14 @@
     // ---------- routing ----------
     route() {
       const view = (location.hash.slice(1) || 'home').split('/')[0];
-      this.view = ['home', 'live', 'movies', 'series'].includes(view) ? view : 'home';
+      this.view = ['home', 'live', 'guide', 'movies', 'series'].includes(view) ? view : 'home';
       $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === this.view));
       $('.home-btn').classList.toggle('active', this.view === 'home');
       document.body.dataset.view = this.view;
       window.scrollTo(0, 0);
       const main = $('#view');
       main.innerHTML = '<div class="loader"><span></span></div>';
-      const render = { home: this.renderHome, live: this.renderLive, movies: this.renderMovies, series: this.renderSeries }[this.view];
+      const render = { home: this.renderHome, live: this.renderLive, guide: this.renderGuide, movies: this.renderMovies, series: this.renderSeries }[this.view];
       render.call(this, main).catch(err => {
         console.error(err);
         main.innerHTML = `<div class="empty"><h3>Couldn’t load this page</h3><p>${esc(err.message)}</p><button class="btn" id="retry">Try again</button></div>`;
@@ -881,18 +881,26 @@
           <div class="loader small"><span></span></div>`;
         bindFav(ch, index);
         $$('.gver', guide).forEach(b => b.addEventListener('click', () => play(index, ch.versions[b.dataset.v])));
+        // Catch-up channels: the full guide, so recent programmes can be replayed.
+        const hasArchive = ch.versions.some(v => Number(v.tv_archive));
         let epg = [];
-        try { epg = await this.api.shortEpg(epgSource.stream_id, 8); } catch {}
+        try { epg = hasArchive ? await this.epgFor(ch) : await this.api.shortEpg(epgSource.stream_id, 8); } catch {}
         if (!guide.isConnected || this.guideFor !== ch) return;
         const now = Date.now();
-        const rows = epg.filter(e => e.end > now);
+        const past = hasArchive ? epg.filter(e => e.end <= now && this.canReplay(ch, e)).slice(-4) : [];
+        const rows = [...past, ...epg.filter(e => e.end > now).slice(0, 8)];
         $('.loader', guide).outerHTML = rows.length ? `<ol class="epg">${rows.map(e => {
-          const live = e.start <= now;
+          const live = e.start <= now && e.end > now, replay = e.end <= now;
           const pct = live ? ((now - e.start) / (e.end - e.start)) * 100 : 0;
-          return `<li class="${live ? 'now' : ''}"><time>${hm(e.start)} – ${hm(e.end)}</time><b>${esc(e.title)}</b>
+          const inner = `<time>${replay ? esc(this.dayLabel(e.start)) + ' · ' : ''}${hm(e.start)} – ${hm(e.end)}</time><b>${replay ? '⟲ ' : ''}${esc(e.title)}</b>
             ${live ? `<span class="bar"><i style="width:${pct.toFixed(1)}%"></i></span>` : ''}
-            ${e.description ? `<p>${esc(e.description)}</p>` : ''}</li>`;
-        }).join('')}</ol>` : '<div class="guide-empty">No guide information for this channel.</div>';
+            ${e.description ? `<p>${esc(e.description)}</p>` : ''}`;
+          return replay ? `<li class="past"><button class="epg-replay" data-replay="${rows.indexOf(e)}">${inner}<span class="chip">Replay</span></button></li>`
+            : `<li class="${live ? 'now' : ''}">${inner}</li>`;
+        }).join('')}</ol>${hasArchive ? '<a class="guide-more" href="#guide">Open the TV Guide for the full week ›</a>' : ''}` : '<div class="guide-empty">No guide information for this channel.</div>';
+        $$('[data-replay]', guide).forEach(b => b.addEventListener('click', () => this.playCatchup(ch, rows[Number(b.dataset.replay)])));
+        const nowRow = $('.epg li.now', guide);
+        if (nowRow) nowRow.scrollIntoView({ block: 'nearest' });
       }, 350);
 
       chList.addEventListener('focusin', e => { const b = e.target.closest('.ch'); if (b) { this.guideFor = current[b.dataset.i]; showGuide(Number(b.dataset.i)); } });
@@ -908,6 +916,226 @@
       const target = at >= 0 ? chList.querySelector(`[data-i="${at}"]`) : start;
       target.focus({ preventScroll: true });
       target.scrollIntoView({ block: 'center' });
+    },
+
+    // ---------- EPG & catch-up ----------
+    // The stream whose guide we read: the catch-up copy when there is one (its guide marks
+    // which programmes can be replayed), otherwise one with a guide id.
+    epgStream(ch) {
+      if (ch.url) return null;
+      return ch.versions.find(v => Number(v.tv_archive)) || ch.versions.find(v => v.epg_channel_id) || null;
+    },
+
+    // Cached for 20 minutes, at most 6 requests at a time.
+    epgFor(ch) {
+      const v = this.epgStream(ch);
+      if (!v || !this.api) return Promise.resolve([]);
+      const cache = this.epgCache || (this.epgCache = new Map());
+      const hit = cache.get(v.stream_id);
+      if (hit && Date.now() - hit.t < 20 * 60e3) return hit.p;
+      const p = this.epgLimit(() => this.api.epgTable(v.stream_id)).catch(() => []);
+      cache.set(v.stream_id, { t: Date.now(), p });
+      return p;
+    },
+
+    epgLimit(job) {
+      this.epgQueue = this.epgQueue || [];
+      this.epgActive = this.epgActive || 0;
+      return new Promise((resolve, reject) => {
+        const run = () => {
+          this.epgActive++;
+          job().then(resolve, reject).finally(() => {
+            this.epgActive--;
+            const next = this.epgQueue.shift();
+            if (next) next();
+          });
+        };
+        if (this.epgActive < 6) run(); else this.epgQueue.push(run);
+      });
+    },
+
+    canReplay(ch, prog) {
+      return !!prog && prog.archive && prog.end <= Date.now() && ch.versions.some(v => Number(v.tv_archive));
+    },
+
+    playCatchup(ch, prog) {
+      const v = ch.versions.find(x => Number(x.tv_archive));
+      const minutes = (prog.end - prog.start) / 60000 + 2;
+      Player.open({
+        kind: 'catchup', url: this.api.catchupUrl(v.stream_id, prog.start, minutes), relay: true,
+        title: prog.title, subtitle: `${ch.label} · ${this.dayLabel(prog.start)} ${hm(prog.start)}–${hm(prog.end)} · Replay`,
+        img: ch.stream_icon,
+      });
+    },
+
+    dayLabel(t) {
+      const d = new Date(t), today = new Date();
+      const diff = Math.round((new Date(d.toDateString()) - new Date(today.toDateString())) / 864e5);
+      if (diff === 0) return 'Today';
+      if (diff === -1) return 'Yesterday';
+      if (diff === 1) return 'Tomorrow';
+      return d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
+    },
+
+    // What happens when a programme is chosen: live now → watch, past + archive → replay.
+    playProgramme(list, index, group, prog) {
+      const ch = list[index], now = Date.now();
+      if (!prog || (prog.start <= now && prog.end > now)) return this.playChannel(list, index, group);
+      if (prog.end <= now) {
+        if (this.canReplay(ch, prog)) return this.playCatchup(ch, prog);
+        return this.toast(ch.versions.some(v => Number(v.tv_archive)) ? 'This programme is no longer in the replay archive' : 'Replay isn’t available on this channel');
+      }
+      this.toast(`${prog.title} starts ${this.dayLabel(prog.start).toLowerCase()} at ${hm(prog.start)}`);
+    },
+
+    // ---------- TV guide grid ----------
+    async renderGuide(main) {
+      this.setBackdrop('');
+      const groups = (await this.liveGroups()).filter(g => !g.free);
+      if (!groups.length) { main.innerHTML = '<div class="empty"><h3>No channels</h3></div>'; return; }
+      let group = groups.find(g => g.key === (this.guideCat || this.liveCat)) || groups.find(g => !g.special) || groups[0];
+      const PX = 6;                      // pixels per minute
+      const CELL = 260;                  // channel column width
+      const maxBack = Math.max(1, ...group.channels.flatMap(c => c.versions.map(v => Number(v.tv_archive_duration) || 0)));
+      let day = this.guideDay || 0;      // 0 = today, -1 = yesterday…
+
+      main.innerHTML = `
+        <div class="guide-page">
+          <div class="gp-top">
+            <div class="gp-info" id="gpInfo"><p class="muted">Move through the guide to see programme details. OK plays live programmes and replays past ones marked ⟲.</p></div>
+            <div class="gp-controls">
+              <button class="btn ghost" id="gpGroup"></button>
+              <div class="gp-days" id="gpDays"></div>
+              <button class="btn ghost" id="gpNow">Now</button>
+            </div>
+          </div>
+          <div class="gp-grid" id="gpGrid" style="--px:${PX}px;--cell:${CELL}px"></div>
+        </div>`;
+
+      const grid = $('#gpGrid', main), info = $('#gpInfo', main);
+      const days = [];
+      for (let d = -Math.min(7, maxBack); d <= 1; d++) days.push(d);
+
+      const paintControls = () => {
+        $('#gpGroup', main).innerHTML = `${esc(group.key === '@fav' ? '★ ' + group.name : group.name)} <span class="muted">▾</span>`;
+        $('#gpDays', main).innerHTML = days.map(d => `<button class="gp-day${d === day ? ' active' : ''}" data-day="${d}">${esc(this.dayLabel(Date.now() + d * 864e5))}</button>`).join('');
+      };
+
+      let observer;
+      const render = () => {
+        paintControls();
+        const dayStart = new Date(new Date().toDateString()).getTime() + day * 864e5;
+        const dayEnd = dayStart + 864e5;
+        const width = 1440 * PX;
+        const x = t => ((Math.max(dayStart, Math.min(dayEnd, t)) - dayStart) / 60000) * PX;
+        const hours = Array.from({ length: 48 }, (_, i) => `<span style="left:${i * 30 * PX}px">${hm(dayStart + i * 30 * 60000)}</span>`).join('');
+        grid.innerHTML = `
+          <div class="gp-head"><div class="gp-corner">${esc(this.dayLabel(dayStart))}</div><div class="gp-ruler" style="width:${width}px">${hours}</div></div>
+          <div class="gp-body">
+          ${group.channels.map((c, i) => `
+            <div class="gp-row" data-i="${i}">
+              <div class="gp-ch"><span class="ch-num">${esc(c.num)}</span><span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}</span><span class="gp-name">${esc(c.label)}</span>${c.versions.some(v => Number(v.tv_archive)) ? '<span class="gp-cu" title="Catch-up">⟲</span>' : ''}</div>
+              <div class="gp-track" style="width:${width}px"><span class="gp-loading"></span></div>
+            </div>`).join('')}
+          <div class="gp-nowline" hidden></div>
+          </div>`;
+
+        const nowLine = $('.gp-nowline', grid);
+        const placeNow = () => {
+          const t = Date.now();
+          nowLine.hidden = !(t >= dayStart && t < dayEnd);
+          nowLine.style.left = `${(($('.gp-ch', grid) || {}).offsetWidth || CELL) + x(t)}px`;
+        };
+        placeNow();
+        clearInterval(this.guideTimer);
+        this.guideTimer = setInterval(() => { if (!grid.isConnected) return clearInterval(this.guideTimer); placeNow(); }, 60000);
+
+        const fill = async row => {
+          const i = Number(row.dataset.i), ch = group.channels[i];
+          const list = await this.epgFor(ch);
+          const track = $('.gp-track', row);
+          if (!track || !grid.isConnected) return;
+          const now = Date.now();
+          const progs = list.filter(p => p.end > dayStart && p.start < dayEnd);
+          row.progs = progs;
+          track.innerHTML = progs.length ? progs.map((p, k) => {
+            const state = p.end <= now ? 'past' : p.start <= now ? 'now' : 'future';
+            const replay = this.canReplay(ch, p);
+            return `<button class="prog ${state}${replay ? ' replay' : ''}" data-k="${k}" style="left:${x(p.start)}px;width:${Math.max(x(p.end) - x(p.start) - 3, 24)}px">
+              <b>${replay ? '⟲ ' : ''}${esc(p.title)}</b><small>${hm(p.start)} – ${hm(p.end)}</small></button>`;
+          }).join('') : `<button class="prog none" data-k="-1" style="left:0;width:${width - 4}px"><b>${ch.url ? 'Free channel' : 'No guide information'}</b><small>OK to watch live</small></button>`;
+        };
+
+        if (observer) observer.disconnect();
+        observer = new IntersectionObserver(entries => {
+          for (const e of entries) if (e.isIntersecting && !e.target.filled) { e.target.filled = true; fill(e.target); }
+        }, { root: grid, rootMargin: '600px 0px' });
+        $$('.gp-row', grid).forEach(r => observer.observe(r));
+
+        // Start around now (today) or the evening (other days).
+        const focusT = day === 0 ? Date.now() - 30 * 60000 : dayStart + 19 * 3600e3;
+        grid.scrollLeft = Math.max(0, x(focusT));
+        grid.scrollTop = 0;
+      };
+
+      const progAt = b => {
+        const row = b.closest('.gp-row'), i = Number(row.dataset.i), k = Number(b.dataset.k);
+        return { i, ch: group.channels[i], prog: k >= 0 && row.progs ? row.progs[k] : null };
+      };
+      const showInfo = debounce(b => {
+        const { ch, prog } = progAt(b);
+        const now = Date.now();
+        const badge = !prog ? '<span class="chip">Live</span>'
+          : prog.start <= now && prog.end > now ? `<span class="badge live">● Live now</span> <span class="bar gp-bar"><i style="width:${(((now - prog.start) / (prog.end - prog.start)) * 100).toFixed(1)}%"></i></span>`
+          : prog.end <= now ? (this.canReplay(ch, prog) ? '<span class="badge replay">⟲ Replay — press OK</span>' : '<span class="chip">Ended</span>')
+          : '<span class="chip">Upcoming</span>';
+        info.innerHTML = `
+          <div class="gp-info-ch">${ch.stream_icon ? `<img src="${esc(ch.stream_icon)}" alt="">` : ''}<span>${esc(ch.num)} · ${esc(ch.label)}</span></div>
+          <h2>${esc(prog ? prog.title : ch.label)}</h2>
+          <div class="gp-info-meta">${prog ? `${esc(this.dayLabel(prog.start))} · ${hm(prog.start)} – ${hm(prog.end)} · ${Math.round((prog.end - prog.start) / 60000)} min` : ''} ${badge}</div>
+          <p>${esc(prog ? prog.description : '')}</p>`;
+      }, 120);
+
+      grid.addEventListener('focusin', e => { const b = e.target.closest('.prog'); if (b) showInfo(b); });
+      grid.addEventListener('click', e => {
+        const b = e.target.closest('.prog');
+        if (!b) return;
+        const { i, prog } = progAt(b);
+        this.playProgramme(group.channels, i, group, prog);
+      });
+      $('#gpDays', main).addEventListener('click', e => {
+        const b = e.target.closest('[data-day]');
+        if (!b) return;
+        day = this.guideDay = Number(b.dataset.day);
+        render();
+        $(`[data-day="${day}"]`, main).focus();
+      });
+      $('#gpNow', main).addEventListener('click', () => {
+        day = this.guideDay = 0;
+        render();
+        setTimeout(() => { const n = $('.gp-row .prog.now', grid) || $('.gp-row .prog', grid); n && n.focus({ preventScroll: true }); }, 400);
+      });
+      $('#gpGroup', main).addEventListener('click', () => {
+        const m = this.openModal(`${this.closeBtn()}<h2 class="sheet-title">Choose a group</h2>
+          <div class="pick-list">${groups.map((g, i) => `<button class="cat${g.special ? ' special' : ''}${g === group ? ' active' : ''}" data-g="${i}">${esc((g.key === '@fav' ? '★ ' : '') + g.name)} <span>${g.channels.length}</span></button>`).join('')}</div>`, 'settings');
+        m.querySelector('.pick-list').addEventListener('click', e => {
+          const b = e.target.closest('[data-g]');
+          if (!b) return;
+          group = groups[Number(b.dataset.g)];
+          this.guideCat = group.key;
+          this.closeModal();
+          render();
+          $('#gpGroup', main).focus();
+        });
+        ($('.pick-list .active', m) || $('.pick-list .cat', m)).focus();
+      });
+
+      render();
+      // Land on what's on now for the first channel.
+      setTimeout(() => {
+        const n = $('.gp-row .prog.now', grid) || $('.gp-row .prog', grid);
+        (n || $('#gpGroup', main)).focus({ preventScroll: true });
+      }, 900);
     },
 
     // ---------- modal ----------
@@ -1223,6 +1451,8 @@
             <select class="field" id="setFormat"><option value="m3u8">HLS (.m3u8)</option><option value="ts">MPEG-TS (.ts)</option></select></label>
           <label class="set"><span>Info language<small>Language for summaries and titles from TMDB.</small></span>
             <select class="field" id="setLang">${langs.map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join('')}</select></label>
+          <label class="set"><span>Catch-up time correction<small>If replays start at the wrong time, shift them here.</small></span>
+            <select class="field" id="setShift">${[-2, -1, 0, 1, 2].map(h => `<option value="${h}">${h === 0 ? 'None (server time)' : (h > 0 ? '+' : '−') + Math.abs(h) + ' hour' + (Math.abs(h) > 1 ? 's' : '')}</option>`).join('')}</select></label>
           <label class="set toggle"><span>Show adult categories</span><input type="checkbox" id="setAdult"></label>
         </section>
         <section class="set-group">
@@ -1238,6 +1468,8 @@
       $('#setFormat', m).value = Settings.liveFormat;
       $('#setLang', m).value = Settings.tmdbLang;
       $('#setAdult', m).checked = Settings.showAdult;
+      $('#setShift', m).value = String(Settings.catchupShift || 0);
+      $('#setShift', m).addEventListener('change', e => save('catchupShift', Number(e.target.value)));
       const save = (k, v) => { Settings[k] = v; Settings.save(); };
       $('#setRelay', m).addEventListener('change', e => save('relay', e.target.value.trim()));
       $('#setFormat', m).addEventListener('change', e => save('liveFormat', e.target.value));

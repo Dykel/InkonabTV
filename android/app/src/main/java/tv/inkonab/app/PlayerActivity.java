@@ -48,6 +48,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
 /**
@@ -81,6 +82,9 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean live, ended, controlsShown;
 
     private final ArrayList<String> history = new ArrayList<>();
+    // Automatic recovery: copies (version × format) already tried for the current channel.
+    private final HashSet<String> tried = new HashSet<>();
+    private boolean altFormat, readyOnce;
     private final JSONObject favChanges = new JSONObject();
 
     private View topBar;
@@ -151,7 +155,11 @@ public class PlayerActivity extends AppCompatActivity {
         player.addListener(new Player.Listener() {
             @Override
             public void onPlaybackStateChanged(int state) {
-                if (state == Player.STATE_READY) errorView.setVisibility(View.GONE);
+                if (state == Player.STATE_READY) {
+                    readyOnce = true;
+                    main.removeCallbacks(watchdog);
+                    errorView.setVisibility(View.GONE);
+                }
                 if (state == Player.STATE_ENDED && !live) {
                     ended = true;
                     finishWithResult();
@@ -160,9 +168,7 @@ public class PlayerActivity extends AppCompatActivity {
 
             @Override
             public void onPlayerError(@NonNull PlaybackException error) {
-                showError(live
-                    ? "Can't play this channel.\n▲ ▼ change channel · ◀ ▶ another quality · OK channel list"
-                    : "Can't play this file (" + error.getErrorCodeName() + ").");
+                onFail(error.getErrorCodeName());
             }
         });
 
@@ -192,7 +198,56 @@ public class PlayerActivity extends AppCompatActivity {
 
     private String urlOf(JSONObject v) {
         String url = v.optString("url", "");
-        return url.isEmpty() ? template.replace("{id}", v.optString("id")) : url;
+        if (!url.isEmpty()) return url;
+        String u = template.replace("{id}", v.optString("id"));
+        if (!altFormat) return u;
+        if (u.endsWith(".m3u8")) return u.substring(0, u.length() - 5) + ".ts";
+        if (u.endsWith(".ts")) return u.substring(0, u.length() - 3) + ".m3u8";
+        return u;
+    }
+
+    // ---------- automatic recovery ----------
+
+    // A stream that never starts within 15 s counts as failed.
+    private final Runnable watchdog = () -> { if (!readyOnce && live) onFail("timeout"); };
+
+    private void onFail(String why) {
+        main.removeCallbacks(watchdog);
+        if (live && autoRetry()) return;
+        showError(live
+            ? "Can't play this channel (tried every copy and format).\n▲ ▼ change channel · OK channel list"
+            : "Can't play this file (" + why + ").");
+    }
+
+    /** Try the channel's other quality copies, then the other stream format (HLS ↔ MPEG-TS). */
+    private boolean autoRetry() {
+        JSONArray vs = current().optJSONArray("versions");
+        if (vs == null) return false;
+        int flat = flatIndex();
+        tried.add(flat + ":" + version + ":" + altFormat);
+        if (tried.size() >= 6) return false; // keep the wait short when a channel is truly down
+        for (int i = 0; i < vs.length(); i++) {
+            if (!tried.contains(flat + ":" + i + ":" + altFormat)) {
+                version = i;
+                Toast.makeText(this, "Trying another copy (" + vs.optJSONObject(i).optString("label", "") + ")…", Toast.LENGTH_SHORT).show();
+                load(0);
+                return true;
+            }
+        }
+        if (!altFormat && vs.optJSONObject(0).optString("url", "").isEmpty()) {
+            altFormat = true;
+            version = 0;
+            Toast.makeText(this, "Trying another stream format…", Toast.LENGTH_SHORT).show();
+            load(0);
+            return true;
+        }
+        return false;
+    }
+
+    // A channel or quality chosen by the viewer starts a fresh recovery cycle.
+    private void freshStart() {
+        tried.clear();
+        altFormat = false;
     }
 
     // ---------- UI ----------
@@ -402,6 +457,7 @@ public class PlayerActivity extends AppCompatActivity {
             chanList.setSelection(0);
         });
         chanList.setOnItemClickListener((a, v, p, id) -> {
+            freshStart();
             group = previewGroup;
             index = p;
             version = 0;
@@ -554,6 +610,9 @@ public class PlayerActivity extends AppCompatActivity {
             MediaItem.Builder item = new MediaItem.Builder().setUri(Uri.parse(url));
             String path = Uri.parse(url).getPath();
             if (path != null && path.toLowerCase().endsWith(".m3u8")) item.setMimeType(MimeTypes.APPLICATION_M3U8);
+            readyOnce = false;
+            main.removeCallbacks(watchdog);
+            main.postDelayed(watchdog, 15000);
             player.setMediaItem(item.build(), startAtMs);
             player.prepare();
             player.play();
@@ -581,6 +640,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (!live || n < 2) return;
         index = (index + step + n) % n;
         version = 0;
+        freshStart();
         load(0);
     }
 
@@ -593,12 +653,14 @@ public class PlayerActivity extends AppCompatActivity {
         JSONArray vs = current().optJSONArray("versions");
         if (vs == null || vs.length() < 2) return;
         version = (version + step + vs.length()) % vs.length();
+        freshStart();
         load(live ? 0 : player.getCurrentPosition());
     }
 
     // Number keys: type a channel number; it switches after a short pause.
     private final Runnable applyDigits = () -> {
         String want = digits.toString();
+        freshStart();
         digits.setLength(0);
         numView.setVisibility(View.GONE);
         if (!jumpTo(want)) Toast.makeText(this, "No channel " + want, Toast.LENGTH_SHORT).show();

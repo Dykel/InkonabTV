@@ -5,6 +5,8 @@ A web player for InkonabTV (Xtream Codes) that runs entirely in the browser and 
 - **Sign in** with your InkonabTV username and password (nothing is stored on any server; you can choose to stay signed in on that device only).
 - **Home**: a large featured banner that follows the poster you're on, plus *Latest added*, *Continue Watching*, *Top rated* and *New episodes* rows.
 - **Live TV**: categories (quality copies merged), a channel list, the TV guide (what's on now and next), ★ Favorites and Recently watched groups. While a channel plays: **OK** opens the channel list (groups ▸ channels), **▲/▼** change channel, **◀/▶** change quality, **number keys** jump to a channel number.
+- **TV Guide**: a week-wide programme grid per group (days back as far as the catch-up archive), with a red now-line and programme details. OK on a live programme watches it; OK on a past programme marked ⟲ replays it (catch-up). The Live TV guide panel also lists recent replays.
+- **Automatic recovery**: if a channel fails or doesn't start within 15 seconds, the player tries its other quality copies and the other stream format before showing an error.
 - **My List**: add any movie or series (☆ My List on its page) or channel (☆ in the guide, or hold OK in the player's channel list); they appear on Home and as their own category.
 - **Movies / Series**: every category with filtering and sorting, a details page (backdrop, cast, trailer from TMDB), seasons and episodes, resume where you stopped, and the next episode plays automatically.
 - **MBC PLAY** live TV and radio, free and always available — on the sign-in screen, on Home and pinned first in Live TV (add more playlists in `freePlaylists` in `config.js`).

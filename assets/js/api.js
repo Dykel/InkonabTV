@@ -21,7 +21,7 @@
     ? navigator.language : (navigator.language || 'en') + '-' + (navigator.language || 'en').toUpperCase();
 
   const Settings = Object.assign(
-    { server: CFG.server, relay: CFG.relay || '', liveFormat: 'm3u8', showAdult: false, tmdbLang: defaultLang },
+    { server: CFG.server, relay: CFG.relay || '', liveFormat: 'm3u8', showAdult: false, tmdbLang: defaultLang, catchupShift: 0 },
     Store.get('settings', {})
   );
   Settings.save = function () {
@@ -82,6 +82,37 @@
           start: Number(e.start_timestamp) * 1000, end: Number(e.stop_timestamp) * 1000,
         }))
       );
+    }
+
+    // A channel's whole guide (about a week back and a few days ahead) in one call.
+    // `archive`: the programme can be replayed (catch-up); `startStr` is the server-local start
+    // ("2026-10-26 19:00:00") that catch-up links expect.
+    epgTable(streamId) {
+      return this.call('get_simple_data_table', { stream_id: streamId }, { cache: false }).then(d =>
+        asArray(d && d.epg_listings).map(e => ({
+          title: b64(e.title), description: b64(e.description),
+          start: Number(e.start_timestamp) * 1000, end: Number(e.stop_timestamp) * 1000,
+          startStr: e.start || '', archive: Number(e.has_archive) === 1,
+        })).filter(e => e.end > e.start).sort((a, b) => a.start - b.start)
+      );
+    }
+
+    // Catch-up (timeshift) link; only the MPEG-TS form is served by this provider. The start
+    // time is written in the server's timezone (server_info.timezone), shifted by the
+    // "Catch-up time correction" setting for panels whose clock differs.
+    catchupUrl(streamId, startMs, minutes) {
+      const tz = (this.info && this.info.server_info && this.info.server_info.timezone) || 'UTC';
+      const t = new Date(startMs + (Number(Settings.catchupShift) || 0) * 3600e3);
+      let parts;
+      try {
+        parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+          .formatToParts(t).map(x => [x.type, x.value]));
+      } catch {
+        const z = n => String(n).padStart(2, '0');
+        parts = { year: t.getUTCFullYear(), month: z(t.getUTCMonth() + 1), day: z(t.getUTCDate()), hour: z(t.getUTCHours()), minute: z(t.getUTCMinutes()) };
+      }
+      const start = `${parts.year}-${parts.month}-${parts.day}:${parts.hour}-${parts.minute}`;
+      return `${this.server}/timeshift/${encodeURIComponent(this.username)}/${encodeURIComponent(this.password)}/${Math.max(1, Math.round(minutes))}/${start}/${streamId}.ts`;
     }
 
     streamUrl(kind, id, ext) {

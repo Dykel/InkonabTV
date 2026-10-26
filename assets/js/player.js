@@ -87,7 +87,7 @@
         payload = {
           live: false, group: 0, index: 0, version: 0, startAt: item.resumeAt > 5 ? item.resumeAt : 0,
           channels: [{ title: item.title || '', subtitle: item.subtitle || '', img: item.img || '',
-            versions: [{ url: App.api.streamUrl(item.kind, item.id, item.ext || 'mp4'), label: '' }] }],
+            versions: [{ url: item.url || App.api.streamUrl(item.kind, item.id, item.ext || 'mp4'), label: item.kind === 'catchup' ? 'Replay' : '' }] }],
         };
       }
       const back = document.activeElement;
@@ -111,12 +111,14 @@
     play(item) {
       this.destroy();
       this.item = item;
-      // item.url: a direct link from a free playlist (MBC PLAY); otherwise an Xtream stream.
+      // item.url: a direct link — a free playlist (MBC PLAY), or a catch-up replay (relay: true,
+      // it comes from the provider's plain-HTTP host like live TV). Otherwise an Xtream stream.
       const ext = item.url
         ? ((item.url.match(/\.(m3u8|ts|mp4|mkv|mp3|aac)(?:\?|$)/i) || [])[1] || 'm3u8').toLowerCase()
-        : item.kind === 'live' ? Settings.liveFormat : item.ext || 'mp4';
+        : item.kind === 'live' ? item.fmtOverride || Settings.liveFormat : item.ext || 'mp4';
+      item.fmt = ext;
       item.rawUrl = item.url || App.api.streamUrl(item.kind, item.id, ext);
-      const url = item.url || relay(item.rawUrl);
+      const url = item.url && !item.relay ? item.url : relay(item.rawUrl);
       this.el.classList.toggle('radio', !!item.radio);
       const art = this.el.querySelector('.p-radio img');
       if (item.radio && item.img) art.src = item.img; else art.removeAttribute('src');
@@ -146,6 +148,8 @@
         v.src = url;
       }
       if (item.resumeAt > 5) v.addEventListener('loadedmetadata', () => { v.currentTime = item.resumeAt; }, { once: true });
+      clearTimeout(this.watchdog);
+      this.watchdog = setTimeout(() => { if (this.item === item && this.el.dataset.state === 'loading') this.fail('timeout'); }, 15000);
       const p = v.play();
       if (p && p.catch) p.catch(() => {});
 
@@ -240,7 +244,7 @@
       const v = ch.versions[0];
       this.closeSide();
       this.play({ ...this.item, id: v.stream_id, url: v.url, radio: v.radio, img: v.stream_icon, title: ch.label,
-        subtitle: grp.name, version: v, list: grp.channels, index, groupKey: grp.key });
+        subtitle: grp.name, version: v, list: grp.channels, index, groupKey: grp.key, tried: null, fmtOverride: null });
     },
 
     closeSide() {
@@ -283,7 +287,7 @@
         const hit = it && await App.findChannelByNum(num, it.list);
         if (!hit) return App.toast('No channel ' + num);
         const ch = hit.list[hit.index], v = ch.versions[0];
-        this.play({ ...this.item, id: v.stream_id, url: v.url, radio: v.radio, img: v.stream_icon, title: ch.label, version: v,
+        this.play({ ...this.item, id: v.stream_id, url: v.url, radio: v.radio, img: v.stream_icon, title: ch.label, version: v, tried: null, fmtOverride: null,
           list: hit.list, index: hit.index, ...(hit.group ? { groupKey: hit.group.key, subtitle: hit.group.name } : {}) });
       }, 1300);
     },
@@ -294,7 +298,7 @@
       const index = (it.index + step + it.list.length) % it.list.length;
       const ch = it.list[index];
       const v = (ch.versions || [ch])[0];
-      this.play({ ...it, id: v.stream_id, url: v.url, radio: v.radio, img: v.stream_icon, title: ch.label || ch.name, subtitle: it.subtitle, version: v, index });
+      this.play({ ...it, id: v.stream_id, url: v.url, radio: v.radio, img: v.stream_icon, title: ch.label || ch.name, subtitle: it.subtitle, version: v, index, tried: null, fmtOverride: null });
       if (it.onZap) it.onZap(ch);
     },
 
@@ -315,7 +319,7 @@
     switchVersion(v) {
       const it = this.item;
       if (!it || !v || v === it.version) return;
-      this.play({ ...it, id: v.stream_id, version: v });
+      this.play({ ...it, id: v.stream_id, version: v, tried: null, fmtOverride: null });
       App.toast('Quality: ' + [v.quality || 'SD', ...v.tags].join(' · '));
     },
 
@@ -338,9 +342,36 @@
       if (this.item && this.item.onEnded) this.item.onEnded();
     },
 
+    // A channel that fails (or never starts) tries its other quality copies, then the other
+    // stream format, before giving up.
+    retry() {
+      const it = this.item;
+      if (!it || it.kind !== 'live' || (it.url && !it.relay)) return false;
+      it.tried = it.tried || new Set();
+      it.tried.add(`${it.id}:${it.fmt}`);
+      if (it.tried.size >= 6) return false; // keep the wait short when a channel is truly down
+      const versions = (it.version && it.version.versions) || [];
+      const next = versions.find(v => !it.tried.has(`${v.stream_id}:${it.fmt}`));
+      if (next) {
+        App.toast(`Trying another copy (${next.quality || 'SD'})…`);
+        this.play({ ...it, id: next.stream_id, version: next, tried: it.tried });
+        return true;
+      }
+      const alt = it.fmt === 'm3u8' ? 'ts' : 'm3u8';
+      const first = versions[0] || it.version;
+      if (first && !it.tried.has(`${first.stream_id}:${alt}`)) {
+        App.toast(`Trying the ${alt === 'ts' ? 'MPEG-TS' : 'HLS'} format…`);
+        this.play({ ...it, id: first.stream_id, version: first, fmtOverride: alt, tried: it.tried });
+        return true;
+      }
+      return false;
+    },
+
     fail(detail) {
       if (!this.item) return;
-      const mixed = !this.item.url && location.protocol === 'https:' && !Settings.relay;
+      const blocked = (!this.item.url || this.item.relay) && location.protocol === 'https:' && !Settings.relay;
+      if (!blocked && this.retry()) { if (detail) console.warn('[player] retrying after', detail); return; }
+      const mixed = (!this.item.url || this.item.relay) && location.protocol === 'https:' && !Settings.relay;
       const msg = mixed
         ? 'This channel is sent over plain HTTP, which browsers block on an HTTPS site. Add a relay in Settings (see README) to play it here.'
         : 'The stream could not be played. It may be offline, or use a format your browser can’t decode (try the other live format in Settings, or open it in VLC).';
@@ -389,6 +420,7 @@
 
     destroy() {
       clearInterval(this.saveTimer);
+      clearTimeout(this.watchdog);
       if (this.hls) { this.hls.destroy(); this.hls = null; }
       if (this.ts) { try { this.ts.destroy(); } catch {} this.ts = null; }
       this.video.pause();
