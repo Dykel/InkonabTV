@@ -15,6 +15,14 @@
       this.el.querySelector('[data-act="close"]').addEventListener('click', () => this.close());
       this.el.querySelector('[data-act="prev"]').addEventListener('click', () => this.zap(-1));
       this.el.querySelector('[data-act="next"]').addEventListener('click', () => this.zap(1));
+      this.el.querySelector('[data-act="list"]').addEventListener('click', () => this.openSide());
+      this.el.querySelector('[data-act="fav"]').addEventListener('click', () => this.toggleFav());
+      this.side = this.el.querySelector('.p-side');
+      this.side.addEventListener('click', e => this.onSideClick(e));
+      this.side.addEventListener('focusin', e => {
+        const g = e.target.closest('[data-g]');
+        if (g) { clearTimeout(this.sidePreview); this.sidePreview = setTimeout(() => this.renderSideChannels(Number(g.dataset.g)), 120); }
+      });
       this.el.querySelector('[data-act="retry"]').addEventListener('click', () => this.play(this.item));
       this.el.querySelector('[data-act="copy"]').addEventListener('click', () => {
         navigator.clipboard && navigator.clipboard.writeText(this.item.rawUrl);
@@ -39,30 +47,45 @@
       this.el.classList.remove('hidden');
       document.body.classList.add('playing');
       this.play(item);
-      this.el.querySelector('[data-act="close"]').focus({ preventScroll: true });
+      this.video.focus({ preventScroll: true });
     },
 
     // Android app: hand playback to ExoPlayer (PlayerActivity). It plays HTTP streams and
-    // codecs browsers can't, so no relay is used. Live sends the whole list for zapping.
+    // codecs browsers can't, so no relay is used. Live sends every group (deduplicated channels +
+    // group index lists) so the native channel list matches the app.
     async openNative(item) {
       const label = v => [v.quality || (v.url ? '' : 'SD'), ...(v.tags || [])].filter(Boolean).join(' · ');
-      const liveUrl = v => v.url || App.api.streamUrl('live', v.stream_id, Settings.liveFormat);
-      let payload;
+      let payload, groups = [];
       if (item.kind === 'live') {
-        const list = item.list || [item.version || { stream_id: item.id, url: item.url, name: item.title, radio: item.radio, stream_icon: item.img }];
-        const index = item.list ? item.index : 0;
-        const cur = list[index];
-        payload = {
-          live: true, index,
-          version: Math.max(0, (cur.versions || [cur]).indexOf(item.version)),
-          channels: list.map(ch => ({
-            title: ch.label || ch.name || '', subtitle: item.subtitle || '', img: ch.stream_icon || '', radio: !!ch.radio,
-            versions: (ch.versions || [ch]).map(v => ({ url: liveUrl(v), label: label(v) })),
-          })),
+        const cur = (item.list && item.list[item.index]) || item.version;
+        groups = await App.liveGroups().catch(() => []);
+        let gi = groups.findIndex(g => g.key === item.groupKey && g.channels.includes(cur));
+        if (gi < 0) gi = groups.findIndex(g => g.channels.includes(cur));
+        if (gi < 0) { groups.unshift({ key: item.groupKey || '@now', name: item.subtitle || 'Channels', channels: item.list || [cur] }); gi = 0; }
+        const flat = [], at = new Map();
+        const add = ch => {
+          if (!at.has(ch)) {
+            at.set(ch, flat.length);
+            flat.push({
+              title: ch.label || ch.name || '', img: ch.stream_icon || '', num: String(ch.num || ''), radio: !!ch.radio,
+              gkey: ch.gkey || '', fav: App.isFav('live', ch.gkey),
+              versions: (ch.versions || [ch]).map(v => (v.url ? { url: v.url, label: label(v) } : { id: String(v.stream_id), label: label(v) })),
+            });
+          }
+          return at.get(ch);
         };
+        payload = {
+          live: true,
+          template: App.api ? App.api.streamUrl('live', '{id}', Settings.liveFormat) : '',
+          groups: groups.map(g => ({ key: g.key, name: g.name, items: g.channels.map(add) })),
+          group: gi,
+          index: Math.max(0, groups[gi].channels.indexOf(cur)),
+          version: Math.max(0, ((cur && cur.versions) || [cur]).indexOf(item.version)),
+        };
+        payload.channels = flat;
       } else {
         payload = {
-          live: false, index: 0, version: 0, startAt: item.resumeAt > 5 ? item.resumeAt : 0,
+          live: false, group: 0, index: 0, version: 0, startAt: item.resumeAt > 5 ? item.resumeAt : 0,
           channels: [{ title: item.title || '', subtitle: item.subtitle || '', img: item.img || '',
             versions: [{ url: App.api.streamUrl(item.kind, item.id, item.ext || 'mp4'), label: '' }] }],
         };
@@ -73,10 +96,15 @@
       if (item.kind !== 'live') {
         if (r.duration > 0 && item.onProgress) item.onProgress(r.position, r.duration);
         if (r.ended && item.onEnded) return item.onEnded();
-      } else if (item.list && item.onZap && item.list[r.index]) {
-        item.onZap(item.list[r.index]);
+      } else {
+        for (const [k, on] of Object.entries(r.fav || {})) App.setFav('live', k, on);
+        for (const k of r.history || []) App.pushRecent(k);
+        const g = payload.groups[r.group] || payload.groups[payload.group];
+        const ch = g && payload.channels[g.items[r.index]];
+        if (back && back.isConnected) back.focus({ preventScroll: true });
+        App.afterLive(g && g.key, ch && ch.gkey);
       }
-      if (back && back.isConnected) back.focus({ preventScroll: true });
+      if (item.kind !== 'live' && back && back.isConnected) back.focus({ preventScroll: true });
       App.onPlayerClosed();
     },
 
@@ -97,6 +125,8 @@
       this.el.querySelector('.p-zap').classList.toggle('hidden', !item.list);
       this.el.querySelector('.p-epg').innerHTML = '';
       this.renderVersions(item);
+      if (item.kind === 'live') App.pushRecent(this.gkey());
+      this.paintFav();
       this.setState('loading');
       this.poke();
 
@@ -137,6 +167,125 @@
           <span class="p-epg-time">${App.hm(e.start)} – ${App.hm(e.end)}</span>
           <span class="p-epg-title">${App.esc(e.title)}</span></div>`).join('');
       } catch {}
+    },
+
+    gkey() { return this.item && this.item.version && this.item.version.gkey; },
+
+    paintFav() {
+      const on = this.item && this.item.kind === 'live' && App.isFav('live', this.gkey());
+      this.el.querySelector('.p-fav-icon').textContent = on ? '★' : '☆';
+      this.el.querySelector('[data-act="fav"]').classList.toggle('on', !!on);
+    },
+
+    toggleFav() {
+      if (!this.item || this.item.kind !== 'live') return;
+      App.toggleFav('live', this.gkey(), this.item.title);
+      this.paintFav();
+    },
+
+    // ---------- channel list sidebar (live): groups on the left, their channels on the right ----------
+    sideOpen() { return !this.side.classList.contains('hidden'); },
+
+    async openSide() {
+      const it = this.item;
+      if (!it || it.kind !== 'live') return;
+      const groups = await App.liveGroups().catch(() => []);
+      const cur = it.list && it.list[it.index];
+      let gi = groups.findIndex(g => g.key === it.groupKey);
+      if (gi < 0) gi = groups.findIndex(g => g.channels.includes(cur));
+      if (gi < 0) { groups.unshift({ key: it.groupKey || '@now', name: it.subtitle || 'Channels', channels: it.list || [] }); gi = 0; }
+      this.sideGroups = groups;
+      this.side.querySelector('.p-groups').innerHTML = groups.map((g, i) =>
+        `<button class="p-g${g.special || g.free ? ' special' : ''}" data-g="${i}">${App.esc((g.key === '@fav' ? '★ ' : '') + g.name)}<small>${g.channels.length}</small></button>`).join('');
+      this.side.classList.remove('hidden');
+      this.renderSideChannels(gi);
+      const playing = this.side.querySelector('.p-c.playing') || this.side.querySelector('.p-c');
+      (playing || this.side.querySelector(`[data-g="${gi}"]`)).focus();
+      playing && playing.scrollIntoView({ block: 'center' });
+    },
+
+    renderSideChannels(gi) {
+      const g = this.sideGroups[gi];
+      if (!g || this.sideGi === gi && this.side.querySelector('.p-c')) { this.markSideGroup(gi); return; }
+      this.sideGi = gi;
+      this.markSideGroup(gi);
+      const now = this.gkey();
+      this.side.querySelector('.p-side-title').textContent = g.name;
+      this.side.querySelector('.p-chans').innerHTML = g.channels.map((c, i) => `
+        <button class="p-c${c.gkey === now ? ' playing' : ''}" data-c="${i}">
+          <span class="ch-num">${App.esc(c.num)}</span>
+          <span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${App.esc(c.stream_icon)}" alt="">` : ''}</span>
+          <span class="ch-name">${App.esc(c.label)}</span>
+          ${App.isFav('live', c.gkey) ? '<span class="fav-star">★</span>' : ''}
+        </button>`).join('') || '<p class="muted">No channels.</p>';
+    },
+
+    markSideGroup(gi) {
+      this.side.querySelectorAll('.p-g').forEach(b => b.classList.toggle('active', Number(b.dataset.g) === gi));
+    },
+
+    onSideClick(e) {
+      const g = e.target.closest('[data-g]');
+      if (g) {
+        this.renderSideChannels(Number(g.dataset.g));
+        const first = this.side.querySelector('.p-c');
+        first && first.focus();
+        return;
+      }
+      const c = e.target.closest('[data-c]');
+      if (!c) return;
+      const grp = this.sideGroups[this.sideGi];
+      const index = Number(c.dataset.c);
+      const ch = grp.channels[index];
+      const v = ch.versions[0];
+      this.closeSide();
+      this.play({ ...this.item, id: v.stream_id, url: v.url, radio: v.radio, img: v.stream_icon, title: ch.label,
+        subtitle: grp.name, version: v, list: grp.channels, index, groupKey: grp.key });
+    },
+
+    closeSide() {
+      this.side.classList.add('hidden');
+      this.sideGi = -1;
+      this.video.focus({ preventScroll: true });
+    },
+
+    // ↑/↓ inside a column, ←/→ between groups and channels; OK is a normal button click.
+    sideKey(e) {
+      const a = document.activeElement;
+      const col = a && a.closest('.p-groups, .p-chans');
+      const move = el => { if (el) { e.preventDefault(); el.focus(); el.scrollIntoView({ block: 'nearest' }); } };
+      switch (e.key) {
+        case 'ArrowUp': if (col) move(a.previousElementSibling); else e.preventDefault(); return true;
+        case 'ArrowDown': if (col) move(a.nextElementSibling); else e.preventDefault(); return true;
+        case 'ArrowLeft': move(this.side.querySelector('.p-g.active')); return true;
+        case 'ArrowRight':
+          if (col && col.classList.contains('p-groups')) move(this.side.querySelector('.p-c.playing') || this.side.querySelector('.p-c'));
+          else e.preventDefault();
+          return true;
+        case 'Escape': case 'Backspace': case 'BrowserBack': case 'GoBack':
+          e.preventDefault(); this.closeSide(); return true;
+      }
+      return false;
+    },
+
+    // Remote number keys: type a channel number, it switches after a short pause.
+    digit(d) {
+      const box = this.el.querySelector('.p-num');
+      this.digits = ((this.digits || '') + d).slice(-4);
+      box.textContent = this.digits;
+      box.classList.remove('hidden');
+      clearTimeout(this.digitTimer);
+      this.digitTimer = setTimeout(async () => {
+        const num = this.digits;
+        this.digits = '';
+        box.classList.add('hidden');
+        const it = this.item;
+        const hit = it && await App.findChannelByNum(num, it.list);
+        if (!hit) return App.toast('No channel ' + num);
+        const ch = hit.list[hit.index], v = ch.versions[0];
+        this.play({ ...this.item, id: v.stream_id, url: v.url, radio: v.radio, img: v.stream_icon, title: ch.label, version: v,
+          list: hit.list, index: hit.index, ...(hit.group ? { groupKey: hit.group.key, subtitle: hit.group.name } : {}) });
+      }, 1300);
     },
 
     zap(step) {
@@ -213,6 +362,11 @@
       if (!this.isOpen()) return;
       this.poke();
       const v = this.video, live = this.item && this.item.kind === 'live';
+      if (live && this.sideOpen()) { if (this.sideKey(e)) e.stopPropagation(); return; }
+      if (live && /^[0-9]$/.test(e.key) && !e.target.matches('input')) { e.preventDefault(); this.digit(e.key); return; }
+      if (live && e.key === 'Enter' && (document.activeElement === v || document.activeElement === document.body)) {
+        e.preventDefault(); e.stopPropagation(); this.openSide(); return;
+      }
       switch (e.key) {
         case 'Escape': case 'Backspace': case 'BrowserBack': case 'GoBack':
           e.preventDefault(); e.stopPropagation(); this.close(); break;
@@ -245,7 +399,10 @@
     close() {
       this.saveProgress();
       this.destroy();
+      const it = this.item;
       this.item = null;
+      this.side.classList.add('hidden');
+      if (it && it.kind === 'live') App.afterLive(it.groupKey, it.version && it.version.gkey);
       this.el.classList.add('hidden');
       document.body.classList.remove('playing');
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});

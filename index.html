@@ -74,11 +74,19 @@
       <div class="p-head"><div class="p-title"></div><div class="p-sub"></div></div>
       <div class="p-vers"></div>
       <div class="p-zap">
+        <button class="round-btn" data-act="fav" aria-label="Add to favorites"><span class="p-fav-icon">☆</span></button>
+        <button class="round-btn" data-act="list" aria-label="Channel list"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
         <button class="round-btn" data-act="prev" aria-label="Previous channel"><svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <button class="round-btn" data-act="next" aria-label="Next channel"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div>
     </div>
     <div class="p-epg"></div>
+    <div class="p-num hidden" aria-live="polite"></div>
+    <aside class="p-side hidden" aria-label="Channels">
+      <div class="p-side-col"><h4>Groups</h4><div class="p-groups"></div></div>
+      <div class="p-side-col wide"><h4 class="p-side-title"></h4><div class="p-chans"></div></div>
+      <p class="p-side-hint">OK: watch · ◀ ▶: groups / channels · Back: close</p>
+    </aside>
     <div class="p-spinner"><div class="loader"><span></span></div></div>
     <div class="p-error">
       <h3>Can’t play this</h3>

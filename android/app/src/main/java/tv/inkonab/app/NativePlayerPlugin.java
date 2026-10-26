@@ -7,6 +7,7 @@ import android.content.res.Configuration;
 
 import androidx.activity.result.ActivityResult;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -20,8 +21,9 @@ public class NativePlayerPlugin extends Plugin {
 
     @PluginMethod
     public void play(PluginCall call) {
+        // Live payloads carry every channel and can exceed the Intent size limit, so hand them over directly.
+        PlayerActivity.pending = call.getData().toString();
         Intent intent = new Intent(getContext(), PlayerActivity.class);
-        intent.putExtra(PlayerActivity.EXTRA, call.getData().toString());
         startActivityForResult(call, intent, "onClosed");
     }
 
@@ -43,8 +45,14 @@ public class NativePlayerPlugin extends Plugin {
             out.put("position", d.getDoubleExtra("position", 0));
             out.put("duration", d.getDoubleExtra("duration", 0));
             out.put("ended", d.getBooleanExtra("ended", false));
+            out.put("group", d.getIntExtra("group", 0));
             out.put("index", d.getIntExtra("index", 0));
             out.put("version", d.getIntExtra("version", 0));
+            try {
+                out.put("history", new JSArray(d.getStringExtra("history")));
+                out.put("fav", new JSObject(d.getStringExtra("fav")));
+            } catch (Exception ignored) {
+            }
         }
         call.resolve(out);
     }

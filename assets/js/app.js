@@ -26,7 +26,7 @@
   // Tags the provider puts in names, e.g. "FR - Title (2026) (VOSTFR) [4K-Q]".
   const TAG_NAMES = [
     [/^4K(-Q)?$|^UHD$/i, '4K'], [/^(\d{3,4})p$/i, m => m[1] + 'p'],
-    [/^VOSTFR$/i, 'VOSTFR'], [/^MULTI[ -]?AUDIO$/i, 'Multi-audio'], [/^MULTI[ -]?SUB$/i, 'Multi-sub'], [/^MULTI$/i, 'Multi'],
+    [/^VOSTFR$/i, 'VOSTFR'], [/^MULTI[ -]?AUDIO$/i, 'Multi-audio'], [/^(?:[A-Z]+ )?MULTI[ -]?SUB$/i, 'Multi-sub'], [/^MULTI$/i, 'Multi'],
     [/^(?:([A-Z]+) )?ENG[ -]SUB$/i, m => (m[1] ? m[1][0] + m[1].slice(1).toLowerCase() + ' · ' : '') + 'English subs'],
     [/^FHD$/i, '1080p'], [/^H\.?265$|^HEVC$/i, 'H265'],
     [/^L ?Q$/i, 'Low quality'], [/^HQ$/i, 'HQ'], [/^CAM$/i, 'CAM'], [/^REC$/i, 'Recording'], [/^Бг Аудио$/i, 'Bulgarian audio'],
@@ -50,7 +50,7 @@
       if (tag) { tags.push(tag); return ''; }
       return /^[A-Z]{2}$/.test(t) ? '' : all; // two-letter country of origin, e.g. (GB)
     });
-    s = s.replace(/[[(]/g, '').replace(/\s{2,}/g, ' ').trim();
+    s = s.replace(/\(\s*\)/g, '').replace(/\s{2,}/g, ' ').trim();
     const quality = tags.find(t => t in QUALITY_RANK) || '';
     return { title: s || String(raw || ''), lang, year, quality, tags: [...new Set(tags.filter(t => t !== quality))] };
   }
@@ -330,30 +330,134 @@
       return this.free;
     },
 
-    playFree(list, index, subtitle) {
+    // ---------- live catalog: every group, shared by the Live page and both players ----------
+    // Groups: free playlists first, then provider categories (quality-split ones merged).
+    liveCatalog() {
+      if (!this.data.liveCatalog) {
+        this.data.liveCatalog = (async () => {
+          const free = await this.loadFree();
+          const groups = [...new Set(free.map(c => c.source))].map(src => ({ key: '@free:' + src, name: src, free: true, channels: free.filter(c => c.source === src) }));
+          let catName = {};
+          if (this.api) {
+            const [channels, cats] = await Promise.all([this.loadLive(), this.loadCats('live')]);
+            const merged = new Map();
+            for (const c of cats) {
+              const key = liveCatKey(c.category_name);
+              let m = merged.get(key);
+              if (!m) merged.set(key, (m = { key, name: key, ids: new Set() }));
+              m.ids.add(String(c.category_id));
+            }
+            const catOf = Object.fromEntries([...merged.values()].flatMap(m => [...m.ids].map(id => [id, m.key])));
+            catName = Object.fromEntries(cats.map(c => [String(c.category_id), c.category_name]));
+            const perCat = {};
+            for (const c of this.allowed(channels)) {
+              const k = catOf[String(c.category_id)];
+              if (k) (perCat[k] || (perCat[k] = [])).push(c);
+            }
+            for (const m of merged.values()) if (perCat[m.key]) groups.push({ key: m.key, name: m.name, channels: uniq(perCat[m.key]) });
+          }
+          const byKey = new Map();
+          for (const g of groups) for (const c of g.channels) if (!byKey.has(c.gkey)) byKey.set(c.gkey, c);
+          return { groups, catName, byKey };
+        })();
+      }
+      return this.data.liveCatalog;
+    },
+
+    // Catalog groups plus the viewer's Favorites and Recently watched, pinned first.
+    async liveGroups() {
+      const cat = await this.liveCatalog();
+      const pick = keys => keys.map(k => cat.byKey.get(k)).filter(Boolean);
+      const fav = pick(this.favs('live')), recent = pick(this.recentLive());
+      return [
+        ...(fav.length ? [{ key: '@fav', name: 'Favorites', special: true, channels: fav }] : []),
+        ...(recent.length ? [{ key: '@recent', name: 'Recently watched', special: true, channels: recent }] : []),
+        ...cat.groups,
+      ];
+    },
+
+    // Play list[index]; group = {key, name} is what the player's channel list opens on.
+    playChannel(list, index, group = {}, version) {
       const ch = list[index];
-      Player.open({ kind: 'live', url: ch.url, radio: ch.radio, img: ch.stream_icon, title: ch.label, subtitle: subtitle || ch.source, version: ch, list, index });
+      const v = version || ch.versions[0];
+      Player.open({
+        kind: 'live', id: v.stream_id, url: v.url, radio: v.radio, img: v.stream_icon, title: ch.label,
+        subtitle: group.name || ch.source || '', version: v, list, index, groupKey: group.key,
+      });
     },
 
-    // One titled row of channel tiles per free playlist; click plays (index into `list`).
-    freeRows(list) {
-      const sources = [...new Set(list.map(c => c.source))];
-      return sources.map(src => {
-        const [a, ...b] = src.split(' ');
-        return `<section class="row free-row"><h2><b>${esc(a)}</b> ${esc(b.join(' '))} <small class="free-note">Free · Live TV &amp; radio</small></h2>
-          <div class="row-scroll">${list.map((c, i) => c.source !== src ? '' : `
-            <button class="tile${c.radio ? ' is-radio' : ''}" data-free="${i}">
-              <span class="tile-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}<span class="ph">${esc(c.label)}</span><span class="play">${ICONS.play}</span></span>
-              <span class="tile-name">${esc(c.label)}${c.radio ? ' <span class="chip">Radio</span>' : ''}</span>
-            </button>`).join('')}</div></section>`;
-      }).join('');
+    // Called by both players when live playback ends: reopen Live TV on what was watched.
+    afterLive(groupKey, gkey) {
+      if (groupKey && !groupKey.startsWith('@now')) this.liveCat = groupKey;
+      this.liveFocus = gkey;
+      if (this.view === 'live') this.route();
     },
 
-    async renderFree(slot) {
-      const list = await this.loadFree();
-      if (!slot.isConnected || !list.length) return;
-      slot.innerHTML = this.freeRows(list);
-      slot.onclick = e => { const b = e.target.closest('[data-free]'); if (b) this.playFree(list, Number(b.dataset.free)); };
+    // A titled row of channel tiles; click plays that channel with the row as its zapping list.
+    channelRow(title, list, group, note = '') {
+      if (!list.length) return '';
+      const [a, ...b] = title.split(' ');
+      return `<section class="row free-row" data-group="${esc(group.key)}"><h2><b>${esc(a)}</b> ${esc(b.join(' '))}${note ? ` <small class="free-note">${esc(note)}</small>` : ''}</h2>
+        <div class="row-scroll">${list.map((c, i) => `
+          <button class="tile${c.radio ? ' is-radio' : ''}" data-ch="${i}">
+            <span class="tile-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}<span class="ph">${esc(c.label)}</span><span class="play">${ICONS.play}</span></span>
+            <span class="tile-name">${this.isFav('live', c.gkey) ? '<span class="fav-star">★</span>' : ''}${esc(c.label)}${c.radio ? ' <span class="chip">Radio</span>' : ''}</span>
+          </button>`).join('')}</div></section>`;
+    },
+
+    bindChannelRows(slot, rows) {
+      slot.onclick = e => {
+        const b = e.target.closest('[data-ch]');
+        const sec = b && b.closest('[data-group]');
+        const row = sec && rows.find(r => r.group.key === sec.dataset.group);
+        if (row) this.playChannel(row.list, Number(b.dataset.ch), row.group);
+      };
+    },
+
+    // Free playlists (sign-in screen and Home), plus Favorite / Recent channels on Home.
+    async renderFree(slot, withMine = false) {
+      const groups = withMine ? await this.liveGroups().catch(() => []) : (await this.liveCatalog()).groups.filter(g => g.free);
+      if (!slot.isConnected) return;
+      const rows = groups.filter(g => g.free || (withMine && g.special)).map(g => ({ group: g, list: g.channels }));
+      slot.innerHTML = rows.map(r => this.channelRow(
+        r.group.key === '@fav' ? 'Favorite channels' : r.group.key === '@recent' ? 'Recently watched channels' : r.group.name,
+        r.list, r.group, r.group.free ? 'Free · Live TV & radio' : '')).join('');
+      this.bindChannelRows(slot, rows);
+    },
+
+    // ---------- favorites & recently watched ----------
+    // fav: { movie: [gkey], series: [gkey], live: [gkey] } — gkeys cover every version of a title/channel.
+    favs(kind) { return (Store.get('fav', {})[kind]) || []; },
+    isFav(kind, key) { return !!key && this.favs(kind).includes(key); },
+    setFav(kind, key, on) {
+      const all = Store.get('fav', {});
+      const list = (all[kind] || []).filter(k => k !== key);
+      if (on) list.unshift(key);
+      all[kind] = list.slice(0, 500);
+      Store.set('fav', all);
+    },
+    toggleFav(kind, key, name) {
+      const on = !this.isFav(kind, key);
+      this.setFav(kind, key, on);
+      this.toast(on ? `★ ${name || 'Added'} — added to ${kind === 'live' ? 'Favorites' : 'My List'}` : `Removed from ${kind === 'live' ? 'Favorites' : 'My List'}`);
+      return on;
+    },
+    recentLive() { return Store.get('recentLive', []); },
+    pushRecent(gkey) {
+      if (!gkey) return;
+      Store.set('recentLive', [gkey, ...this.recentLive().filter(k => k !== gkey)].slice(0, 30));
+    },
+
+    // Remote number keys: find a channel by its number, preferring the group being watched.
+    async findChannelByNum(num, list) {
+      const want = String(num);
+      const inList = (list || []).findIndex(c => String(c.num) === want);
+      if (inList >= 0) return { list, index: inList };
+      for (const g of (await this.liveCatalog()).groups) {
+        const i = g.channels.findIndex(c => String(c.num) === want);
+        if (i >= 0) return { list: g.channels, index: i, group: g };
+      }
+      return null;
     },
 
     // ---------- continue watching ----------
@@ -388,6 +492,7 @@
           ${item.img ? `<img loading="lazy" src="${esc(item.img)}" alt="">` : ''}
           ${series ? '<span class="badge">Series</span>' : ''}
           ${has4k ? '<span class="q">4K</span>' : ''}
+          ${this.isFav(item.kind, item.gkey) ? '<span class="fav-badge" title="In My List">★</span>' : ''}
           ${versions.length > 1 ? `<span class="vcount">${versions.length} versions</span>` : ''}
           <span class="play">${ICONS.play}</span>
         </span>
@@ -445,7 +550,11 @@
       }
       const topRated = movies.slice(0, 3000).filter(m => m.rating >= 7.5).slice(0, 30);
       const recentSeries = shows.slice(0, 30);
-      const index = new Map([...latest, ...topRated, ...recentSeries].map(i => [i.kind + i.id, i]));
+      // My List: favorite movies and series, newest first.
+      const byG = new Map([...movies, ...shows].map(i => [i.kind + i.gkey, i]));
+      const myList = Store.get('fav', {});
+      const mine = [...(myList.series || []).map(k => byG.get('series' + k)), ...(myList.movie || []).map(k => byG.get('movie' + k))].filter(Boolean);
+      const index = new Map([...latest, ...topRated, ...recentSeries, ...mine].map(i => [i.kind + i.id, i]));
 
       main.innerHTML = `
         <section class="hero" id="hero">
@@ -462,8 +571,9 @@
         </section>
         <div class="rows">
           ${this.row('Latest added', latest, 'first')}
-          <div id="freeSlot"></div>
           <div id="cwSlot"></div>
+          ${this.row('My List', mine)}
+          <div id="freeSlot"></div>
           <div id="popSlot"></div>
           ${this.row('Top rated', topRated)}
           ${this.row('New episodes', recentSeries)}
@@ -474,7 +584,7 @@
       $('[data-hero="play"]', main).addEventListener('click', () => this.heroItem && (this.heroItem.kind === 'series' ? this.openSeries(this.heroItem) : this.openMovie(this.heroItem, true)));
       $('[data-hero="info"]', main).addEventListener('click', () => this.heroItem && (this.heroItem.kind === 'series' ? this.openSeries(this.heroItem) : this.openMovie(this.heroItem)));
       this.renderContinue();
-      this.renderFree($('#freeSlot', main));
+      this.renderFree($('#freeSlot', main), true);
       if (latest[0]) this.setHero(latest[0]);
 
       // TMDB-ranked rows arrive a moment later so they never hold up the page.
@@ -550,8 +660,10 @@
       const byId = new Map(items.map(i => [i.kind + i.id, i]));
       const label = kind === 'movie' ? 'Movies' : 'Series';
       const latest = uniq(items);
+      const byGkey = new Map(latest.map(i => [i.gkey, i]));
+      const mine = () => this.favs(kind).map(k => byGkey.get(k)).filter(Boolean);
       const virtual = { '': latest, '@top': picks.byDate, '@popular': picks.byPop };
-      const titles = { '': `<b>Latest</b> ${label.toLowerCase()}`, '@top': `<b>Top</b> picks`, '@popular': `<b>Most</b> watched` };
+      const titles = { '': `<b>Latest</b> ${label.toLowerCase()}`, '@top': `<b>Top</b> picks`, '@popular': `<b>Most</b> watched`, '@fav': `<b>My</b> List` };
       const startCat = picks.byDate.length ? '@top' : '';
 
       main.innerHTML = `
@@ -560,6 +672,7 @@
           <aside class="cats">
             <input class="field" type="search" placeholder="Filter categories" id="catFilter">
             <div class="cat-list" id="catList">
+              <button class="cat special" data-cat="@fav">★ My List <span>${mine().length}</span></button>
               ${picks.byDate.length ? `
               <button class="cat special" data-cat="@top">Top picks <span>${picks.byDate.length}</span></button>
               <button class="cat special" data-cat="@popular">Most watched <span>${picks.byPop.length}</span></button>` : ''}
@@ -588,14 +701,14 @@
         shown += slice.length;
       };
       const show = (cat, name) => {
-        let list = cat in virtual ? virtual[cat] : uniq(items.filter(i => i.cat === cat));
+        let list = cat === '@fav' ? mine() : cat in virtual ? virtual[cat] : uniq(items.filter(i => i.cat === cat));
         const s = sortSel.value;
         if (s === 'name') list = [...list].sort((a, b) => a.name.localeCompare(b.name));
         else if (s === 'rating') list = [...list].sort((a, b) => b.rating - a.rating);
         else if (s === 'added') list = [...list].sort((a, b) => b.added - a.added);
         current = list; shown = 0; grid.innerHTML = '';
         $('#gridTitle', main).innerHTML = titles[cat] || esc(name);
-        if (!list.length) grid.innerHTML = '<div class="empty"><p>Nothing here yet.</p></div>';
+        if (!list.length) grid.innerHTML = `<div class="empty"><p>${cat === '@fav' ? 'Nothing in My List yet. Open a title and choose “☆ My List” to add it here.' : 'Nothing here yet.'}</p></div>`;
         more();
       };
 
@@ -682,37 +795,16 @@
     // ---------- live ----------
     async renderLive(main) {
       this.setBackdrop('');
-      const [channels, cats, free] = await Promise.all([this.loadLive(), this.loadCats('live'), this.loadFree()]);
-      const list = this.allowed(channels);
-
-      // Merge quality-split categories; each merged category lists every channel once.
-      const merged = new Map();
-      for (const c of cats) {
-        const key = liveCatKey(c.category_name);
-        let m = merged.get(key);
-        if (!m) merged.set(key, (m = { key, name: key, ids: new Set() }));
-        m.ids.add(String(c.category_id));
-      }
-      const catOf = Object.fromEntries([...merged.values()].flatMap(m => [...m.ids].map(id => [id, m.key])));
-      const catName = Object.fromEntries(cats.map(c => [String(c.category_id), c.category_name]));
-      const perCat = {};
-      for (const c of list) {
-        const k = catOf[String(c.category_id)];
-        if (k) (perCat[k] || (perCat[k] = [])).push(c);
-      }
-      const usable = [...merged.values()].filter(m => perCat[m.key]);
-      for (const m of usable) m.channels = uniq(perCat[m.key]);
-      // Free playlists (MBC PLAY) are pinned first.
-      const freeCats = [...new Set(free.map(c => c.source))].map(src => ({ key: '@free:' + src, name: src, free: true, channels: free.filter(c => c.source === src) }));
-      for (const f of freeCats) merged.set(f.key, f);
-      usable.unshift(...freeCats);
+      const [groups, cat] = await Promise.all([this.liveGroups(), this.liveCatalog()]);
+      const byKey = new Map(groups.map(g => [g.key, g]));
+      const catName = cat.catName;
 
       main.innerHTML = `
         <div class="live">
           <aside class="cats">
             <input class="field" type="search" placeholder="Filter categories" id="catFilter">
             <div class="cat-list" id="catList">
-              ${usable.map(m => `<button class="cat${m.free ? ' special' : ''}" data-cat="${esc(m.key)}" data-name="${esc(fold(m.name))}">${esc(m.name)} <span>${m.channels.length}</span></button>`).join('')}
+              ${groups.map(g => `<button class="cat${g.free || g.special ? ' special' : ''}" data-cat="${esc(g.key)}" data-name="${esc(fold(g.name))}">${g.key === '@fav' ? '★ ' : ''}${esc(g.name)} <span>${g.channels.length}</span></button>`).join('')}
             </div>
           </aside>
           <section class="channels">
@@ -723,20 +815,22 @@
         </div>`;
 
       const qualities = ch => [...new Set(ch.versions.map(v => v.quality || 'SD'))];
-      let current = [];
+      let current = [], group = null;
       const chList = $('#chList', main);
-      const renderChannels = (key, q = '') => {
-        const cat = merged.get(key);
-        current = cat.channels.filter(c => !q || c.versions.some(v => v.key.includes(q)));
-        $('#chTitle', main).textContent = cat.name;
-        chList.innerHTML = current.map((c, i) => `
+      const rowHtml = (c, i) => `
           <button class="ch" data-i="${i}">
             <span class="ch-num">${esc(c.num)}</span>
             <span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}</span>
             <span class="ch-name">${esc(c.label)}</span>
+            ${this.isFav('live', c.gkey) ? '<span class="fav-star" title="Favorite">★</span>' : ''}
             <span class="ch-q">${c.url ? (c.radio ? '<span class="chip">Radio</span>' : '') : qualities(c).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</span>
             ${c.versions.some(v => Number(v.tv_archive)) ? '<span class="chip">Catch-up</span>' : ''}
-          </button>`).join('') || '<div class="empty"><p>No channels.</p></div>';
+          </button>`;
+      const renderChannels = (key, q = '') => {
+        group = byKey.get(key);
+        current = group.channels.filter(c => !q || c.versions.some(v => v.key.includes(q)));
+        $('#chTitle', main).textContent = group.name;
+        chList.innerHTML = current.map(rowHtml).join('') || '<div class="empty"><p>No channels.</p></div>';
       };
       const pick = b => {
         $$('.cat', main).forEach(c => c.classList.toggle('active', c === b));
@@ -755,31 +849,37 @@
         if (b) renderChannels(b.dataset.cat, fold(e.target.value));
       }, 150));
 
-      const play = (index, version) => {
-        const ch = current[index];
-        if (ch.url) return this.playFree(current, index, $('#chTitle', main).textContent);
-        const v = version || ch.versions[0];
-        Player.open({
-          kind: 'live', id: v.stream_id, title: ch.label, subtitle: $('#chTitle', main).textContent, version: v, list: current, index,
-          onZap: c => { const btn = chList.querySelector(`[data-i="${current.indexOf(c)}"]`); btn && btn.focus({ preventScroll: true }); },
-        });
-      };
+      const play = (index, version) => this.playChannel(current, index, group, version);
 
       const guide = $('#guide', main);
+      const favBtn = ch => `<button class="btn ghost sm fav-btn" data-fav>${this.isFav('live', ch.gkey) ? '★ In Favorites' : '☆ Add to Favorites'}</button>`;
+      const bindFav = (ch, index) => {
+        const b = $('[data-fav]', guide);
+        b && b.addEventListener('click', () => {
+          this.toggleFav('live', ch.gkey, ch.label);
+          b.outerHTML = favBtn(ch);
+          bindFav(ch, index);
+          const row = chList.querySelector(`[data-i="${index}"]`);
+          if (row) row.outerHTML = rowHtml(ch, index);
+          $('[data-fav]', guide).focus();
+        });
+      };
       const showGuide = debounce(async index => {
         const ch = current[index];
+        const head = `<div class="guide-head">${ch.stream_icon ? `<img src="${esc(ch.stream_icon)}" alt="">` : ''}<h3>${esc(ch.label)}</h3></div>${favBtn(ch)}`;
         if (ch.url) {
-          guide.innerHTML = `<div class="guide-head">${ch.stream_icon ? `<img src="${esc(ch.stream_icon)}" alt="">` : ''}<h3>${esc(ch.label)}</h3></div>
-            <div class="guide-empty">${ch.radio ? 'Live radio' : 'Live TV'} from ${esc(ch.source)} — free, no guide information.</div>`;
+          guide.innerHTML = `${head}<div class="guide-empty">${ch.radio ? 'Live radio' : 'Live TV'} from ${esc(ch.source)} — free, no guide information.</div>`;
+          bindFav(ch, index);
           return;
         }
         const epgSource = ch.versions.find(v => v.epg_channel_id) || ch.versions[0];
-        guide.innerHTML = `<div class="guide-head">${ch.stream_icon ? `<img src="${esc(ch.stream_icon)}" alt="">` : ''}<h3>${esc(ch.label)}</h3></div>
+        guide.innerHTML = `${head}
           ${ch.versions.length > 1 ? `<div class="guide-vers"><h4>Versions <span class="muted">${ch.versions.length}</span></h4>
             ${ch.versions.map((v, vi) => `<button class="gver" data-v="${vi}">
               <span class="chip">${esc(v.quality || 'SD')}</span>${v.tags.map(t => `<span class="chip">${esc(t)}</span>`).join('')}
               <small>${esc(catName[String(v.category_id)] || '')}</small>${ICONS.play}</button>`).join('')}</div>` : ''}
           <div class="loader small"><span></span></div>`;
+        bindFav(ch, index);
         $$('.gver', guide).forEach(b => b.addEventListener('click', () => play(index, ch.versions[b.dataset.v])));
         let epg = [];
         try { epg = await this.api.shortEpg(epgSource.stream_id, 8); } catch {}
@@ -798,8 +898,16 @@
       chList.addEventListener('focusin', e => { const b = e.target.closest('.ch'); if (b) { this.guideFor = current[b.dataset.i]; showGuide(Number(b.dataset.i)); } });
       chList.addEventListener('click', e => { const b = e.target.closest('.ch'); if (b) play(Number(b.dataset.i)); });
 
+      // Reopen on the group (and channel) watched last.
       const start = (this.liveCat && $(`.cat[data-cat="${CSS.escape(this.liveCat)}"]`, main)) || $('.cat', main);
-      if (start) { pick(start); start.focus({ preventScroll: true }); start.scrollIntoView({ block: 'nearest' }); }
+      if (!start) return;
+      pick(start);
+      start.scrollIntoView({ block: 'nearest' });
+      const at = this.liveFocus ? current.findIndex(c => c.gkey === this.liveFocus) : -1;
+      this.liveFocus = null;
+      const target = at >= 0 ? chList.querySelector(`[data-i="${at}"]`) : start;
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ block: 'center' });
     },
 
     // ---------- modal ----------
@@ -890,6 +998,20 @@
       extra.prepend(box);
     },
 
+    // "☆ My List" toggle on a details page; refreshes the poster star wherever the card is shown.
+    myListBtn(m, item) {
+      const b = document.createElement('button');
+      b.className = 'btn ghost fav-btn';
+      const paint = () => { b.innerHTML = this.isFav(item.kind, item.gkey) ? '<span>★ In My List</span>' : '<span>☆ My List</span>'; };
+      paint();
+      b.addEventListener('click', () => {
+        this.toggleFav(item.kind, item.gkey, item.name);
+        paint();
+        $$(`.card[data-kind="${item.kind}"][data-id="${item.id}"]`).forEach(c => { c.outerHTML = this.card(item); });
+      });
+      $('.detail-actions', m).appendChild(b);
+    },
+
     trailerBtn(m, key) {
       if (!key) return;
       const b = document.createElement('button');
@@ -934,6 +1056,7 @@
            <button class="btn ghost" data-a="start">${ICONS.restart}<span>From start</span></button>`
         : `<button class="btn primary" data-a="start">${ICONS.play}<span>Play</span></button>`;
       this.trailerBtn(m, extra.trailer);
+      this.myListBtn(m, item);
       actions.addEventListener('click', e => {
         const a = e.target.closest('[data-a]');
         if (!a) return;
@@ -971,6 +1094,7 @@
       if (!seasons.length) {
         actions.innerHTML = '<p class="muted">No episodes available yet.</p>';
         this.trailerBtn(m, extra.trailer);
+        this.myListBtn(m, item);
         this.renderVersions(m, item, v => { if (v !== item) this.openSeries(v); });
         return;
       }
@@ -1003,6 +1127,7 @@
       actions.innerHTML = `<button class="btn primary" data-a="play">${ICONS.play}<span>${resumeEp ? 'Resume ' + epEntry(resumeEp).subtitle.split(' — ')[0] : 'Play S' + startEp.season + ' · E' + startEp.episode_num}</span></button>`;
       $('[data-a="play"]', actions).addEventListener('click', () => playEp(startEp, !!resumeEp));
       this.trailerBtn(m, extra.trailer);
+      this.myListBtn(m, item);
 
       const ex = $('.detail-extra', m);
       ex.insertAdjacentHTML('afterbegin', `
@@ -1068,8 +1193,7 @@
         ].filter(Boolean).join('') : '<p class="muted center">No results.</p>';
         res.onclick = e => {
           const ch = e.target.closest('[data-live]');
-          if (ch && lv[ch.dataset.live].url) { this.playFree(lv, Number(ch.dataset.live), 'Search'); return; }
-          if (ch) { const index = Number(ch.dataset.live); const v = lv[index].versions[0]; Player.open({ kind: 'live', id: v.stream_id, title: lv[index].label, subtitle: 'Search', version: v, list: lv, index }); }
+          if (ch) this.playChannel(lv, Number(ch.dataset.live), { key: '@now:search', name: 'Search' });
         };
       }, 250);
       q.addEventListener('input', run);
@@ -1117,7 +1241,7 @@
       const save = (k, v) => { Settings[k] = v; Settings.save(); };
       $('#setRelay', m).addEventListener('change', e => save('relay', e.target.value.trim()));
       $('#setFormat', m).addEventListener('change', e => save('liveFormat', e.target.value));
-      const resetPicks = () => { delete this.data.moviePicks; delete this.data.seriesPicks; };
+      const resetPicks = () => { delete this.data.moviePicks; delete this.data.seriesPicks; delete this.data.liveCatalog; };
       $('#setLang', m).addEventListener('change', e => { save('tmdbLang', e.target.value); TMDB.cache.clear(); resetPicks(); });
       $('#setAdult', m).addEventListener('change', e => { save('showAdult', e.target.checked); resetPicks(); this.route(); });
       $('#testRelay', m).addEventListener('click', async () => {
