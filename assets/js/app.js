@@ -143,6 +143,7 @@
       $('#app').classList.add('hidden');
       $('#login').classList.remove('hidden');
       $('#loginError').textContent = error || '';
+      this.renderFree($('#freeLogin'));
       const creds = Store.get('creds');
       if (creds) $('#loginUser').value = creds.u;
       setTimeout(() => ($('#loginUser').value ? $('#loginPass') : $('#loginUser')).focus(), 50);
@@ -314,6 +315,47 @@
       })().catch(() => ({ byDate: [], byPop: [] })));
     },
 
+    // ---------- free playlists (MBC PLAY) — available signed in or not ----------
+    loadFree() {
+      if (!this.free) {
+        this.free = Promise.all((CFG.freePlaylists || []).map(p =>
+          M3U.load(p.url).then(list => list.map((c, i) => {
+            const ch = { num: i + 1, name: c.name, label: c.name, stream_icon: c.logo, url: c.url, radio: c.radio, source: p.name,
+              quality: '', tags: [], key: fold(c.name), gkey: 'free:' + p.name + ':' + fold(c.name) };
+            ch.versions = [ch];
+            return ch;
+          })).catch(err => { console.warn('[free playlist]', p.url, err); return []; })
+        )).then(lists => lists.flat());
+      }
+      return this.free;
+    },
+
+    playFree(list, index, subtitle) {
+      const ch = list[index];
+      Player.open({ kind: 'live', url: ch.url, radio: ch.radio, img: ch.stream_icon, title: ch.label, subtitle: subtitle || ch.source, version: ch, list, index });
+    },
+
+    // One titled row of channel tiles per free playlist; click plays (index into `list`).
+    freeRows(list) {
+      const sources = [...new Set(list.map(c => c.source))];
+      return sources.map(src => {
+        const [a, ...b] = src.split(' ');
+        return `<section class="row free-row"><h2><b>${esc(a)}</b> ${esc(b.join(' '))} <small class="free-note">Free · Live TV &amp; radio</small></h2>
+          <div class="row-scroll">${list.map((c, i) => c.source !== src ? '' : `
+            <button class="tile${c.radio ? ' is-radio' : ''}" data-free="${i}">
+              <span class="tile-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}<span class="ph">${esc(c.label)}</span><span class="play">${ICONS.play}</span></span>
+              <span class="tile-name">${esc(c.label)}${c.radio ? ' <span class="chip">Radio</span>' : ''}</span>
+            </button>`).join('')}</div></section>`;
+      }).join('');
+    },
+
+    async renderFree(slot) {
+      const list = await this.loadFree();
+      if (!slot.isConnected || !list.length) return;
+      slot.innerHTML = this.freeRows(list);
+      slot.onclick = e => { const b = e.target.closest('[data-free]'); if (b) this.playFree(list, Number(b.dataset.free)); };
+    },
+
     // ---------- continue watching ----------
     cw() { return Store.get('cw', []); },
     cwGet(key) { return this.cw().find(e => e.key === key); },
@@ -420,6 +462,7 @@
         </section>
         <div class="rows">
           ${this.row('Latest added', latest, 'first')}
+          <div id="freeSlot"></div>
           <div id="cwSlot"></div>
           <div id="popSlot"></div>
           ${this.row('Top rated', topRated)}
@@ -431,6 +474,7 @@
       $('[data-hero="play"]', main).addEventListener('click', () => this.heroItem && (this.heroItem.kind === 'series' ? this.openSeries(this.heroItem) : this.openMovie(this.heroItem, true)));
       $('[data-hero="info"]', main).addEventListener('click', () => this.heroItem && (this.heroItem.kind === 'series' ? this.openSeries(this.heroItem) : this.openMovie(this.heroItem)));
       this.renderContinue();
+      this.renderFree($('#freeSlot', main));
       if (latest[0]) this.setHero(latest[0]);
 
       // TMDB-ranked rows arrive a moment later so they never hold up the page.
@@ -638,7 +682,7 @@
     // ---------- live ----------
     async renderLive(main) {
       this.setBackdrop('');
-      const [channels, cats] = await Promise.all([this.loadLive(), this.loadCats('live')]);
+      const [channels, cats, free] = await Promise.all([this.loadLive(), this.loadCats('live'), this.loadFree()]);
       const list = this.allowed(channels);
 
       // Merge quality-split categories; each merged category lists every channel once.
@@ -658,13 +702,17 @@
       }
       const usable = [...merged.values()].filter(m => perCat[m.key]);
       for (const m of usable) m.channels = uniq(perCat[m.key]);
+      // Free playlists (MBC PLAY) are pinned first.
+      const freeCats = [...new Set(free.map(c => c.source))].map(src => ({ key: '@free:' + src, name: src, free: true, channels: free.filter(c => c.source === src) }));
+      for (const f of freeCats) merged.set(f.key, f);
+      usable.unshift(...freeCats);
 
       main.innerHTML = `
         <div class="live">
           <aside class="cats">
             <input class="field" type="search" placeholder="Filter categories" id="catFilter">
             <div class="cat-list" id="catList">
-              ${usable.map(m => `<button class="cat" data-cat="${esc(m.key)}" data-name="${esc(fold(m.name))}">${esc(m.name)} <span>${m.channels.length}</span></button>`).join('')}
+              ${usable.map(m => `<button class="cat${m.free ? ' special' : ''}" data-cat="${esc(m.key)}" data-name="${esc(fold(m.name))}">${esc(m.name)} <span>${m.channels.length}</span></button>`).join('')}
             </div>
           </aside>
           <section class="channels">
@@ -686,7 +734,7 @@
             <span class="ch-num">${esc(c.num)}</span>
             <span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}</span>
             <span class="ch-name">${esc(c.label)}</span>
-            <span class="ch-q">${qualities(c).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</span>
+            <span class="ch-q">${c.url ? (c.radio ? '<span class="chip">Radio</span>' : '') : qualities(c).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</span>
             ${c.versions.some(v => Number(v.tv_archive)) ? '<span class="chip">Catch-up</span>' : ''}
           </button>`).join('') || '<div class="empty"><p>No channels.</p></div>';
       };
@@ -709,6 +757,7 @@
 
       const play = (index, version) => {
         const ch = current[index];
+        if (ch.url) return this.playFree(current, index, $('#chTitle', main).textContent);
         const v = version || ch.versions[0];
         Player.open({
           kind: 'live', id: v.stream_id, title: ch.label, subtitle: $('#chTitle', main).textContent, version: v, list: current, index,
@@ -719,6 +768,11 @@
       const guide = $('#guide', main);
       const showGuide = debounce(async index => {
         const ch = current[index];
+        if (ch.url) {
+          guide.innerHTML = `<div class="guide-head">${ch.stream_icon ? `<img src="${esc(ch.stream_icon)}" alt="">` : ''}<h3>${esc(ch.label)}</h3></div>
+            <div class="guide-empty">${ch.radio ? 'Live radio' : 'Live TV'} from ${esc(ch.source)} — free, no guide information.</div>`;
+          return;
+        }
         const epgSource = ch.versions.find(v => v.epg_channel_id) || ch.versions[0];
         guide.innerHTML = `<div class="guide-head">${ch.stream_icon ? `<img src="${esc(ch.stream_icon)}" alt="">` : ''}<h3>${esc(ch.label)}</h3></div>
           ${ch.versions.length > 1 ? `<div class="guide-vers"><h4>Versions <span class="muted">${ch.versions.length}</span></h4>
@@ -1002,18 +1056,19 @@
         const term = fold(q.value.trim());
         if (term.length < 2) { res.innerHTML = '<p class="muted center">Start typing to search.</p>'; return; }
         res.innerHTML = '<div class="loader small"><span></span></div>';
-        const [vod, series, live] = await Promise.all([this.loadVod(), this.loadSeries(), this.loadLive()]);
+        const [vod, series, live, free] = await Promise.all([this.loadVod(), this.loadSeries(), this.loadLive(), this.loadFree()]);
         if (fold(q.value.trim()) !== term) return;
         const match = list => list.filter(i => i.key.includes(term)).slice(0, 36);
-        const mv = match(uniq(this.allowed(vod))), sv = match(uniq(series)), lv = match(uniq(this.allowed(live))).slice(0, 24);
+        const mv = match(uniq(this.allowed(vod))), sv = match(uniq(series)), lv = match(uniq([...free, ...this.allowed(live)])).slice(0, 24);
         byId = new Map([...mv, ...sv].map(i => [i.kind + i.id, i]));
         res.innerHTML = (mv.length || sv.length || lv.length) ? [
-          lv.length && `<h3>Channels</h3><div class="ch-grid">${lv.map((c, i) => `<button class="ch" data-live="${i}"><span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}</span><span class="ch-name">${esc(c.label)}</span><span class="ch-q">${[...new Set(c.versions.map(v => v.quality || 'SD'))].map(t => `<span class="chip">${esc(t)}</span>`).join('')}</span></button>`).join('')}</div>`,
+          lv.length && `<h3>Channels</h3><div class="ch-grid">${lv.map((c, i) => `<button class="ch" data-live="${i}"><span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}</span><span class="ch-name">${esc(c.label)}</span><span class="ch-q">${(c.url ? (c.radio ? ['Radio'] : []) : [...new Set(c.versions.map(v => v.quality || 'SD'))]).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</span></button>`).join('')}</div>`,
           mv.length && `<h3>Movies</h3><div class="grid">${mv.map(i => this.card(i)).join('')}</div>`,
           sv.length && `<h3>Series</h3><div class="grid">${sv.map(i => this.card(i)).join('')}</div>`,
         ].filter(Boolean).join('') : '<p class="muted center">No results.</p>';
         res.onclick = e => {
           const ch = e.target.closest('[data-live]');
+          if (ch && lv[ch.dataset.live].url) { this.playFree(lv, Number(ch.dataset.live), 'Search'); return; }
           if (ch) { const index = Number(ch.dataset.live); const v = lv[index].versions[0]; Player.open({ kind: 'live', id: v.stream_id, title: lv[index].label, subtitle: 'Search', version: v, list: lv, index }); }
         };
       }, 250);

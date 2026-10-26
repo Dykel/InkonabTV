@@ -558,3 +558,43 @@ img.broken { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- free playlists (MBC PLAY) ---------- */
+.free-note { font: 500 .8rem var(--font); color: var(--accent); margin-left: 10px; letter-spacing: .02em; }
+.tile { flex: none; width: clamp(150px, 13vw, 230px); text-align: left; }
+.tile-logo {
+  position: relative; display: grid; place-items: center; aspect-ratio: 16 / 10;
+  border-radius: var(--radius); overflow: hidden;
+  background: radial-gradient(120% 120% at 30% 20%, #23434c, #0f1e23);
+  border: 1px solid var(--line); transition: transform .2s;
+}
+.tile-logo img { position: relative; z-index: 1; max-width: 72%; max-height: 70%; object-fit: contain; filter: drop-shadow(0 4px 14px rgba(0,0,0,.4)); }
+.tile-logo .ph { position: absolute; inset: 0; }
+.tile-logo img:not(.broken) + .ph { visibility: hidden; }
+.tile.is-radio .tile-logo { background: radial-gradient(120% 120% at 30% 20%, #4a3a10, #1a1406); }
+.tile-name { display: flex; gap: 8px; align-items: center; margin-top: 10px; font: 500 1rem var(--font-display); color: #d6e1e4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .play { z-index: 2; width: 50px; height: 50px; margin: -25px 0 0 -25px; }
+.tile:hover .tile-logo, .tile:focus-visible .tile-logo { transform: scale(1.05); }
+.tile:focus-visible { outline: none; }
+.tile:focus-visible .tile-logo { outline: 4px solid #fff; outline-offset: 4px; }
+.tile:hover .play, .tile:focus-visible .play { opacity: 1; transform: scale(1); }
+
+.login { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; gap: 28px; align-content: center; justify-items: center; }
+.login-free { width: min(1200px, 100%); min-width: 0; }
+.login-free:empty { display: none; }
+.login-free .row { margin: 0; }
+.login-free .row h2, .login-free .row-scroll { margin-left: 0; margin-right: 0; padding-left: 4px; padding-right: 4px; }
+.login-free .row h2 { text-align: center; }
+.login-free .row-scroll { justify-content: safe center; }
+
+/* radio: audio-only stream, show the station artwork */
+.p-radio { position: absolute; inset: 0; display: none; place-content: center; justify-items: center; gap: 22px; background: radial-gradient(80% 80% at 50% 40%, #2a2208, #000); pointer-events: none; }
+.player.radio .p-radio { display: grid; }
+.player.radio video { position: absolute; inset: auto 0 0 0; height: 64px; background: transparent; }
+.p-radio img { width: min(280px, 50vw); max-height: 40vh; object-fit: contain; border-radius: 24px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+.p-radio span { font: 600 .85rem var(--font-display); letter-spacing: .3em; text-transform: uppercase; color: var(--accent); }
+.eq { display: flex; gap: 6px; align-items: flex-end; height: 34px; }
+.eq i { width: 6px; border-radius: 3px; background: var(--accent); animation: eq 1s ease-in-out infinite; }
+.eq i:nth-child(2) { animation-delay: -.2s; } .eq i:nth-child(3) { animation-delay: -.5s; } .eq i:nth-child(4) { animation-delay: -.7s; } .eq i:nth-child(5) { animation-delay: -.35s; }
+@keyframes eq { 0%, 100% { height: 8px; } 50% { height: 34px; } }
+.player[data-state="loading"] .eq i, .player[data-state="error"] .eq i { animation-play-state: paused; }

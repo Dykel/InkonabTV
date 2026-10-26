@@ -160,6 +160,28 @@
     },
   };
 
+  // Minimal M3U parser: [{name, logo, group, url, radio}]
+  const M3U = {
+    async load(url) {
+      const text = await fetch(url, { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error('Playlist ' + r.status); return r.text(); });
+      const out = [];
+      let cur = null;
+      for (const raw of text.split(/\r?\n/)) {
+        const line = raw.trim();
+        if (line.startsWith('#EXTINF')) {
+          const attr = k => (line.match(new RegExp(k + '="([^"]*)"')) || [])[1] || '';
+          cur = { name: line.slice(line.lastIndexOf(',') + 1).trim(), logo: attr('tvg-logo'), group: attr('group-title') };
+        } else if (line && !line.startsWith('#') && cur) {
+          cur.url = line;
+          cur.radio = /radio/i.test(cur.group) || /\bradio\b|\bfm\b/i.test(cur.name) || /\/radio\.|fm\.m3u8$/i.test(line);
+          out.push(cur);
+          cur = null;
+        }
+      }
+      return out;
+    },
+  };
+
   function asArray(v) {
     if (Array.isArray(v)) return v;
     if (v && typeof v === 'object') return Object.values(v);
@@ -178,5 +200,6 @@
   window.Settings = Settings;
   window.Xtream = Xtream;
   window.TMDB = TMDB;
+  window.M3U = M3U;
   window.asArray = asArray;
 })();

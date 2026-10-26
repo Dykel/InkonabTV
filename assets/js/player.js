@@ -44,9 +44,15 @@
     play(item) {
       this.destroy();
       this.item = item;
-      const ext = item.kind === 'live' ? Settings.liveFormat : item.ext || 'mp4';
-      item.rawUrl = App.api.streamUrl(item.kind, item.id, ext);
-      const url = relay(item.rawUrl);
+      // item.url: a direct link from a free playlist (MBC PLAY); otherwise an Xtream stream.
+      const ext = item.url
+        ? ((item.url.match(/\.(m3u8|ts|mp4|mkv|mp3|aac)(?:\?|$)/i) || [])[1] || 'm3u8').toLowerCase()
+        : item.kind === 'live' ? Settings.liveFormat : item.ext || 'mp4';
+      item.rawUrl = item.url || App.api.streamUrl(item.kind, item.id, ext);
+      const url = item.url || relay(item.rawUrl);
+      this.el.classList.toggle('radio', !!item.radio);
+      const art = this.el.querySelector('.p-radio img');
+      if (item.radio && item.img) art.src = item.img; else art.removeAttribute('src');
       this.el.querySelector('.p-title').textContent = item.title || '';
       this.el.querySelector('.p-sub').textContent = item.subtitle || '';
       this.el.querySelector('.p-zap').classList.toggle('hidden', !item.list);
@@ -76,7 +82,7 @@
 
       if (item.kind !== 'live') {
         this.saveTimer = setInterval(() => this.saveProgress(), 5000);
-      } else {
+      } else if (!item.url) {
         this.loadEpg(item);
       }
     },
@@ -100,7 +106,7 @@
       const index = (it.index + step + it.list.length) % it.list.length;
       const ch = it.list[index];
       const v = (ch.versions || [ch])[0];
-      this.play({ ...it, id: v.stream_id, title: ch.label || ch.name, subtitle: it.subtitle, version: v, index });
+      this.play({ ...it, id: v.stream_id, url: v.url, radio: v.radio, img: v.stream_icon, title: ch.label || ch.name, subtitle: it.subtitle, version: v, index });
       if (it.onZap) it.onZap(ch);
     },
 
@@ -146,7 +152,7 @@
 
     fail(detail) {
       if (!this.item) return;
-      const mixed = location.protocol === 'https:' && !Settings.relay;
+      const mixed = !this.item.url && location.protocol === 'https:' && !Settings.relay;
       const msg = mixed
         ? 'This channel is sent over plain HTTP, which browsers block on an HTTPS site. Add a relay in Settings (see README) to play it here.'
         : 'The stream could not be played. It may be offline, or use a format your browser can’t decode (try the other live format in Settings, or open it in VLC).';

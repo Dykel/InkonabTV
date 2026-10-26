@@ -13,6 +13,11 @@ window.INKONAB_CONFIG = {
   // Users can also set it from Settings inside the app.
   relay: '',
 
+  // Free playlists that are always available, signed in or not (TV and radio).
+  freePlaylists: [
+    { name: 'MBC PLAY', url: 'https://raw.githubusercontent.com/Dykel/MBCPLAY/refs/heads/main/mbc.m3u' },
+  ],
+
   // TMDB v3 API key — used for backdrops, title logos, summaries, cast and trailers.
   tmdbKey: '6c337b22c291ab1d3ff5a86e17ef6f49',
 };

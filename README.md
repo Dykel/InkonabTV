@@ -6,6 +6,7 @@ A web player for InkonabTV (Xtream Codes) that runs entirely in the browser and 
 - **Home**: a large featured banner that follows the poster you're on, plus *Latest added*, *Continue Watching*, *Top rated* and *New episodes* rows.
 - **Live TV**: categories, a channel list, the TV guide (what's on now and next), and channel up/down in the player.
 - **Movies / Series**: every category with filtering and sorting, a details page (backdrop, cast, trailer from TMDB), seasons and episodes, resume where you stopped, and the next episode plays automatically.
+- **MBC PLAY** live TV and radio, free and always available — on the sign-in screen, on Home and pinned first in Live TV (add more playlists in `freePlaylists` in `config.js`).
 - **Search** across movies, series and channels.
 - Works with a mouse, a touch screen, or a keyboard/TV remote (arrow keys, Enter, Back).
 
@@ -38,6 +39,7 @@ The relay only accepts your provider's host (`ALLOWED_HOSTS` in the worker), so 
 | --- | --- |
 | `server` | Xtream server, `https://inkonabtv.ottb.xyz:443` |
 | `relay` | HTTPS relay URL (see above); leave empty to disable |
+| `freePlaylists` | M3U playlists anyone can watch without signing in (MBC PLAY) |
 | `tmdbKey` | TMDB v3 API key, used for artwork, summaries, cast and trailers |
 | `logo`, `icon` | Brand images |
 
