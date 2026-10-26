@@ -34,11 +34,50 @@
 
     // item: {kind, id, ext, title, subtitle, img, resumeAt, list, index, onProgress, onEnded}
     open(item) {
+      if (window.Native) return this.openNative(item);
       this.returnFocus = document.activeElement;
       this.el.classList.remove('hidden');
       document.body.classList.add('playing');
       this.play(item);
       this.el.querySelector('[data-act="close"]').focus({ preventScroll: true });
+    },
+
+    // Android app: hand playback to ExoPlayer (PlayerActivity). It plays HTTP streams and
+    // codecs browsers can't, so no relay is used. Live sends the whole list for zapping.
+    async openNative(item) {
+      const label = v => [v.quality || (v.url ? '' : 'SD'), ...(v.tags || [])].filter(Boolean).join(' · ');
+      const liveUrl = v => v.url || App.api.streamUrl('live', v.stream_id, Settings.liveFormat);
+      let payload;
+      if (item.kind === 'live') {
+        const list = item.list || [item.version || { stream_id: item.id, url: item.url, name: item.title, radio: item.radio, stream_icon: item.img }];
+        const index = item.list ? item.index : 0;
+        const cur = list[index];
+        payload = {
+          live: true, index,
+          version: Math.max(0, (cur.versions || [cur]).indexOf(item.version)),
+          channels: list.map(ch => ({
+            title: ch.label || ch.name || '', subtitle: item.subtitle || '', img: ch.stream_icon || '', radio: !!ch.radio,
+            versions: (ch.versions || [ch]).map(v => ({ url: liveUrl(v), label: label(v) })),
+          })),
+        };
+      } else {
+        payload = {
+          live: false, index: 0, version: 0, startAt: item.resumeAt > 5 ? item.resumeAt : 0,
+          channels: [{ title: item.title || '', subtitle: item.subtitle || '', img: item.img || '',
+            versions: [{ url: App.api.streamUrl(item.kind, item.id, item.ext || 'mp4'), label: '' }] }],
+        };
+      }
+      const back = document.activeElement;
+      let r = {};
+      try { r = await Native.player.play(payload); } catch (e) { App.toast('Can’t open the player'); console.warn('[native player]', e); }
+      if (item.kind !== 'live') {
+        if (r.duration > 0 && item.onProgress) item.onProgress(r.position, r.duration);
+        if (r.ended && item.onEnded) return item.onEnded();
+      } else if (item.list && item.onZap && item.list[r.index]) {
+        item.onZap(item.list[r.index]);
+      }
+      if (back && back.isConnected) back.focus({ preventScroll: true });
+      App.onPlayerClosed();
     },
 
     play(item) {

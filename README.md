@@ -45,6 +45,26 @@ The relay only accepts your provider's host (`ALLOWED_HOSTS` in the worker), so 
 
 In-app **Settings** also offer: live format (HLS or MPEG-TS), the language for TMDB info, showing adult categories, M3U/EPG links to copy, and signing out.
 
+## Android app (phones and Android TV / Google TV)
+
+The `android/` folder wraps the same web app in a native Android app (Capacitor), so it looks and works exactly like the website. One APK installs on phones, tablets, Android TV and Google TV boxes, and it shows up on the TV home screen with the InkonabTV banner.
+
+Differences from the website, all improvements:
+
+- Video plays in Android's native player (ExoPlayer) with FFmpeg audio. That means MKV, HEVC/H265 and Dolby AC3/EAC3/DTS audio work, and **no relay is needed** (plain-HTTP streams are allowed in the app).
+- The remote works everywhere: the D-pad moves around the app, **Back** closes dialogs or goes Home, and in live TV **▲/▼** (or CH+/CH−) change channel and **◀/▶** change quality.
+
+Build it (needs Node, Java 21 and the Android SDK):
+
+```bash
+npm install
+npm run apk
+```
+
+The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. To install it on an Android TV, enable *Developer options → USB/Network debugging* on the TV, then run `adb connect <tv-ip>` and `adb install -r app-debug.apk`. Or copy the APK to a USB stick and open it with a file manager.
+
+After changing the web app, run `npm run sync` (or `npm run apk`) so the Android app gets the new files.
+
 ## Run it on your computer
 
 ```bash

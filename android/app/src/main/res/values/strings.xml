@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">InkonabTV</string>
+    <string name="title_activity_main">InkonabTV</string>
+    <string name="package_name">tv.inkonab.app</string>
+    <string name="custom_url_scheme">tv.inkonab.app</string>
+</resources>

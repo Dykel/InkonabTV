@@ -585,7 +585,9 @@ img.broken { visibility: hidden; }
 .login-free .row { margin: 0; }
 .login-free .row h2, .login-free .row-scroll { margin-left: 0; margin-right: 0; padding-left: 4px; padding-right: 4px; }
 .login-free .row h2 { text-align: center; }
-.login-free .row-scroll { justify-content: safe center; }
+/* Centre the tiles when they fit; when they overflow, auto margins collapse so the first tile stays reachable. */
+.login-free .row-scroll > :first-child { margin-left: auto; }
+.login-free .row-scroll > :last-child { margin-right: auto; }
 
 /* radio: audio-only stream, show the station artwork */
 .p-radio { position: absolute; inset: 0; display: none; place-content: center; justify-items: center; gap: 22px; background: radial-gradient(80% 80% at 50% 40%, #2a2208, #000); pointer-events: none; }

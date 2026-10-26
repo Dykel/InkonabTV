@@ -1,0 +1,13 @@
+{
+  "appId": "tv.inkonab.app",
+  "appName": "InkonabTV",
+  "webDir": "build/www",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#05090b"
+  }
+}
