@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1518">
+  <meta name="referrer" content="no-referrer">
+  <title>InkonabTV</title>
+  <link rel="icon" type="image/svg+xml" href="https://raw.githubusercontent.com/Dykel/inkonab/refs/heads/main/icon.svg">
+  <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/Dykel/inkonab/refs/heads/main/icon.svg">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700&family=Saira:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+  <div id="bg" class="bg" aria-hidden="true"><div class="bg-img"></div><div class="bg-img"></div><div class="bg-shade"></div></div>
+
+  <div id="splash" class="splash hidden"><img data-logo alt=""><div class="loader"><span></span></div></div>
+
+  <!-- Sign in -->
+  <section id="login" class="login hidden">
+    <form id="loginForm" class="login-card" autocomplete="on">
+      <img class="login-logo" data-logo alt="">
+      <p class="login-sub">Sign in with your InkonabTV subscription</p>
+      <label class="lf"><span>Username</span><input class="field" id="loginUser" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+      <label class="lf"><span>Password</span><input class="field" id="loginPass" name="password" type="password" autocomplete="current-password" required></label>
+      <label class="remember"><input type="checkbox" id="loginRemember" checked> Keep me signed in on this device</label>
+      <p class="login-error" id="loginError" role="alert"></p>
+      <button class="btn primary wide-btn" id="loginBtn" type="submit">Sign in</button>
+    </form>
+  </section>
+
+  <!-- App -->
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <div class="nav-pill">
+        <button class="home-btn" data-view="home" aria-label="Home">
+          <svg viewBox="0 0 24 24"><path d="M3.5 10.6 12 3.8l8.5 6.8V19a1.6 1.6 0 0 1-1.6 1.6h-4.2v-5.4H9.3v5.4H5.1A1.6 1.6 0 0 1 3.5 19Z" fill="currentColor"/></svg>
+        </button>
+        <img class="brand" data-logo alt="">
+        <nav class="tabs">
+          <button class="tab" data-view="live">Live TV</button>
+          <button class="tab" data-view="movies">Movies</button>
+          <button class="tab" data-view="series">Series</button>
+        </nav>
+      </div>
+      <div class="top-right">
+        <span id="date" class="date"></span>
+        <button class="round-btn" id="searchBtn" aria-label="Search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.6-3.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <button class="round-btn" id="settingsBtn" aria-label="Settings">
+          <svg viewBox="0 0 24 24"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+        </button>
+        <button class="avatar" id="avatar" aria-label="Account"></button>
+      </div>
+    </header>
+    <main id="view"></main>
+  </div>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true"></div>
+
+  <!-- Player -->
+  <div id="player" class="player hidden" data-state="loading">
+    <video id="video" playsinline controls autoplay></video>
+    <div class="p-top">
+      <button class="round-btn" data-act="close" aria-label="Back">
+        <svg viewBox="0 0 24 24"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="p-head"><div class="p-title"></div><div class="p-sub"></div></div>
+      <div class="p-zap">
+        <button class="round-btn" data-act="prev" aria-label="Previous channel"><svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="round-btn" data-act="next" aria-label="Next channel"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+    </div>
+    <div class="p-epg"></div>
+    <div class="p-spinner"><div class="loader"><span></span></div></div>
+    <div class="p-error">
+      <h3>Can’t play this</h3>
+      <p class="p-error-msg"></p>
+      <div class="p-error-actions">
+        <button class="btn primary" data-act="retry">Try again</button>
+        <button class="btn ghost" data-act="settings">Open Settings</button>
+        <button class="btn ghost" data-act="copy">Copy link for VLC</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
+  <script src="config.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/player.js"></script>
+  <script src="assets/js/nav.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
