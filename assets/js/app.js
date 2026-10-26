@@ -204,7 +204,10 @@
       return this.data.series || (this.data.series = this.api.seriesList().then(list => list.map(fromSeries).sort((a, b) => b.added - a.added)));
     },
     loadLive() {
-      return this.data.live || (this.data.live = this.api.liveStreams().then(list => list.map(c => ({ ...c, key: fold(c.name), adult: Number(c.is_adult) === 1 }))));
+      // Channels named "✶⋆✶ … ✶⋆✶" are the provider's section dividers, not real channels.
+      return this.data.live || (this.data.live = this.api.liveStreams().then(list => list
+        .filter(c => !String(c.name || '').trim().startsWith('✶⋆✶'))
+        .map(c => ({ ...c, key: fold(c.name), adult: Number(c.is_adult) === 1 }))));
     },
     async loadCats(kind) {
       const key = kind + 'Cats';
