@@ -23,16 +23,47 @@
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   const fmtDur = secs => { secs = Math.round(secs); const h = Math.floor(secs / 3600), m = Math.round((secs % 3600) / 60); return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m} min`; };
 
+  // Tags the provider puts in names, e.g. "FR - Title (2026) (VOSTFR) [4K-Q]".
+  const TAG_NAMES = [
+    [/^4K(-Q)?$|^UHD$/i, '4K'], [/^(\d{3,4})p$/i, m => m[1] + 'p'],
+    [/^VOSTFR$/i, 'VOSTFR'], [/^MULTI[ -]?AUDIO$/i, 'Multi-audio'], [/^MULTI[ -]?SUB$/i, 'Multi-sub'], [/^MULTI$/i, 'Multi'],
+    [/^(?:([A-Z]+) )?ENG[ -]SUB$/i, m => (m[1] ? m[1][0] + m[1].slice(1).toLowerCase() + ' · ' : '') + 'English subs'],
+    [/^L ?Q$/i, 'Low quality'], [/^HQ$/i, 'HQ'], [/^CAM$/i, 'CAM'], [/^REC$/i, 'Recording'], [/^Бг Аудио$/i, 'Bulgarian audio'],
+  ];
+  const tagName = t => {
+    for (const [re, out] of TAG_NAMES) { const m = t.trim().match(re); if (m) return typeof out === 'function' ? out(m) : out; }
+    return '';
+  };
+  const QUALITY_RANK = { '4K': 0, '1080p': 1, '720p': 2, '480p': 3 };
+
   function parseName(raw) {
     let s = String(raw || '').trim();
-    let lang = '';
+    let lang = '', year = '';
+    const tags = [];
     const m = s.match(/^([A-Z]{2,4}(?:-[A-Z]{2})?)\s*[-|:]\s+/);
     if (m) { lang = m[1]; s = s.slice(m[0].length); }
-    const quality = (s.match(/\[(4K|UHD|FHD|HD|SD|\d{3,4}p)\]/i) || [])[1] || '';
-    const year = (s.match(/\((\d{4})\)/) || [])[1] || '';
-    s = s.replace(/\[[^\]]*\]/g, '').replace(/\((\d{4}|[A-Z]{2,7})\)/g, '').replace(/\s{2,}/g, ' ').trim();
-    return { title: s || String(raw || ''), lang, year, quality };
+    s = s.replace(/\[([^\]]*)(?:\]|$)/g, (_, t) => { t.split(/[/|,]/).map(tagName).forEach(x => x && tags.push(x)); return ''; });
+    s = s.replace(/\(([^)]*)\)/g, (all, t) => {
+      if (/^\d{4}$/.test(t)) { year = year || t; return ''; }
+      const tag = tagName(t);
+      if (tag) { tags.push(tag); return ''; }
+      return /^[A-Z]{2}$/.test(t) ? '' : all; // two-letter country of origin, e.g. (GB)
+    });
+    s = s.replace(/[[(]/g, '').replace(/\s{2,}/g, ' ').trim();
+    const quality = tags.find(t => t in QUALITY_RANK) || '';
+    return { title: s || String(raw || ''), lang, year, quality, tags: [...new Set(tags.filter(t => t !== quality))] };
   }
+
+  const LANG_NAMES = { QFR: 'French (Canada)', EX: 'Ex-Yugoslav', IN: 'Indian', SOM: 'Somali', PK: 'Pakistani', MA: 'Moroccan', AL: 'Albanian' };
+  let langNamer;
+  function langName(code) {
+    if (!code) return 'Original';
+    if (LANG_NAMES[code]) return LANG_NAMES[code];
+    try { langNamer = langNamer || new Intl.DisplayNames(['en'], { type: 'language' }); return langNamer.of(code.toLowerCase()) || code; } catch { return code; }
+  }
+
+  // Keep one entry per title (versions are grouped by TMDB id, see App.group).
+  const uniq = list => { const seen = new Set(); return list.filter(i => !seen.has(i.gkey) && seen.add(i.gkey)); };
 
   function firstImage(v) {
     if (Array.isArray(v)) return v[0] || '';
@@ -43,13 +74,13 @@
   // Normalise Xtream VOD / series entries into one card model.
   function fromVod(v) {
     const n = parseName(v.name);
-    return { kind: 'movie', id: v.stream_id, name: n.title, raw: v.name, lang: n.lang, year: n.year, quality: n.quality,
+    return { kind: 'movie', id: v.stream_id, name: n.title, raw: v.name, lang: n.lang, year: n.year, quality: n.quality, tags: n.tags,
       img: v.stream_icon || '', added: Number(v.added) || 0, rating: parseFloat(v.rating) || 0, tmdb: v.tmdb || v.tmdb_id || '',
       ext: v.container_extension || 'mp4', cat: String(v.category_id), adult: Number(v.is_adult) === 1, key: fold(v.name) };
   }
   function fromSeries(s) {
     const n = parseName(s.name);
-    return { kind: 'series', id: s.series_id, name: n.title, raw: s.name, lang: n.lang, year: n.year || (s.releaseDate || '').slice(0, 4), quality: n.quality,
+    return { kind: 'series', id: s.series_id, name: n.title, raw: s.name, lang: n.lang, year: n.year || (s.releaseDate || '').slice(0, 4), quality: n.quality, tags: n.tags,
       img: s.cover || '', added: Number(s.last_modified) || 0, rating: parseFloat(s.rating) || 0, tmdb: s.tmdb || '',
       plot: s.plot || '', genre: s.genre || '', backdrop: firstImage(s.backdrop_path), cat: String(s.category_id),
       adult: false, key: fold(s.name) };
@@ -198,10 +229,30 @@
 
     // ---------- data ----------
     loadVod() {
-      return this.data.vod || (this.data.vod = this.api.vodStreams().then(list => list.map(fromVod).sort((a, b) => b.added - a.added)));
+      return this.data.vod || (this.data.vod = this.api.vodStreams().then(list => this.group(list.map(fromVod).sort((a, b) => b.added - a.added))));
     },
     loadSeries() {
-      return this.data.series || (this.data.series = this.api.seriesList().then(list => list.map(fromSeries).sort((a, b) => b.added - a.added)));
+      return this.data.series || (this.data.series = this.api.seriesList().then(list => this.group(list.map(fromSeries).sort((a, b) => b.added - a.added))));
+    },
+
+    // Link every copy of the same title (other languages, 4K, MKV/MP4…) through item.versions,
+    // best first: info language, French, English, then by resolution.
+    group(list) {
+      const order = [Settings.tmdbLang.split('-')[0].toUpperCase(), 'FR', 'QFR', 'EN', ''];
+      const langRank = i => { const r = order.indexOf(i.lang); return r < 0 ? order.length : r; };
+      const rank = i => langRank(i) * 10 + (QUALITY_RANK[i.quality] ?? 5) + (i.tags.includes('Low quality') || i.tags.includes('CAM') ? 5 : 0);
+      const groups = new Map();
+      for (const i of list) {
+        i.gkey = i.tmdb && i.tmdb !== '0' ? 't' + i.tmdb : 'n' + fold(i.name) + i.year;
+        let g = groups.get(i.gkey);
+        if (!g) groups.set(i.gkey, (g = []));
+        g.push(i);
+      }
+      for (const g of groups.values()) {
+        g.sort((a, b) => rank(a) - rank(b) || b.added - a.added);
+        for (const i of g) i.versions = g;
+      }
+      return list;
     },
     loadLive() {
       // Channels named "✶⋆✶ … ✶⋆✶" are the provider's section dividers, not real channels.
@@ -227,17 +278,8 @@
       if (this.data[key]) return this.data[key];
       return (this.data[key] = (async () => {
         const [all, top] = await Promise.all([kind === 'movie' ? this.loadVod() : this.loadSeries(), TMDB.top(kind === 'movie' ? 'movie' : 'tv')]);
-        // Prefer the info language, then French (most of this catalog), English, then untagged copies.
-        const order = [Settings.tmdbLang.split('-')[0].toUpperCase(), 'FR', 'QFR', 'EN', ''];
-        const rank = i => { const r = order.indexOf(i.lang); return r < 0 ? order.length : r; };
-        const best = new Map();
-        for (const i of this.allowed(all)) {
-          const id = String(i.tmdb || '');
-          if (!top.has(id)) continue;
-          const cur = best.get(id);
-          if (!cur || rank(i) < rank(cur)) best.set(id, i);
-        }
-        const picks = [...best.values()];
+        // Show each title's best version (see group()).
+        const picks = uniq(this.allowed(all).filter(i => top.has(String(i.tmdb)))).map(i => i.versions[0]);
         const meta = i => top.get(String(i.tmdb));
         return {
           byDate: [...picks].sort((a, b) => meta(b).date.localeCompare(meta(a).date) || meta(b).pop - meta(a).pop),
@@ -268,15 +310,21 @@
     // ---------- shared UI ----------
     card(item) {
       const series = item.kind === 'series';
+      const versions = item.versions || [item];
+      const langs = [...new Set(versions.map(v => v.lang).filter(Boolean))];
+      const has4k = versions.some(v => v.quality === '4K');
+      const sub = [item.year, langs.slice(0, 3).join(' · ') + (langs.length > 3 ? ` +${langs.length - 3}` : '')].filter(Boolean).join('  •  ');
       return `<button class="card${series ? ' is-series' : ''}" data-kind="${item.kind}" data-id="${item.id}">
         <span class="poster">
           <span class="ph">${esc(item.name)}</span>
           ${item.img ? `<img loading="lazy" src="${esc(item.img)}" alt="">` : ''}
           ${series ? '<span class="badge">Series</span>' : ''}
-          ${item.quality ? `<span class="q">${esc(item.quality)}</span>` : ''}
+          ${has4k ? '<span class="q">4K</span>' : ''}
+          ${versions.length > 1 ? `<span class="vcount">${versions.length} versions</span>` : ''}
           <span class="play">${ICONS.play}</span>
         </span>
         <span class="card-title">${esc(item.name)}</span>
+        ${sub ? `<span class="card-sub">${esc(sub)}</span>` : ''}
       </button>`;
     },
 
@@ -320,7 +368,7 @@
     // ---------- home ----------
     async renderHome(main) {
       const [vod, series] = await Promise.all([this.loadVod(), this.loadSeries()]);
-      const movies = this.allowed(vod), shows = series;
+      const movies = uniq(this.allowed(vod)), shows = uniq(series);
       // Two movies, then one series, so both show up even when one side is updated more often.
       const latest = [];
       for (let i = 0; latest.length < 30 && i < 30; i++) {
@@ -425,12 +473,14 @@
       this.setBackdrop('');
       const [all, cats, picks] = await Promise.all([kind === 'movie' ? this.loadVod() : this.loadSeries(), this.loadCats(kind), this.tmdbPicks(kind)]);
       const items = this.allowed(all);
-      const counts = {};
-      for (const i of items) counts[i.cat] = (counts[i.cat] || 0) + 1;
+      const perCat = {};
+      for (const i of items) (perCat[i.cat] || (perCat[i.cat] = new Set())).add(i.gkey);
+      const counts = Object.fromEntries(Object.entries(perCat).map(([k, v]) => [k, v.size]));
       const usable = cats.filter(c => counts[c.category_id]);
       const byId = new Map(items.map(i => [i.kind + i.id, i]));
       const label = kind === 'movie' ? 'Movies' : 'Series';
-      const virtual = { '': items, '@top': picks.byDate, '@popular': picks.byPop };
+      const latest = uniq(items);
+      const virtual = { '': latest, '@top': picks.byDate, '@popular': picks.byPop };
       const titles = { '': `<b>Latest</b> ${label.toLowerCase()}`, '@top': `<b>Top</b> picks`, '@popular': `<b>Most</b> watched` };
       const startCat = picks.byDate.length ? '@top' : '';
 
@@ -442,7 +492,7 @@
               ${picks.byDate.length ? `
               <button class="cat special" data-cat="@top">Top picks <span>${picks.byDate.length}</span></button>
               <button class="cat special" data-cat="@popular">Most watched <span>${picks.byPop.length}</span></button>` : ''}
-              <button class="cat" data-cat="">Latest added <span>${items.length}</span></button>
+              <button class="cat" data-cat="">Latest added <span>${latest.length}</span></button>
               ${usable.map(c => `<button class="cat" data-cat="${esc(c.category_id)}" data-name="${esc(fold(c.category_name))}">${esc(c.category_name)} <span>${counts[c.category_id]}</span></button>`).join('')}
             </div>
           </aside>
@@ -467,7 +517,7 @@
         shown += slice.length;
       };
       const show = (cat, name) => {
-        let list = cat in virtual ? virtual[cat] : items.filter(i => i.cat === cat);
+        let list = cat in virtual ? virtual[cat] : uniq(items.filter(i => i.cat === cat));
         const s = sortSel.value;
         if (s === 'name') list = [...list].sort((a, b) => a.name.localeCompare(b.name));
         else if (s === 'rating') list = [...list].sort((a, b) => b.rating - a.rating);
@@ -594,7 +644,8 @@
     // ---------- modal ----------
     openModal(html, cls = '') {
       const m = $('#modal');
-      this.modalReturn = document.activeElement;
+      // Switching from one details page to another keeps the original focus target.
+      if (!m.contains(document.activeElement)) this.modalReturn = document.activeElement;
       m.className = 'modal ' + cls;
       m.innerHTML = `<div class="sheet">${html}</div>`;
       m.scrollTop = 0;
@@ -619,7 +670,7 @@
         <div class="detail-body">
           <div class="detail-poster"><span class="ph">${esc(item.name)}</span>${item.img ? `<img src="${esc(item.img)}" alt="">` : ''}</div>
           <div class="detail-info">
-            <div class="detail-chips">${[item.kind === 'series' ? '<span class="badge">Series</span>' : '', item.lang && `<span class="chip">${esc(item.lang)}</span>`, item.quality && `<span class="chip">${esc(item.quality)}</span>`].filter(Boolean).join('')}</div>
+            <div class="detail-chips">${[item.kind === 'series' ? '<span class="badge">Series</span>' : '', item.lang && `<span class="chip">${esc(langName(item.lang))}</span>`, ...[item.quality, ...(item.tags || [])].filter(Boolean).map(t => `<span class="chip">${esc(t)}</span>`), item.kind === 'movie' && item.ext ? `<span class="chip">${esc(item.ext.toUpperCase())}</span>` : ''].filter(Boolean).join('')}</div>
             <h1 class="detail-title">${esc(item.name)}</h1>
             <div class="detail-meta"></div>
             <p class="detail-plot">${esc(item.plot || '')}</p>
@@ -647,6 +698,35 @@
       if (info.director) extra.push(`<p class="muted"><b>Director</b> ${esc(info.director)}</p>`);
       $('.detail-extra', m).insertAdjacentHTML('afterbegin', extra.join(''));
       return { trailer: (t && t.trailer) || info.youtube_trailer || '', backdrop: bg || '' };
+    },
+
+    // Every copy of this title: language, resolution, tags, file format and category. onPick(version).
+    async renderVersions(m, item, onPick) {
+      const versions = item.versions || [item];
+      const cats = await this.loadCats(item.kind).catch(() => []);
+      const extra = $('.detail-extra', m);
+      if (!extra) return;
+      const catName = Object.fromEntries(cats.map(c => [String(c.category_id), c.category_name]));
+      const box = document.createElement('section');
+      box.className = 'versions-box';
+      box.innerHTML = `<h3>${versions.length > 1 ? `Versions <span class="muted">${versions.length}</span>` : 'Version'}</h3>
+        <div class="versions">${versions.map(v => {
+          const saved = item.kind === 'movie' && this.cwGet('movie:' + v.id);
+          const chips = [v.quality, ...v.tags, item.kind === 'movie' && v.ext ? v.ext.toUpperCase() : ''].filter(Boolean);
+          const state = v === item && item.kind === 'series' ? 'Showing' : saved ? `Resume · ${fmtDur(saved.dur - saved.pos)} left` : '';
+          return `<button class="ver${v === item ? ' current' : ''}" data-vid="${esc(v.id)}">
+            <span class="ver-lang"><b>${esc(v.lang || '—')}</b><span>${esc(langName(v.lang))}</span></span>
+            <span class="ver-tags">${chips.map(c => `<span class="chip">${esc(c)}</span>`).join('')}</span>
+            <span class="ver-cat">${esc(catName[v.cat] || '')}</span>
+            <span class="ver-go">${state ? `<small>${esc(state)}</small>` : ''}${ICONS.play}</span>
+          </button>`;
+        }).join('')}</div>`;
+      box.addEventListener('click', e => {
+        const b = e.target.closest('.ver');
+        const v = b && versions.find(x => String(x.id) === b.dataset.vid);
+        if (v) onPick(v);
+      });
+      extra.prepend(box);
     },
 
     trailerBtn(m, key) {
@@ -698,6 +778,15 @@
         if (!a) return;
         this.playEntry({ ...entry, pos: saved ? saved.pos : 0 }, a.dataset.a === 'resume');
       });
+      this.renderVersions(m, item, v => {
+        const key = 'movie:' + v.id;
+        const prev = this.cwGet(key);
+        this.playEntry({
+          ...entry, key, id: v.id, ext: v === item ? entry.ext : v.ext,
+          subtitle: [v.year || item.year, langName(v.lang), v.quality].filter(Boolean).join(' · '),
+          pos: prev ? prev.pos : 0,
+        }, true);
+      });
       const primary = $('.btn.primary', actions);
       primary.focus();
       if (autoplay) primary.click();
@@ -721,6 +810,7 @@
       if (!seasons.length) {
         actions.innerHTML = '<p class="muted">No episodes available yet.</p>';
         this.trailerBtn(m, extra.trailer);
+        this.renderVersions(m, item, v => { if (v !== item) this.openSeries(v); });
         return;
       }
 
@@ -785,6 +875,7 @@
         const ep = flat.find(x => String(x.id) === b.dataset.id);
         playEp(ep, true);
       });
+      this.renderVersions(m, item, v => { if (v !== item) this.openSeries(v); });
       const firstSeason = resumeEp ? resumeEp.season : seasons[0];
       $$('.season', m).forEach(x => x.classList.toggle('active', x.dataset.s === firstSeason));
       renderSeason(firstSeason);
@@ -807,7 +898,7 @@
         const [vod, series, live] = await Promise.all([this.loadVod(), this.loadSeries(), this.loadLive()]);
         if (fold(q.value.trim()) !== term) return;
         const match = list => list.filter(i => i.key.includes(term)).slice(0, 36);
-        const mv = match(this.allowed(vod)), sv = match(series), lv = match(this.allowed(live)).slice(0, 24);
+        const mv = match(uniq(this.allowed(vod))), sv = match(uniq(series)), lv = match(this.allowed(live)).slice(0, 24);
         byId = new Map([...mv, ...sv].map(i => [i.kind + i.id, i]));
         res.innerHTML = (mv.length || sv.length || lv.length) ? [
           lv.length && `<h3>Channels</h3><div class="ch-grid">${lv.map((c, i) => `<button class="ch" data-live="${i}"><span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}</span><span class="ch-name">${esc(c.name)}</span></button>`).join('')}</div>`,
