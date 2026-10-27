@@ -75,9 +75,10 @@ After changing the web app, run `npm run sync` (or `npm run apk`) so the Android
 The same app, packaged for Samsung Smart TVs (2018 and newer). It uses Samsung's own video
 player (AVPlay), so HLS, MPEG-TS, MKV and Dolby audio play directly — no relay needed.
 
-Remote: arrows / OK / **Back** as usual (Back on Home exits). While live TV plays: **OK** or
-**◀** opens the channel list, **CH+ / CH−** change channel, **▶** switches quality, number keys
-jump to a channel. Colour keys: **Red** ★ favorite, **Green** channel list, **Yellow** TV Guide,
+Remote: arrows / OK / **Back** as usual (Back on Home exits). While live TV plays: **◀** opens
+the channel list, **OK** shows the top bar on ☆ (**◀ ▶** move along it: qualities, ☆, channel
+list; **▼** or **Back** hides it), **CH+ / CH−** change channel, **▶** switches quality, number
+keys jump to a channel. Colour keys: **Red** ★ favorite, **Green** channel list, **Yellow** TV Guide,
 **Blue** search. On text fields press **OK** to open the keyboard.
 
 Build: `npm run tizen` → `build/tizen/` (code converted for older TV engines, see

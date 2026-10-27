@@ -8,7 +8,7 @@ Seller: Joseph Jonathan COLLET · Support: https://github.com/Dykel/InkonabTV/is
 | --- | --- |
 | App name | InkonabTV |
 | Tizen application ID | InkonabTV1.InkonabTV |
-| Version | 1.0.1 |
+| Version | 1.0.2 |
 | Type | Tizen web application (TV) |
 | Category | Video |
 | Supported resolution | 1920 × 1080 (FHD); the layout is scaled by the TV on UHD models |
@@ -92,7 +92,8 @@ Main screen (top bar: Home · Live TV · TV Guide · Movies · Series · Search 
 | 0–9 | Live player: jump to that channel number. PIN dialog: enter digits |
 | CH+ / CH− | Live player: next / previous channel |
 | ▶ (live player) | Next quality copy of the channel, when the playlist has several |
-| ◀ / OK (live player) | Opens the channel list |
+| ◀ (live player) | Opens the channel list |
+| OK (live player) | Shows the top bar with the focus on ☆ Favorite; ◀ ▶ move along it (Back, qualities, ☆, channel list, previous/next channel), OK presses, ▼ or Return hides it. The bar hides by itself after 3.5 s |
 | OK (movie / episode player) | Shows the on-screen controls and focuses Play/Pause |
 | ◀ ▶ (movie / episode player) | Seek 10 s back / forward; when the controls have focus, move between buttons |
 | Play, Pause, Play/Pause | Play / pause |

@@ -387,12 +387,47 @@
       if (detail) console.warn('[player]', detail);
     },
 
-    setState(s) { this.el.dataset.state = s; },
+    setState(s) {
+      this.el.dataset.state = s;
+      // The controls stay up while a stream loads; once it plays, hide them a moment later.
+      if (s === 'playing' && this.el.classList.contains('ui')) this.poke();
+    },
 
     poke() {
       this.el.classList.add('ui');
       clearTimeout(this.hideTimer);
-      this.hideTimer = setTimeout(() => { if (this.el.dataset.state === 'playing') this.el.classList.remove('ui'); }, 3500);
+      this.hideTimer = setTimeout(() => {
+        if (this.el.dataset.state !== 'playing') return;
+        this.el.classList.remove('ui');
+        if (this.barFocused()) this.video.focus();
+      }, 3500);
+    },
+
+    // ---------- top bar on a TV (live): OK brings it up on ☆, ◀ ▶ move along it ----------
+    barFocused() { return this.el.querySelector('.p-top').contains(document.activeElement); },
+
+    focusBar() {
+      this.poke();
+      const fav = this.el.querySelector('[data-act="fav"]');
+      if (fav) fav.focus({ preventScroll: true });
+    },
+
+    // Returns true when the key was used inside the bar.
+    barKey(e) {
+      const bar = this.el.querySelector('.p-top');
+      const btns = [...bar.querySelectorAll('button')].filter(b => b.offsetParent);
+      const i = btns.indexOf(document.activeElement);
+      switch (e.key) {
+        case 'ArrowLeft': case 'ArrowRight':
+          btns[Math.max(0, Math.min(btns.length - 1, i + (e.key === 'ArrowLeft' ? -1 : 1)))].focus({ preventScroll: true });
+          return true;
+        case 'ArrowUp': return true;
+        case 'ArrowDown': case 'Escape': case 'Backspace': case 'BrowserBack': case 'GoBack':
+          this.el.classList.remove('ui');
+          this.video.focus();
+          return true;
+      }
+      return false;
     },
 
     // The video has the remote's attention (the AVPlay adapter focuses the player itself).
@@ -406,9 +441,13 @@
       this.poke();
       const v = this.video, live = this.item && this.item.kind === 'live';
       if (live && this.sideOpen()) { if (this.sideKey(e)) e.stopPropagation(); return; }
+      const tv = document.documentElement.classList.contains('tv');
+      if (tv && this.barFocused() && this.barKey(e)) { e.preventDefault(); e.stopPropagation(); return; }
       if (live && /^[0-9]$/.test(e.key) && !e.target.matches('input')) { e.preventDefault(); this.digit(e.key); return; }
       if (live && e.key === 'Enter' && this.mediaFocused()) {
-        e.preventDefault(); e.stopPropagation(); this.openSide(); return;
+        e.preventDefault(); e.stopPropagation();
+        if (tv) this.focusBar(); else this.openSide();
+        return;
       }
       switch (e.key) {
         case 'Escape': case 'Backspace': case 'BrowserBack': case 'GoBack':
