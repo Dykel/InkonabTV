@@ -8,7 +8,7 @@ Seller: Joseph Jonathan COLLET · Support: https://github.com/Dykel/InkonabTV/is
 | --- | --- |
 | App name | InkonabTV |
 | Tizen application ID | InkonabTV1.InkonabTV |
-| Version | 1.0.2 |
+| Version | 1.0.3 |
 | Type | Tizen web application (TV) |
 | Category | Video |
 | Supported resolution | 1920 × 1080 (FHD); the layout is scaled by the TV on UHD models |
@@ -115,7 +115,7 @@ Keys the app doesn't use do nothing.
 - **Errors:** a wrong account shows "Wrong username or password"; an unreachable server or playlist link says so and asks to check the link and connection. A stream that can't be played shows "Can't play this" with a Try again button.
 - **Parental control:** adult categories (and titles the provider marks as adult) are hidden by default. Turning on "Show adult categories" asks the user to create a 4-digit PIN the first time and asks for the PIN after that. They are hidden again every time the app starts.
 - **Multitasking:** when the user leaves with Home/Source, playback is suspended and resumes when the app returns.
-- **Saved playlist:** the playlist is saved on the TV and refreshed every 6 hours in the background, or with Settings → Refresh now.
+- **Saved playlist:** the playlist is saved on the TV and refreshed every 6 hours in the background, or with Settings → Refresh now. Channels and titles the provider removed disappear from every list, including Favorites, Recently watched, Continue Watching and My List.
 - **Sign out** (Settings) deletes the saved playlist and account from the TV.
 
 ## 7. Content and privacy

@@ -390,11 +390,55 @@
       this.showLogin();
     },
 
-    // Saved playlists were refreshed in the background: drop derived data so the next page uses it.
-    onCatalogRefreshed() {
+    // Saved playlists were refreshed in the background: rebuild from the new data, forget what the
+    // provider removed, and redraw the page (later, if a dialog or the player is open).
+    async onCatalogRefreshed() {
       this.data = {};
       this.epgCache = null;
+      try { await this.pruneRemoved(); } catch (e) { console.warn('[refresh]', e); }
+      if (Player.isOpen() || !$('#modal').classList.contains('hidden')) this.redrawLater = true;
+      else this.redraw();
       this.toast('Playlist updated');
+    },
+
+    // Drop favorites, history, Continue Watching and My List entries whose channel or title is gone.
+    // A list that comes back empty (a provider glitch) removes nothing.
+    async pruneRemoved() {
+      const [cat, vod, series] = await Promise.all([this.liveCatalog(), this.loadVod().catch(() => []), this.loadSeries().catch(() => [])]);
+      const fav = Store.get('fav', {});
+      const keep = (list, set) => (set.size ? (list || []).filter(k => set.has(k)) : list);
+      const movieKeys = new Set(vod.map(i => i.gkey)), seriesKeys = new Set(series.map(i => i.gkey));
+      Object.assign(fav, { live: keep(fav.live, cat.byKey), movie: keep(fav.movie, movieKeys), series: keep(fav.series, seriesKeys) });
+      Store.set('fav', fav);
+      if (cat.byKey.size) Store.set('recentLive', this.recentLive().filter(k => cat.byKey.has(k)));
+      const movieIds = new Set(vod.map(i => String(i.id))), seriesIds = new Set(series.map(i => String(i.id)));
+      Store.set('cw', this.cw().filter(e =>
+        e.kind === 'movie' ? !movieIds.size || movieIds.has(String(e.id))
+          : e.kind === 'episode' ? !seriesIds.size || seriesIds.has(String(e.seriesId)) : true));
+      // The channel playing now zaps through the new list.
+      const it = Player.isOpen() && Player.item;
+      if (it && it.kind === 'live' && it.list) {
+        const groups = await this.liveGroups();
+        const g = groups.find(x => x.key === it.groupKey);
+        if (g) {
+          const cur = it.list[it.index];
+          it.list = g.channels;
+          it.index = cur ? g.channels.findIndex(c => c.gkey === cur.gkey) : -1;
+        }
+      }
+    },
+
+    // Redraw the current page, keeping the focus on the same item when it still exists.
+    async redraw() {
+      this.redrawLater = false;
+      const a = document.activeElement;
+      const attrs = a && a.closest && $('#view').contains(a) ? [...a.attributes].filter(x => x.name.startsWith('data-')) : [];
+      const y = window.scrollY;
+      await this.route();
+      window.scrollTo(0, y);
+      const sel = attrs.map(x => `[${x.name}="${CSS.escape(x.value)}"]`).join('');
+      const back = sel && $('#view ' + sel);
+      if (back) back.focus({ preventScroll: true });
     },
 
     start() {
@@ -458,7 +502,7 @@
       const main = $('#view');
       main.innerHTML = '<div class="loader"><span></span></div>';
       const render = { home: this.renderHome, live: this.renderLive, guide: this.renderGuide, movies: this.renderMovies, series: this.renderSeries }[this.view];
-      render.call(this, main).catch(err => {
+      return render.call(this, main).catch(err => {
         console.error(err);
         main.innerHTML = `<div class="empty"><h3>Couldn’t load this page</h3><p>${esc(err.message)}</p><button class="btn" id="retry">Try again</button></div>`;
         $('#retry').addEventListener('click', () => this.route());
@@ -466,7 +510,8 @@
     },
 
     onPlayerClosed() {
-      if (this.view === 'home') this.renderContinue();
+      if (this.redrawLater && $('#modal').classList.contains('hidden')) this.redraw();
+      else if (this.view === 'home') this.renderContinue();
     },
 
     // ---------- data ----------
@@ -1383,6 +1428,7 @@
       m.innerHTML = '';
       document.body.classList.remove('modal-open');
       if (this.modalReturn && this.modalReturn.isConnected) this.modalReturn.focus({ preventScroll: true });
+      if (this.redrawLater && !Player.isOpen()) this.redraw();
     },
     closeBtn: () => `<button class="round-btn close" data-close aria-label="Close">${ICONS.close}</button>`,
 
