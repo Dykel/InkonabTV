@@ -120,14 +120,16 @@ console.log('Samsung TV app built in build/tizen');
 
 // ---------- package (.wgt) ----------
 const tizen = join(process.env.TIZEN_STUDIO || join(homedir(), 'tizen-studio'), 'tools/ide/bin/tizen');
-const profile = process.env.TIZEN_PROFILE || 'InkonabTV';
 if (existsSync(tizen)) {
-  const profiles = execFileSync(tizen, ['security-profiles', 'list'], { encoding: 'utf8' });
-  if (!new RegExp(`^\\s*${profile}\\b`, 'm').test(profiles)) {
-    console.log(`Not packaged: create the "${profile}" Samsung certificate profile first (README → Samsung TV).`);
+  // Certificate profile: $TIZEN_PROFILE, else one named like "InkonabTV" (any case), else the active one.
+  const listing = execFileSync(tizen, ['security-profiles', 'list'], { encoding: 'utf8' });
+  const rows = listing.split('\n').map(l => l.trim().match(/^(\S+)\s+(O|X)?\s*$/)).filter(Boolean).filter(m => m[1] !== '[Profile');
+  const pick = process.env.TIZEN_PROFILE || (rows.find(m => /^inkonab/i.test(m[1])) || rows.find(m => m[2] === 'O') || [])[1];
+  if (!pick) {
+    console.log('Not packaged: create a Samsung certificate profile first (README → Samsung TV).');
   } else {
-    execFileSync(tizen, ['package', '-t', 'wgt', '-s', profile, '--', out], { stdio: 'inherit' });
-    console.log(`Signed package: build/tizen/InkonabTV.wgt (certificate profile "${profile}")`);
+    execFileSync(tizen, ['package', '-t', 'wgt', '-s', pick, '--', out], { stdio: 'inherit' });
+    console.log(`Signed package: build/tizen/InkonabTV.wgt (certificate profile "${pick}")`);
   }
 } else {
   console.log('Tizen Studio not found: install it to sign and install the package (README → Samsung TV).');
