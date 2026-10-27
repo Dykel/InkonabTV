@@ -90,18 +90,35 @@
     if (!isText(t)) return;
     if (e.keyCode === 13 && t.readOnly) { e.preventDefault(); e.stopPropagation(); openKeyboard(t); return; }
     if (e.keyCode === IME_DONE || e.keyCode === IME_CANCEL || (e.keyCode === 13 && !t.readOnly)) {
-      // Done in Username moves on to Password.
-      if (t.id === 'loginUser' && e.keyCode !== IME_CANCEL) {
+      // Done in Server moves on to Username, Username to Password.
+      const next = { loginServer: 'loginUser', loginUser: 'loginPass' }[t.id];
+      if (next && e.keyCode !== IME_CANCEL) {
         e.preventDefault();
-        const pass = document.getElementById('loginPass');
         t.readOnly = true;
         delete t.dataset.typing;
-        openKeyboard(pass);
+        openKeyboard(document.getElementById(next));
         return;
       }
       if (e.keyCode !== 13) { t.readOnly = true; delete t.dataset.typing; }
     }
   }, true);
+
+  // ---------- network: Samsung reports cable / Wi-Fi changes itself ----------
+  try {
+    const NS = webapis.network.NetworkState;
+    webapis.network.addNetworkStateChangeListener(state => {
+      if (state === NS.GATEWAY_DISCONNECTED || state === NS.LAN_CABLE_DETACHED || state === NS.WIFI_MODULE_STATE_DETACHED) window.dispatchEvent(new Event('offline'));
+      else if (state === NS.GATEWAY_CONNECTED || state === NS.LAN_CABLE_ATTACHED) window.dispatchEvent(new Event('online'));
+    });
+  } catch (e) {}
+
+  // ---------- screensaver: off while a video plays, back on when it stops or pauses ----------
+  const screenSaver = on => {
+    try {
+      const S = webapis.appcommon.AppCommonScreenSaverState;
+      webapis.appcommon.setScreenSaver(on ? S.SCREEN_SAVER_ON : S.SCREEN_SAVER_OFF);
+    } catch (e) {}
+  };
 
   // ---------- AVPlay: Samsung's native player behind the web page ----------
   // Exposes the small part of HTMLVideoElement the web player uses, so player.js stays the same.
@@ -145,7 +162,7 @@
           onbufferingstart: () => this.emit('waiting'),
           onbufferingcomplete: () => this.emit('playing'),
           oncurrentplaytime: ms => { this.t = ms / 1000; },
-          onstreamcompleted: () => this.emit('ended'),
+          onstreamcompleted: () => { screenSaver(true); this.emit('ended'); },
           onerror: err => { if (this.url === mine) { this.error = err; this.emit('error'); } },
           onevent: () => {},
         });
@@ -157,6 +174,7 @@
           if (this.pendingSeek) { try { av.seekTo(this.pendingSeek * 1000); } catch (e) {} this.pendingSeek = 0; }
           av.play();
           this.isPaused = false;
+          screenSaver(false);
           this.emit('playing');
         }, err => { if (this.url === mine) { this.error = err; this.emit('error'); } });
       } catch (e) {
@@ -165,14 +183,15 @@
     },
     stop() {
       this.url = '';
+      screenSaver(true);
       try {
         const st = av.getState();
         if (st !== 'NONE' && st !== 'IDLE') av.stop();
         av.close();
       } catch (e) {}
     },
-    play() { try { av.play(); this.isPaused = false; } catch (e) {} return Promise.resolve(); },
-    pause() { try { av.pause(); this.isPaused = true; } catch (e) {} },
+    play() { try { av.play(); this.isPaused = false; screenSaver(false); } catch (e) {} return Promise.resolve(); },
+    pause() { try { av.pause(); this.isPaused = true; screenSaver(true); } catch (e) {} },
     get paused() { return this.isPaused; },
     get duration() { return this.dur; },
     get currentTime() { return this.t; },
@@ -203,24 +222,67 @@
     try { if (document.hidden) av.suspend(); else av.restore(); } catch (e) {}
   });
 
-  // Progress bar for movies and episodes (AVPlay has no built-in controls).
+  // On-screen controls for movies and episodes (AVPlay has none): ⏪ 30 s · play/pause · ⏩ 30 s ·
+  // stop, plus the time and a progress bar. OK shows them; ◀ ▶ move between buttons; ▲ ▼ hide them.
   document.addEventListener('DOMContentLoaded', () => {
     const player = document.getElementById('player');
+    const icon = d => '<svg viewBox="0 0 24 24"><path fill="currentColor" d="' + d + '"/></svg>';
+    const PLAY = icon('M8 5v14l11-7z'), PAUSE = icon('M7 5h3.5v14H7zM13.5 5H17v14h-3.5z');
     const bar = document.createElement('div');
     bar.className = 'tz-progress';
-    bar.innerHTML = '<span class="tz-time"></span><span class="bar"><i></i></span><span class="tz-dur"></span>';
+    bar.innerHTML = '<div class="tz-ctl">' +
+      '<button class="round-btn" data-tz="rew" aria-label="Rewind 30 seconds">' + icon('M11 18V6l-8.5 6zm.5-6 8.5 6V6z') + '</button>' +
+      '<button class="round-btn tz-pp" data-tz="pp" aria-label="Pause">' + PAUSE + '</button>' +
+      '<button class="round-btn" data-tz="ff" aria-label="Forward 30 seconds">' + icon('M4 18l8.5-6L4 6zm9-12v12l8.5-6z') + '</button>' +
+      '<button class="round-btn" data-tz="stop" aria-label="Stop">' + icon('M6 6h12v12H6z') + '</button>' +
+      '</div><span class="tz-time"></span><span class="bar"><i></i></span><span class="tz-dur"></span>';
     player.appendChild(bar);
+    const ctl = bar.querySelector('.tz-ctl');
+    const btns = [].slice.call(ctl.querySelectorAll('button'));
+    const P = () => window.Player;
+    const vod = () => P() && P().isOpen() && P().item && P().item.kind !== 'live';
+    const act = name => {
+      const v = P().video;
+      if (name === 'rew') v.currentTime = Math.max(0, v.currentTime - 30);
+      else if (name === 'ff') v.currentTime = v.currentTime + 30;
+      else if (name === 'pp') { if (v.paused) v.play(); else v.pause(); }
+      else if (name === 'stop') { P().close(); return; }
+      paint();
+    };
+    ctl.addEventListener('click', e => { const b = e.target.closest('[data-tz]'); if (b) act(b.dataset.tz); });
+    document.addEventListener('keydown', e => {
+      if (!vod()) return;
+      const a = document.activeElement, i = btns.indexOf(a);
+      if (i < 0) {
+        // OK on the playing video: show the controls on play/pause.
+        if (e.key === 'Enter' && P().mediaFocused()) { e.preventDefault(); e.stopImmediatePropagation(); P().poke(); btns[1].focus(); }
+        return;
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault(); e.stopImmediatePropagation(); P().poke();
+        btns[Math.max(0, Math.min(btns.length - 1, i + (e.key === 'ArrowLeft' ? -1 : 1)))].focus();
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault(); e.stopImmediatePropagation(); P().video.focus();
+      }
+    }, true);
     const fmt = s => { s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
-    setInterval(() => {
-      const P = window.Player;
-      const vod = P && P.isOpen() && P.item && P.item.kind !== 'live';
-      bar.hidden = !vod;
-      if (!vod) return;
-      const v = P.video, d = v.duration;
+    function paint() {
+      const on = vod();
+      bar.hidden = !on;
+      if (!on) return;
+      const v = P().video, d = v.duration;
+      // Paused: keep the controls on screen so the state is clear.
+      if (v.paused) player.classList.add('ui');
+      else if (!player.classList.contains('ui') && ctl.contains(document.activeElement)) v.focus();
+      const pp = btns[1];
+      pp.innerHTML = v.paused ? PLAY : PAUSE;
+      pp.setAttribute('aria-label', window.T(v.paused ? 'Play' : 'Pause'));
+      bar.classList.toggle('paused', v.paused);
       if (!(d > 0 && isFinite(d))) return;
-      bar.querySelector('.tz-time').textContent = fmt(v.currentTime) + (v.paused ? '  ❚❚' : '');
+      bar.querySelector('.tz-time').textContent = fmt(v.currentTime);
       bar.querySelector('.tz-dur').textContent = fmt(d);
       bar.querySelector('i').style.width = Math.min(100, (v.currentTime / d) * 100).toFixed(2) + '%';
-    }, 1000);
+    }
+    setInterval(paint, 500);
   });
 })();

@@ -23,12 +23,30 @@
   <section id="login" class="login hidden">
     <form id="loginForm" class="login-card" autocomplete="on">
       <img class="login-logo" data-logo alt="">
-      <p class="login-sub">Sign in with your InkonabTV subscription</p>
-      <label class="lf"><span>Username</span><input class="field" id="loginUser" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
-      <label class="lf"><span>Password</span><input class="field" id="loginPass" name="password" type="password" autocomplete="current-password" required></label>
-      <label class="remember"><input type="checkbox" id="loginRemember" checked> Keep me signed in on this device</label>
+      <p class="login-sub" id="loginSub">Sign in with your InkonabTV subscription</p>
+      <div class="login-modes" id="loginModes" hidden>
+        <button type="button" class="login-mode" data-mode="xtream">Xtream Codes</button>
+        <button type="button" class="login-mode" data-mode="m3u">M3U playlist</button>
+        <button type="button" class="login-mode" data-mode="remote">Set up from phone</button>
+      </div>
+      <label class="lf" data-for="server" hidden><span>Server address</span><input class="field" id="loginServer" type="url" inputmode="url" placeholder="http://server.example:8080" autocapitalize="none" spellcheck="false"></label>
+      <label class="lf" data-for="xtream"><span>Username</span><input class="field" id="loginUser" name="username" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+      <label class="lf" data-for="xtream"><span>Password</span><input class="field" id="loginPass" name="password" type="password" autocomplete="current-password"></label>
+      <label class="lf" data-for="m3u" hidden><span>Playlist link (M3U)</span><input class="field" id="loginM3u" type="url" inputmode="url" placeholder="https://example.com/playlist.m3u" autocapitalize="none" spellcheck="false"></label>
+      <div class="pair" data-for="remote" hidden>
+        <img class="pair-qr" id="pairQr" alt="">
+        <div class="pair-text">
+          <p>On your phone or computer, open</p>
+          <b class="pair-url" id="pairUrl"></b>
+          <p>and enter this code:</p>
+          <div class="pair-code" id="pairCode">…</div>
+          <p class="muted" id="pairNote">or scan the QR code. The code works once and changes every 15 minutes.</p>
+        </div>
+      </div>
+      <label class="remember" data-for="form"><input type="checkbox" id="loginRemember" checked> Keep me signed in on this device</label>
       <p class="login-error" id="loginError" role="alert"></p>
-      <button class="btn primary wide-btn" id="loginBtn" type="submit">Sign in</button>
+      <button class="btn primary wide-btn" id="loginBtn" type="submit" data-for="form">Sign in</button>
+      <p class="login-note" id="loginNote" hidden>InkonabTV is a media player. It doesn’t include or sell any channels or content: add the playlist you get from your own provider.</p>
     </form>
     <div class="login-free" id="freeLogin"></div>
   </section>
@@ -109,6 +127,8 @@
   <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
   <script src="assets/js/vendor/capacitor.js"></script>
   <script src="config.js"></script>
+  <script src="assets/js/i18n.js"></script>
+  <script src="assets/js/vendor/qrcode.js"></script>
   <script src="assets/js/api.js"></script>
   <script src="assets/js/player.js"></script>
   <script src="assets/js/nav.js"></script>

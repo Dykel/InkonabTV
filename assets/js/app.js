@@ -17,7 +17,15 @@
   };
 
   // ---------- helpers ----------
+  const LOCALE = (window.I18N && I18N.locale) || 'en-US';
+  const T = window.T || (s => s);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // "server.tv:8080" / "http://server.tv:8080/player_api.php?…" → "http://server.tv:8080".
+  const normServer = v => {
+    v = String(v || '').trim();
+    if (!v) return '';
+    try { const u = new URL(/^\w+:\/\//.test(v) ? v : 'http://' + v); return u.origin + u.pathname.replace(/\/(player_api|get|xmltv)\.php$/, '').replace(/\/+$/, ''); } catch { return ''; }
+  };
   const hm = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const fold = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
@@ -117,56 +125,259 @@
       this.tickDate();
       setInterval(() => this.tickDate(), 60000);
 
+      this.watchNetwork();
+
       const creds = Store.get('creds');
       if (!creds) return this.showLogin();
       this.showSplash(true);
       try {
-        await this.connect(creds.u, creds.p);
+        await this.connect(creds);
         this.start();
       } catch (err) {
-        this.showLogin(err.message);
+        this.showLogin(this.loginError(err, creds));
       } finally {
         this.showSplash(false);
       }
     },
 
-    async connect(u, p) {
-      const api = new Xtream(Settings.server, u, p);
+    // creds: { u, p, s? } for an Xtream account (s: server, player mode only) or { m } for an M3U link.
+    async connect(creds) {
+      const api = creds.m ? new M3UPlaylist(creds.m) : new Xtream(creds.s || Settings.server, creds.u, creds.p);
       await api.login();
       this.api = api;
       this.data = {};
     },
 
+    loginError(err, creds) {
+      if (err.message !== 'Failed to fetch' && !/^Playlist \d/.test(err.message)) return err.message;
+      return creds && creds.m ? 'Can’t load the playlist. Check the link and your connection.' : 'Can’t reach the server. Check your connection.';
+    },
+
     showSplash(on) { $('#splash').classList.toggle('hidden', !on); },
+
+    // Sign-in modes: "xtream" (username/password; plus the server address in player mode),
+    // "m3u" (player mode) and "remote" (filled in from a phone, when CFG.pairApi is set).
+    loginModes() {
+      return ['xtream', ...(CFG.playerMode ? ['m3u'] : []), ...(CFG.pairApi ? ['remote'] : [])];
+    },
 
     showLogin(error) {
       $('#app').classList.add('hidden');
       $('#login').classList.remove('hidden');
       $('#loginError').textContent = error || '';
       this.renderFree($('#freeLogin'));
+      if (CFG.playerMode) {
+        $('#loginSub').textContent = 'Add your playlist';
+        $('#loginNote').hidden = false;
+      }
+      const modes = this.loginModes();
+      $('#loginModes').hidden = modes.length < 2;
+      $('#loginForm').classList.toggle('wide', modes.length > 1);
+      $$('.login-mode').forEach(b => { b.hidden = !modes.includes(b.dataset.mode); });
+      if (!$('#loginModes').dataset.bound) {
+        $('#loginModes').dataset.bound = '1';
+        $('#loginModes').addEventListener('click', e => { const b = e.target.closest('.login-mode'); if (b) this.setLoginMode(b.dataset.mode, true); });
+      }
       const creds = Store.get('creds');
-      if (creds) $('#loginUser').value = creds.u;
-      setTimeout(() => ($('#loginUser').value ? $('#loginPass') : $('#loginUser')).focus(), 50);
+      if (creds) {
+        if (creds.m) $('#loginM3u').value = creds.m;
+        if (creds.u) $('#loginUser').value = creds.u;
+        if (creds.s) $('#loginServer').value = creds.s;
+      }
+      this.setLoginMode(creds && creds.m && modes.includes('m3u') ? 'm3u' : 'xtream');
+    },
+
+    setLoginMode(mode, fromClick) {
+      this.loginMode = mode;
+      $$('.login-mode').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+      const show = { server: mode === 'xtream' && !!CFG.playerMode, xtream: mode === 'xtream', m3u: mode === 'm3u', remote: mode === 'remote', form: mode !== 'remote' };
+      $$('#loginForm [data-for]').forEach(el => { el.hidden = !show[el.dataset.for]; });
+      $('#loginForm').classList.toggle('has-pair', mode === 'remote');
+      if (fromClick) $('#loginError').textContent = '';
+      if (mode === 'remote') this.startPair(); else this.stopPair();
+      if (fromClick) return;
+      const first = mode === 'm3u' ? '#loginM3u'
+        : [CFG.playerMode && '#loginServer', '#loginUser', '#loginPass'].filter(Boolean).find(sel => !$(sel).value) || '#loginPass';
+      setTimeout(() => $(mode === 'remote' ? '.login-mode.active' : first).focus(), 50);
+    },
+
+    // What the form holds, or an error message.
+    formCreds() {
+      if (this.loginMode === 'm3u') {
+        const m = $('#loginM3u').value.trim();
+        if (!m) return 'Enter the playlist link.';
+        // An Xtream "get.php" playlist link: sign in to the account itself (movies, series, guide).
+        try {
+          const u = new URL(/^\w+:\/\//.test(m) ? m : 'http://' + m);
+          const user = u.searchParams.get('username'), pass = u.searchParams.get('password');
+          if (/\/get\.php$/.test(u.pathname) && user && pass) return { s: u.origin, u: user, p: pass };
+          return { m: u.toString() };
+        } catch { return 'Enter the playlist link.'; }
+      }
+      const u = $('#loginUser').value.trim(), p = $('#loginPass').value;
+      if (!CFG.playerMode) return u && p ? { u, p } : 'Enter your username and password.';
+      const s = normServer($('#loginServer').value);
+      return s && u && p ? { s, u, p } : 'Enter the server address, username and password.';
     },
 
     async submitLogin(e) {
       e.preventDefault();
-      const u = $('#loginUser').value.trim(), p = $('#loginPass').value;
+      const c = this.formCreds();
+      if (typeof c === 'string') { $('#loginError').textContent = c; return; }
+      await this.signIn(c);
+    },
+
+    async signIn(c) {
       const btn = $('#loginBtn');
-      if (!u || !p) { $('#loginError').textContent = 'Enter your username and password.'; return; }
       btn.disabled = true; btn.textContent = 'Signing in…';
       $('#loginError').textContent = '';
       try {
-        await this.connect(u, p);
+        await this.connect(c);
         Store.del('creds');
-        Store.set('creds', { u, p }, !$('#loginRemember').checked);
+        Store.set('creds', c, !$('#loginRemember').checked);
         $('#loginPass').value = '';
+        this.stopPair();
         this.start();
       } catch (err) {
-        $('#loginError').textContent = err.message === 'Failed to fetch' ? 'Can’t reach the server. Check your connection.' : err.message;
+        $('#loginError').textContent = this.loginError(err, c);
+        if (this.loginMode === 'remote') this.setLoginMode(c.m ? 'm3u' : 'xtream');
       } finally {
         btn.disabled = false; btn.textContent = 'Sign in';
       }
+    },
+
+    // ---------- remote setup: the TV shows a code, someone fills the account in from a phone ----------
+    // CFG.pairApi is the pairing worker (proxy/pair-worker.js); CFG.setupUrl the page that sends to it.
+    async startPair() {
+      this.stopPair();
+      const run = this.pairRun = {};
+      const note = $('#pairNote');
+      $('#pairUrl').textContent = CFG.setupUrl.replace(/^https?:\/\//, '');
+      $('#pairCode').textContent = '…';
+      $('#pairQr').removeAttribute('src');
+      note.textContent = 'Getting a code…';
+      let pair;
+      try {
+        const r = await fetch(CFG.pairApi.replace(/\/+$/, '') + '/pair', { method: 'POST' });
+        if (!r.ok) throw new Error(r.status);
+        pair = await r.json();
+      } catch {
+        if (run !== this.pairRun) return;
+        note.textContent = 'Remote setup isn’t available right now. Try again later.';
+        run.timer = setTimeout(() => run === this.pairRun && this.startPair(), 20000);
+        return;
+      }
+      if (run !== this.pairRun) return;
+      $('#pairCode').textContent = pair.code.slice(0, 3) + '-' + pair.code.slice(3);
+      note.textContent = 'or scan the QR code. The code works once and changes every 15 minutes.';
+      try {
+        const qr = qrcode(0, 'M');
+        qr.addData(CFG.setupUrl + '#' + pair.code);
+        qr.make();
+        $('#pairQr').src = qr.createDataURL(6, 0);
+      } catch {}
+      const until = Date.now() + (pair.ttl || 900) * 1000 - 5000;
+      const poll = async () => {
+        if (run !== this.pairRun) return;
+        if (Date.now() > until) return this.startPair();
+        try {
+          const r = await fetch(`${CFG.pairApi.replace(/\/+$/, '')}/pair/${pair.code}?token=${encodeURIComponent(pair.token)}`, { cache: 'no-store' });
+          if (r.status === 200) {
+            const d = await r.json();
+            if (run !== this.pairRun) return;
+            const c = d.m ? { m: d.m } : { s: CFG.playerMode ? normServer(d.s) : undefined, u: d.u, p: d.p };
+            if (c.m) $('#loginM3u').value = c.m; else { $('#loginUser').value = c.u || ''; if (c.s) $('#loginServer').value = c.s; }
+            note.textContent = 'Received — signing in…';
+            this.pairRun = null;
+            return this.signIn(c);
+          }
+        } catch {}
+        run.timer = setTimeout(poll, 3000);
+      };
+      poll();
+    },
+
+    stopPair() {
+      if (this.pairRun) clearTimeout(this.pairRun.timer);
+      this.pairRun = null;
+    },
+
+    // ---------- network lost / back ----------
+    watchNetwork() {
+      const box = document.createElement('div');
+      box.className = 'net-down';
+      box.hidden = true;
+      box.setAttribute('role', 'alert');
+      box.innerHTML = '<b>No network connection</b><span>Check your TV’s network settings. The app continues by itself when the connection is back.</span>';
+      document.body.appendChild(box);
+      const down = () => { box.hidden = false; };
+      const up = () => {
+        if (box.hidden) return;
+        box.hidden = true;
+        this.toast('Connection restored');
+        if (Player.isOpen() && Player.el.dataset.state === 'error') Player.play({ ...Player.item, tried: null });
+        else if (this.api && $('#view .empty #retry')) this.route();
+      };
+      window.addEventListener('offline', down);
+      window.addEventListener('online', up);
+      if (navigator.onLine === false) down();
+    },
+
+    // ---------- parental PIN ----------
+    // Resolves true when the right PIN is entered (or a new one is created twice), false on cancel.
+    askPin(mode) {
+      return new Promise(resolve => {
+        const steps = mode === 'create' ? ['Create a 4-digit PIN', 'Enter the PIN again'] : [mode === 'change' ? 'Enter your current PIN' : 'Enter your parental PIN'];
+        let step = 0, digits = '', first = '';
+        const back = document.activeElement;
+        const dlg = document.createElement('div');
+        dlg.className = 'pin-dlg';
+        dlg.innerHTML = `<div class="pin-card" role="dialog" aria-modal="true">
+          <h3 class="pin-title"></h3><p>Use the number keys or the keypad below.</p>
+          <div class="pin-dots"><i></i><i></i><i></i><i></i></div><p class="pin-err"></p>
+          <div class="pin-pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button type="button" data-d="${n}">${n}</button>`).join('')}
+            <button type="button" data-d="del" aria-label="Delete">⌫</button><button type="button" data-d="0">0</button><button type="button" data-d="cancel" aria-label="Cancel">✕</button></div>
+          <button type="button" class="btn ghost" data-d="cancel">Cancel</button></div>`;
+        document.body.appendChild(dlg);
+        const paint = () => {
+          $('.pin-title', dlg).textContent = steps[step];
+          $$('.pin-dots i', dlg).forEach((d, i) => d.classList.toggle('on', i < digits.length));
+        };
+        const done = ok => {
+          document.removeEventListener('keydown', onKey, true);
+          dlg.remove();
+          if (back && back.isConnected) back.focus();
+          resolve(ok);
+        };
+        const fail = msg => { $('.pin-err', dlg).textContent = msg; digits = ''; paint(); };
+        const press = d => {
+          if (d === 'cancel') return done(false);
+          if (d === 'del') { digits = digits.slice(0, -1); return paint(); }
+          if (digits.length >= 4) return;
+          if (!digits) $('.pin-err', dlg).textContent = '';
+          digits += d;
+          paint();
+          if (digits.length < 4) return;
+          setTimeout(() => {
+            if (mode !== 'create') return digits === Settings.adultPin ? done(true) : fail('Wrong PIN');
+            if (step === 0) { first = digits; step = 1; digits = ''; $('.pin-err', dlg).textContent = ''; return paint(); }
+            if (digits !== first) { step = 0; return fail('The PINs don’t match'); }
+            Settings.adultPin = digits;
+            Settings.save();
+            this.toast('PIN saved');
+            done(true);
+          }, 150);
+        };
+        const onKey = e => {
+          if (/^[0-9]$/.test(e.key)) { e.preventDefault(); e.stopImmediatePropagation(); press(e.key); }
+          else if (e.key === 'Escape' || e.key === 'BrowserBack' || e.key === 'GoBack') { e.preventDefault(); e.stopImmediatePropagation(); done(false); }
+          else if (e.key === 'Backspace' && !e.target.matches('input')) { e.preventDefault(); e.stopImmediatePropagation(); press('del'); }
+        };
+        document.addEventListener('keydown', onKey, true);
+        dlg.addEventListener('click', e => { const b = e.target.closest('[data-d]'); if (b) press(b.dataset.d); });
+        paint();
+        $('[data-d="1"]', dlg).focus();
+      });
     },
 
     logout() {
@@ -225,7 +436,7 @@
     },
 
     tickDate() {
-      $('#date').textContent = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      $('#date').textContent = new Date().toLocaleDateString(LOCALE, { weekday: 'long', month: 'long', day: 'numeric' });
     },
 
     toast(msg) {
@@ -410,7 +621,7 @@
     // A titled row of channel tiles; click plays that channel with the row as its zapping list.
     channelRow(title, list, group, note = '') {
       if (!list.length) return '';
-      const [a, ...b] = title.split(' ');
+      const [a, ...b] = T(title).split(' ');
       return `<section class="row free-row" data-group="${esc(group.key)}"><h2><b>${esc(a)}</b> ${esc(b.join(' '))}${note ? ` <small class="free-note">${esc(note)}</small>` : ''}</h2>
         <div class="row-scroll">${list.map((c, i) => `
           <button class="tile${c.radio ? ' is-radio' : ''}" data-ch="${i}">
@@ -531,7 +742,7 @@
 
     row(title, items, extraClass = '') {
       if (!items.length) return '';
-      const [a, ...b] = title.split(' ');
+      const [a, ...b] = T(title).split(' ');
       return `<section class="row ${extraClass}"><h2><b>${esc(a)}</b> ${esc(b.join(' '))}</h2>
         <div class="row-scroll">${items.map(i => this.card(i)).join('')}</div></section>`;
     },
@@ -988,7 +1199,7 @@
       if (diff === 0) return 'Today';
       if (diff === -1) return 'Yesterday';
       if (diff === 1) return 'Tomorrow';
-      return d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
+      return d.toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' });
     },
 
     // What happens when a programme is chosen: live now → watch, past + archive → replay.
@@ -1448,7 +1659,7 @@
       if (min < 1) return 'Just now';
       if (min < 60) return `${min} min ago`;
       const h = Math.round(min / 60);
-      return h < 48 ? `${h} hour${h > 1 ? 's' : ''} ago` : new Date(t).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+      return h < 48 ? `${h} hour${h > 1 ? 's' : ''} ago` : new Date(t).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
     },
 
     // ---------- free VPN (Android app) ----------
@@ -1483,17 +1694,19 @@
     // ---------- settings ----------
     openSettings() {
       const ui = (this.api && this.api.info && this.api.info.user_info) || {};
-      const exp = Number(ui.exp_date) ? new Date(Number(ui.exp_date) * 1000).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Never';
+      const exp = Number(ui.exp_date) ? new Date(Number(ui.exp_date) * 1000).toLocaleDateString(LOCALE, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Never';
       const langs = [['en-US', 'English'], ['fr-FR', 'Français'], ['es-ES', 'Español'], ['de-DE', 'Deutsch'], ['it-IT', 'Italiano'], ['pt-PT', 'Português'], ['nl-NL', 'Nederlands'], ['ar-SA', 'العربية'], ['tr-TR', 'Türkçe']];
       if (!langs.some(l => l[0] === Settings.tmdbLang)) langs.unshift([Settings.tmdbLang, Settings.tmdbLang]);
       const m = this.openModal(`${this.closeBtn()}
         <h2 class="sheet-title">Settings</h2>
         <section class="set-group">
           <h3>Account</h3>
+          ${this.api.isM3U ? `<div class="kv link"><span>Playlist</span><code>${esc(this.api.url)}</code></div>` : `
+          ${CFG.playerMode ? `<div class="kv link"><span>Server</span><code>${esc(this.api.server)}</code></div>` : ''}
           <div class="kv"><span>Username</span><b>${esc(this.api.username)}</b></div>
           <div class="kv"><span>Status</span><b class="ok">${esc(ui.status || 'Active')}</b></div>
           <div class="kv"><span>Expires</span><b>${esc(exp)}</b></div>
-          <div class="kv"><span>Connections</span><b>${esc(ui.active_cons ?? '–')} / ${esc(ui.max_connections ?? '–')}</b></div>
+          <div class="kv"><span>Connections</span><b>${esc(ui.active_cons ?? '–')} / ${esc(ui.max_connections ?? '–')}</b></div>`}
         </section>
         <section class="set-group">
           <h3>Playback</h3>
@@ -1503,9 +1716,11 @@
             <select class="field" id="setFormat"><option value="m3u8">HLS (.m3u8)</option><option value="ts">MPEG-TS (.ts)</option></select></label>
           <label class="set"><span>Info language<small>Language for summaries and titles from TMDB.</small></span>
             <select class="field" id="setLang">${langs.map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join('')}</select></label>
-          <label class="set"><span>Catch-up time correction<small>If replays start at the wrong time, shift them here.</small></span>
+          <label class="set"${this.api.isM3U ? ' hidden' : ''}><span>Catch-up time correction<small>If replays start at the wrong time, shift them here.</small></span>
             <select class="field" id="setShift">${[-2, -1, 0, 1, 2].map(h => `<option value="${h}">${h === 0 ? 'None (server time)' : (h > 0 ? '+' : '−') + Math.abs(h) + ' hour' + (Math.abs(h) > 1 ? 's' : '')}</option>`).join('')}</select></label>
-          <label class="set toggle"><span>Show adult categories</span><input type="checkbox" id="setAdult"></label>
+          <label class="set toggle"><span>Show adult categories<small>Protected by your parental PIN. Hidden again each time the app starts.</small></span><input type="checkbox" id="setAdult"></label>
+          <div class="kv"><span>Parental PIN</span><b id="pinState">${Settings.adultPin ? 'Set' : 'Not set'}</b></div>
+          ${Settings.adultPin ? '<div class="set-row vpn-actions"><button class="btn ghost" id="pinChange">Change PIN</button></div>' : ''}
         </section>
         ${window.Native ? `<section class="set-group" id="vpnGroup">
           <h3>Free VPN</h3>
@@ -1527,7 +1742,8 @@
         <section class="set-group">
           <h3>Playlist links</h3>
           <div class="kv link"><span>M3U</span><code>${esc(this.api.m3uUrl())}</code><button class="round-btn sm" data-copy="${esc(this.api.m3uUrl())}" aria-label="Copy M3U link">${ICONS.copy}</button></div>
-          <div class="kv link"><span>EPG</span><code>${esc(this.api.epgUrl())}</code><button class="round-btn sm" data-copy="${esc(this.api.epgUrl())}" aria-label="Copy EPG link">${ICONS.copy}</button></div>
+          ${this.api.epgUrl() ? `<div class="kv link"><span>EPG</span><code>${esc(this.api.epgUrl())}</code><button class="round-btn sm" data-copy="${esc(this.api.epgUrl())}" aria-label="Copy EPG link">${ICONS.copy}</button></div>` : ''}
+          ${CFG.privacyUrl ? `<div class="kv link"><span>Privacy policy</span><code>${esc(CFG.privacyUrl.replace(/^https?:\/\//, ''))}</code></div>` : ''}
         </section>
         <div class="set-actions">
           <button class="btn ghost" id="clearCw">Clear Continue Watching</button>
@@ -1544,12 +1760,26 @@
       $('#setFormat', m).addEventListener('change', e => save('liveFormat', e.target.value));
       const resetPicks = () => { delete this.data.moviePicks; delete this.data.seriesPicks; delete this.data.liveCatalog; };
       $('#setLang', m).addEventListener('change', e => { save('tmdbLang', e.target.value); TMDB.cache.clear(); resetPicks(); });
-      $('#setAdult', m).addEventListener('change', e => { save('showAdult', e.target.checked); resetPicks(); this.route(); });
+      $('#setAdult', m).addEventListener('change', async e => {
+        const box = e.target, on = box.checked;
+        // Turning adult categories on needs the parental PIN (created the first time).
+        if (on) {
+          box.checked = false;
+          if (!(await this.askPin(Settings.adultPin ? 'check' : 'create'))) return;
+          box.checked = true;
+          $('#pinState', m).textContent = 'Set';
+        }
+        Settings.showAdult = on;
+        resetPicks();
+        this.route();
+      });
+      const pinChange = $('#pinChange', m);
+      if (pinChange) pinChange.addEventListener('click', async () => { if (await this.askPin('change')) await this.askPin('create'); });
       $('#testRelay', m).addEventListener('click', async () => {
         save('relay', $('#setRelay', m).value.trim());
         if (!Settings.relay) return this.toast('Enter a relay URL first');
         try {
-          const r = await fetch(relayUrl(this.api.apiUrl({})));
+          const r = await fetch(relayUrl(this.api.apiUrl ? this.api.apiUrl({}) : this.api.url));
           const d = await r.json();
           this.toast(d && d.user_info ? 'Relay works ✓' : 'Relay answered, but not with your account');
         } catch { this.toast('Relay not reachable'); }

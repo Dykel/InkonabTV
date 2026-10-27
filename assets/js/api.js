@@ -24,8 +24,10 @@
     { server: CFG.server, relay: CFG.relay || '', liveFormat: 'm3u8', showAdult: false, tmdbLang: defaultLang, catchupShift: 0 },
     Store.get('settings', {})
   );
+  // Adult categories are hidden again at every start (parental PIN); only the PIN is kept.
+  Settings.showAdult = false;
   Settings.save = function () {
-    const { save, ...plain } = Settings;
+    const { save, showAdult, ...plain } = Settings;
     Store.set('settings', plain);
   };
 
@@ -231,6 +233,106 @@
     epgUrl() { return `${this.server}/xmltv.php?username=${encodeURIComponent(this.username)}&password=${encodeURIComponent(this.password)}`; }
   }
 
+  // An M3U playlist behind the same interface as Xtream, so the whole app works with either.
+  // Entries are sorted into live channels, movies and series episodes ("Show S01E02"); ids are
+  // a hash of the link so favorites and Continue Watching survive playlist refreshes.
+  class M3UPlaylist {
+    constructor(url) {
+      this.url = url.trim();
+      this.server = this.url;
+      this.username = 'Playlist';
+      this.cache = new Map();
+      this.isM3U = true;
+    }
+
+    async login() {
+      const key = 'm3u|' + this.url;
+      let hit = await Disk.get(key);
+      if (!hit || !hit.d) {
+        hit = { t: Date.now(), d: await M3U.load(this.url) };
+        Disk.set(key, hit);
+      } else if (Date.now() - hit.t > MAX_AGE) this.scheduleRefresh();
+      this.savedT = hit.t;
+      this.index(hit.d);
+      if (!this.live.length && !this.vod.length && !this.series.length) throw new Error('This playlist is empty');
+      this.info = { user_info: { username: this.username, status: 'Active' }, server_info: {} };
+      return this.info;
+    }
+
+    index(entries) {
+      const hash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return (h >>> 0).toString(36); };
+      const ext = u => ((u.match(/\.([a-z0-9]{2,4})(?:\?|$)/i) || [])[1] || 'm3u8').toLowerCase();
+      const cats = { live: new Map(), movie: new Map(), series: new Map() };
+      const catId = (kind, name) => {
+        const m = cats[kind];
+        if (!m.has(name)) m.set(name, { category_id: kind[0] + hash(name), category_name: name, parent_id: 0 });
+        return m.get(name).category_id;
+      };
+      this.urls = new Map();
+      this.live = []; this.vod = []; this.series = [];
+      const shows = new Map();
+      entries.forEach((e, i) => {
+        const id = hash(e.url);
+        this.urls.set(id, e.url);
+        const ep = e.name.match(/^(.*?)[\s._-]*S(\d{1,2})\s*E(\d{1,3})\b[\s._-]*(.*)$/i);
+        const kind = /\/series\//.test(e.url) || (ep && e.type !== 'live') ? 'series'
+          : /\/movie\//.test(e.url) || e.type === 'movie' || /\b(movies?|films?|vod|cin[eé]ma)\b/i.test(e.group) || /\.(mp4|mkv|avi|mov)(\?|$)/i.test(e.url) ? 'movie' : 'live';
+        const group = e.group || { live: 'Channels', movie: 'Movies', series: 'Series' }[kind];
+        if (kind === 'live') {
+          this.live.push({ num: i + 1, name: e.name, stream_id: id, stream_icon: e.logo, category_id: catId('live', group), epg_channel_id: e.tvgId || '', is_adult: 0 });
+        } else if (kind === 'movie') {
+          this.vod.push({ stream_id: id, name: e.name, stream_icon: e.logo, category_id: catId('movie', group), container_extension: ext(e.url), added: entries.length - i, rating: 0, is_adult: 0, tmdb: e.tmdb || '' });
+        } else {
+          const title = (ep ? ep[1] : e.name).trim() || e.name;
+          let s = shows.get(title);
+          if (!s) {
+            s = { series_id: 's' + hash(title), name: title, cover: e.logo, category_id: catId('series', group), last_modified: entries.length - i, tmdb: e.tmdb || '', episodes: {} };
+            shows.set(title, s);
+            this.series.push(s);
+          }
+          const season = String(ep ? Number(ep[2]) : 1);
+          (s.episodes[season] = s.episodes[season] || []).push({
+            id, episode_num: ep ? Number(ep[3]) : s.episodes[season].length + 1, title: ep ? ep[4] : e.name,
+            container_extension: ext(e.url), info: { movie_image: e.logo },
+          });
+        }
+      });
+      this.cats = { live: [...cats.live.values()], movie: [...cats.movie.values()], series: [...cats.series.values()] };
+    }
+
+    savedAt() { return this.savedT || null; }
+    scheduleRefresh(delay = 8000) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = setTimeout(() => this.refreshAll(), delay);
+    }
+    async refreshAll() {
+      try {
+        const d = await M3U.load(this.url);
+        if (!d.length) return false;
+        this.savedT = Date.now();
+        await Disk.set('m3u|' + this.url, { t: this.savedT, d });
+        this.index(d);
+        window.dispatchEvent(new CustomEvent('inkonab:catalog'));
+        return true;
+      } catch { return false; }
+    }
+
+    byCat(list, categoryId) { return Promise.resolve(categoryId == null ? list : list.filter(x => x.category_id === categoryId)); }
+    liveCategories() { return Promise.resolve(this.cats.live); }
+    vodCategories() { return Promise.resolve(this.cats.movie); }
+    seriesCategories() { return Promise.resolve(this.cats.series); }
+    liveStreams(categoryId) { return this.byCat(this.live, categoryId); }
+    vodStreams(categoryId) { return this.byCat(this.vod, categoryId); }
+    seriesList(categoryId) { return this.byCat(this.series, categoryId); }
+    vodInfo(id) { const v = this.vod.find(x => x.stream_id === String(id)); return Promise.resolve({ info: {}, movie_data: { container_extension: v && v.container_extension } }); }
+    seriesInfo(id) { const s = this.series.find(x => x.series_id === String(id)); return Promise.resolve(s ? { info: { name: s.name, cover: s.cover }, episodes: s.episodes } : null); }
+    shortEpg() { return Promise.resolve([]); }
+    epgTable() { return Promise.resolve([]); }
+    streamUrl(kind, id) { return this.urls.get(String(id)) || String(id); }
+    m3uUrl() { return this.url; }
+    epgUrl() { return ''; }
+  }
+
   const TMDB = {
     img: (path, size = 'w780') => (path ? `https://image.tmdb.org/t/p/${size}${path}` : ''),
     cache: new Map(),
@@ -309,7 +411,7 @@
         const line = raw.trim();
         if (line.startsWith('#EXTINF')) {
           const attr = k => (line.match(new RegExp(k + '="([^"]*)"')) || [])[1] || '';
-          cur = { name: line.slice(line.lastIndexOf(',') + 1).trim(), logo: attr('tvg-logo'), group: attr('group-title') };
+          cur = { name: line.slice(line.lastIndexOf(',') + 1).trim(), logo: attr('tvg-logo'), group: attr('group-title'), tvgId: attr('tvg-id'), type: attr('tvg-type'), tmdb: attr('tmdb-id') || attr('tvg-tmdb') };
         } else if (line && !line.startsWith('#') && cur) {
           cur.url = line;
           cur.radio = /radio/i.test(cur.group) || /\bradio\b|\bfm\b/i.test(cur.name) || /\/radio\.|fm\.m3u8$/i.test(line);
@@ -338,6 +440,7 @@
   window.Store = Store;
   window.Settings = Settings;
   window.Xtream = Xtream;
+  window.M3UPlaylist = M3UPlaylist;
   window.Disk = Disk;
   window.TMDB = TMDB;
   window.M3U = M3U;

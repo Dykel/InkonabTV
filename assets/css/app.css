@@ -147,6 +147,47 @@ select.field option { background: #13252b; }
 .remember input { width: 18px; height: 18px; accent-color: var(--accent); }
 .login-error { color: var(--danger); min-height: 1.2em; margin: 0; font-size: .92rem; }
 .wide-btn { justify-content: center; width: 100%; padding: 15px; font-size: 1.05rem; }
+.login-card.wide { width: min(540px, 100%); }
+.login-card.has-pair { width: min(600px, 100%); }
+.login-modes { display: flex; gap: 6px; padding: 5px; border-radius: 999px; background: rgba(0,0,0,.28); border: 1px solid var(--line); }
+.login-modes[hidden] { display: none; }
+.login-mode { flex: 1; padding: 10px 8px; border-radius: 999px; color: var(--muted); font-size: .88rem; font-weight: 600; white-space: nowrap; }
+.login-mode.active { background: var(--tab); color: #fff; }
+.login-mode:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.lf[hidden], .pair[hidden], [data-for][hidden] { display: none; }
+.login-note { margin: 0; color: var(--muted); font-size: .82rem; line-height: 1.45; text-align: center; }
+.pair { display: flex; gap: 22px; align-items: center; }
+.pair-qr { width: 168px; height: 168px; flex: none; border-radius: 14px; background: #fff; padding: 8px; image-rendering: pixelated; }
+.pair-qr:not([src]) { visibility: hidden; }
+.pair-text { min-width: 0; display: grid; gap: 6px; }
+.pair-text p { margin: 0; color: var(--muted); font-size: .92rem; }
+.pair-url { font-size: 1rem; word-break: break-all; color: var(--text); }
+.pair-code { font-family: var(--font-display); font-size: 2.6rem; letter-spacing: .14em; color: var(--accent); line-height: 1.1; }
+.pair-text .muted { font-size: .8rem; }
+
+/* ---------- no network ---------- */
+.net-down {
+  position: fixed; top: 22px; left: 50%; transform: translateX(-50%); z-index: 90;
+  width: min(560px, calc(100% - 32px)); padding: 16px 20px; border-radius: 18px;
+  background: var(--glass-strong); border: 1px solid var(--danger); box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  display: grid; gap: 4px; pointer-events: none;
+}
+.net-down[hidden] { display: none; }
+.net-down b { color: var(--danger); font-size: 1.05rem; }
+.net-down span { color: var(--muted); font-size: .9rem; }
+
+/* ---------- parental PIN ---------- */
+.pin-dlg { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; background: rgba(3,7,9,.72); }
+.pin-card { width: min(380px, calc(100% - 32px)); padding: 28px 26px 22px; border-radius: 24px; background: var(--glass-strong); border: 1px solid var(--line-strong); display: grid; gap: 14px; justify-items: center; text-align: center; }
+.pin-card h3 { margin: 0; font-size: 1.2rem; }
+.pin-card p { margin: 0; color: var(--muted); font-size: .88rem; }
+.pin-dots { display: flex; gap: 14px; }
+.pin-dots i { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line-strong); }
+.pin-dots i.on { background: var(--accent); border-color: var(--accent); }
+.pin-err { color: var(--danger) !important; min-height: 1.2em; }
+.pin-pad { display: grid; grid-template-columns: repeat(3, 64px); gap: 10px; }
+.pin-pad button { height: 54px; border-radius: 14px; background: rgba(255,255,255,.1); border: 1px solid var(--line); font-size: 1.3rem; font-weight: 600; }
+.pin-pad button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; background: rgba(255,255,255,.22); }
 
 /* ---------- top bar ---------- */
 .topbar {
@@ -484,6 +525,7 @@ img.broken { visibility: hidden; }
 .kv.link { align-items: center; }
 .kv.link code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .82rem; color: #c8d5d9; background: rgba(255,255,255,.05); padding: 8px 10px; border-radius: 8px; }
 .set { display: grid; grid-template-columns: 1fr minmax(0, 320px); gap: 16px; align-items: center; padding: 10px 0; }
+.set[hidden] { display: none; }
 .set > span:first-child { display: grid; }
 .set small { color: var(--muted); font-size: .84rem; }
 .set-row { display: flex; gap: 8px; }

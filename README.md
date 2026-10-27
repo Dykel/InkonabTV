@@ -95,6 +95,38 @@ Build: `npm run tizen` → `build/tizen/` (code converted for older TV engines, 
 
 The free VPN is Android-only (Samsung TVs don't let apps create VPNs).
 
+**Store version (player mode).** The Samsung build is a pure player, so it can be published in
+the Samsung store: there is no built-in server and no MBC PLAY. People add their own playlist
+with an Xtream Codes account (server, username, password), an M3U link, or **Set up from phone**
+(see below). The interface follows the TV's menu language (English, French, Spanish, German,
+Italian, Portuguese). Other Samsung store requirements are also covered: the screensaver turns
+off during playback, a message appears when the network drops, adult categories need a parental
+PIN, and movies have on-screen play controls.
+Store files are in `store/samsung/`: icons, 1920×1080 screenshots, `App_Description.md` for
+Samsung's description template and `Store_Listing.md` with the store texts. The free test
+playlist for Samsung's reviewers is `test/samsung-review.m3u`. It holds only Blender open movies
+and public test streams.
+
+## Remote setup (fill in a TV's playlist from your phone)
+
+With remote setup switched on, the sign-in screen has a **Set up from phone** tab that shows a
+code and a QR code. Open `https://dykel.github.io/InkonabTV/setup.html` (or scan the QR code),
+enter the code and the playlist, and press **Send to TV**. The TV signs in by itself within a
+few seconds. Each code works once and expires after 15 minutes. The details pass through a small
+Cloudflare Worker (`proxy/pair/`) that deletes them as soon as the TV collects them.
+
+Deploy the worker once (free Cloudflare plan):
+
+```bash
+cd proxy/pair
+npx wrangler login
+npx wrangler deploy
+```
+
+Copy the URL it prints (e.g. `https://inkonab-pair.yourname.workers.dev`) into `pairApi:` in
+`config.js`, then rebuild the apps (`npm run tizen`, `npm run apk`) and push so the website's
+setup page uses it too. While `pairApi` is empty, the tab is hidden.
+
 ## Run it on your computer
 
 ```bash

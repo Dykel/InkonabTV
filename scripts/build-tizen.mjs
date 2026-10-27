@@ -5,6 +5,8 @@
 // - CSS: `inset`, clamp()/min()/max(), :focus-visible and grid `gap` are rewritten into forms
 //   older engines understand; tizen/tizen.css adds AVPlay styles and other fallbacks.
 // - hls.js / mpegts.js / Capacitor are left out: Samsung's AVPlay plays the streams.
+// - Player mode (store version): no built-in server or free playlists; people add their own
+//   Xtream account or M3U link (config.js → playerMode).
 import { cpSync, rmSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, copyFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -18,13 +20,15 @@ const TARGET = 'chrome56';
 const VW = 1920, VH = 1080, REM = 16; // TV viewport, used to resolve clamp()/min()/max()
 
 rmSync(out, { recursive: true, force: true });
-mkdirSync(join(out, 'assets', 'js'), { recursive: true });
+mkdirSync(join(out, 'assets', 'js', 'vendor'), { recursive: true });
 mkdirSync(join(out, 'assets', 'css'), { recursive: true });
 cpSync(join(root, 'config.js'), join(out, 'config.js'));
 
 // ---------- JS ----------
 const lower = (code, file) => transformSync(code, { target: TARGET, loader: 'js', sourcefile: file, charset: 'utf8' }).code;
-writeFileSync(join(out, 'config.js'), lower(readFileSync(join(root, 'config.js'), 'utf8'), 'config.js'));
+writeFileSync(join(out, 'config.js'), lower(readFileSync(join(root, 'config.js'), 'utf8') +
+  "\nObject.assign(window.INKONAB_CONFIG, { playerMode: true, server: '', freePlaylists: [] });\n", 'config.js'));
+writeFileSync(join(out, 'assets/js/vendor/qrcode.js'), lower(readFileSync(join(root, 'assets/js/vendor/qrcode.js'), 'utf8'), 'qrcode.js'));
 writeFileSync(join(out, 'assets/js/polyfills.js'), lower(readFileSync(join(root, 'tizen/polyfills.js'), 'utf8'), 'polyfills.js'));
 for (const f of readdirSync(join(root, 'assets/js'))) {
   if (!f.endsWith('.js') || f === 'native.js') continue;
@@ -105,7 +109,7 @@ writeFileSync(join(out, 'config.xml'), `<?xml version="1.0" encoding="UTF-8"?>
     <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>
     <icon src="icon.png"/>
     <name>InkonabTV</name>
-    <description>InkonabTV — Live TV, movies and series</description>
+    <description>InkonabTV — a player for your own IPTV playlists (Xtream Codes and M3U)</description>
     <tizen:profile name="tv-samsung"/>
     <tizen:privilege name="http://tizen.org/privilege/internet"/>
     <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
@@ -115,7 +119,7 @@ writeFileSync(join(out, 'config.xml'), `<?xml version="1.0" encoding="UTF-8"?>
     <access origin="*" subdomains="true"/>
 </widget>
 `);
-copyFileSync(join(root, 'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png'), join(out, 'icon.png'));
+copyFileSync(join(root, 'store/samsung/icon_512x423.png'), join(out, 'icon.png')); // Samsung: 512 × 423
 console.log('Samsung TV app built in build/tizen');
 
 // ---------- package (.wgt) ----------

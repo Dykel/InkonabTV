@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1518">
+  <meta name="referrer" content="no-referrer">
+  <title>InkonabTV remote setup</title>
+  <link rel="icon" type="image/svg+xml" href="https://raw.githubusercontent.com/Dykel/inkonab/refs/heads/main/icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700&family=Saira:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    .setup-code { font-family: var(--font-display); font-size: 1.6rem; letter-spacing: .18em; text-transform: uppercase; text-align: center; }
+    .setup-done { text-align: center; display: grid; gap: 10px; }
+    .setup-done b { color: var(--ok); font-size: 1.2rem; }
+  </style>
+</head>
+<body>
+  <div class="bg" aria-hidden="true"><div class="bg-shade"></div></div>
+  <section class="login">
+    <form id="setup" class="login-card" autocomplete="off">
+      <img class="login-logo" data-logo alt="InkonabTV">
+      <p class="login-sub">Remote setup</p>
+      <label class="lf"><span>Code shown on the TV</span><input class="field setup-code" id="code" maxlength="7" autocapitalize="characters" spellcheck="false" placeholder="ABC-123" required></label>
+      <div class="login-modes">
+        <button type="button" class="login-mode active" data-mode="xtream">Xtream Codes</button>
+        <button type="button" class="login-mode" data-mode="m3u">M3U playlist</button>
+      </div>
+      <label class="lf" data-for="xtream"><span>Server address</span><input class="field" id="server" type="url" inputmode="url" placeholder="http://server.example:8080" autocapitalize="none" spellcheck="false"></label>
+      <label class="lf" data-for="xtream"><span>Username</span><input class="field" id="user" autocapitalize="none" spellcheck="false"></label>
+      <label class="lf" data-for="xtream"><span>Password</span><input class="field" id="pass" type="password"></label>
+      <label class="lf" data-for="m3u" hidden><span>Playlist link (M3U)</span><input class="field" id="m3u" type="url" inputmode="url" placeholder="https://example.com/playlist.m3u" autocapitalize="none" spellcheck="false"></label>
+      <p class="login-error" id="err" role="alert"></p>
+      <button class="btn primary wide-btn" id="send" type="submit">Send to TV</button>
+      <p class="login-note">The account goes straight to the TV that shows this code and is deleted as soon as the TV receives it (at most 15 minutes later). InkonabTV is a media player: it doesn’t include or sell any channels or content.</p>
+    </form>
+  </section>
+
+  <script src="config.js"></script>
+  <script src="assets/js/i18n.js"></script>
+  <script>
+    (function () {
+      const CFG = window.INKONAB_CONFIG, $ = s => document.querySelector(s);
+      document.querySelectorAll('[data-logo]').forEach(i => { i.src = CFG.logo; });
+      let mode = 'xtream';
+      document.querySelectorAll('.login-mode').forEach(b => b.addEventListener('click', () => {
+        mode = b.dataset.mode;
+        document.querySelectorAll('.login-mode').forEach(x => x.classList.toggle('active', x === b));
+        document.querySelectorAll('[data-for]').forEach(el => { el.hidden = el.dataset.for !== mode; });
+      }));
+      // The TV's QR code opens this page as setup.html#ABC123.
+      const fromHash = location.hash.slice(1).replace(/[^A-Za-z0-9]/g, '');
+      if (fromHash) { $('#code').value = fromHash.slice(0, 3) + '-' + fromHash.slice(3); history.replaceState(null, '', location.pathname); }
+      (fromHash ? $('#server') : $('#code')).focus();
+
+      const say = msg => { $('#err').textContent = window.T(msg); };
+      $('#setup').addEventListener('submit', async e => {
+        e.preventDefault();
+        if (!CFG.pairApi) return say('Remote setup isn’t available right now. Try again later.');
+        const code = $('#code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (code.length !== 6) return say('Enter the 6-character code shown on the TV.');
+        const body = mode === 'm3u'
+          ? { m: $('#m3u').value.trim() }
+          : { s: $('#server').value.trim(), u: $('#user').value.trim(), p: $('#pass').value };
+        if (mode === 'm3u' ? !body.m : !(body.s && body.u && body.p)) {
+          return say(mode === 'm3u' ? 'Enter the playlist link.' : 'Enter the server address, username and password.');
+        }
+        const btn = $('#send');
+        btn.disabled = true;
+        say('');
+        try {
+          const r = await fetch(CFG.pairApi.replace(/\/+$/, '') + '/pair/' + code, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+          });
+          if (r.status === 204) {
+            $('#setup').innerHTML = `<img class="login-logo" src="${CFG.logo}" alt="InkonabTV"><div class="setup-done"><b></b><p></p></div>`;
+            $('.setup-done b').textContent = window.T('Sent to the TV ✓');
+            $('.setup-done p').textContent = window.T('The TV signs in by itself within a few seconds. You can close this page.');
+            return;
+          }
+          say(r.status === 409 ? 'This code was already used. Ask for the new code on the TV.' : r.status === 404 ? 'This code is wrong or has expired. Check the code on the TV.' : 'Remote setup isn’t available right now. Try again later.');
+        } catch {
+          say('Remote setup isn’t available right now. Try again later.');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
