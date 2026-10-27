@@ -1497,7 +1497,7 @@
         </section>
         <section class="set-group">
           <h3>Playback</h3>
-          <label class="set"><span>HTTPS relay URL<small>Needed to play video when this site is opened over HTTPS. See README.</small></span>
+          <label class="set"${window.Native ? ' hidden' : ''}><span>HTTPS relay URL<small>Needed to play video when this site is opened over HTTPS. See README.</small></span>
             <span class="set-row"><input class="field" id="setRelay" type="url" placeholder="https://inkonab-relay.you.workers.dev" value="${esc(Settings.relay)}"><button class="btn ghost" id="testRelay">Test</button></span></label>
           <label class="set"><span>Live stream format<small>HLS works best in browsers; try MPEG-TS if a channel won’t start.</small></span>
             <select class="field" id="setFormat"><option value="m3u8">HLS (.m3u8)</option><option value="ts">MPEG-TS (.ts)</option></select></label>
