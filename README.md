@@ -70,6 +70,31 @@ The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. To in
 
 After changing the web app, run `npm run sync` (or `npm run apk`) so the Android app gets the new files.
 
+## Samsung TV app (Tizen)
+
+The same app, packaged for Samsung Smart TVs (2018 and newer). It uses Samsung's own video
+player (AVPlay), so HLS, MPEG-TS, MKV and Dolby audio play directly — no relay needed.
+
+Remote: arrows / OK / **Back** as usual (Back on Home exits). While live TV plays: **OK** or
+**◀** opens the channel list, **CH+ / CH−** change channel, **▶** switches quality, number keys
+jump to a channel. Colour keys: **Red** ★ favorite, **Green** channel list, **Yellow** TV Guide,
+**Blue** search. On text fields press **OK** to open the keyboard.
+
+Build: `npm run tizen` → `build/tizen/` (code converted for older TV engines, see
+`scripts/build-tizen.mjs`). To install it on your TV once:
+
+1. **TV:** open *Apps*, press **1 2 3 4 5** on the remote, switch **Developer mode** on, enter your
+   Mac's IP address, then restart the TV (hold Power until it reboots).
+2. **Mac:** connect to the TV: `~/tizen-studio/tools/sdb connect <TV-IP>`
+3. **Certificate (one time):** open `~/tizen-studio/tools/certificate-manager/certificate-manager.app`,
+   click **+**, choose **Samsung** → **TV**, name the profile **InkonabTV**, create an author
+   certificate (any name and password), sign in with your Samsung account, and create the
+   distributor certificate for the connected TV.
+4. `npm run tizen` now also signs `build/tizen/InkonabTV.wgt`; install it with
+   `~/tizen-studio/tools/ide/bin/tizen install -n InkonabTV.wgt -- build/tizen`.
+
+The free VPN is Android-only (Samsung TVs don't let apps create VPNs).
+
 ## Run it on your computer
 
 ```bash

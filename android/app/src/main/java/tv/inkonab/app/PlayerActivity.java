@@ -928,11 +928,12 @@ public class PlayerActivity extends AppCompatActivity {
                     view.showController();
                     return true;
                 // ▲/▼ always change channel, like a TV remote. ◀/▶ change quality while the controls are hidden.
-                case KeyEvent.KEYCODE_CHANNEL_UP:
+                // ▲/▼ move up/down the list; CH+/CH− go to the next/previous channel number.
+                case KeyEvent.KEYCODE_CHANNEL_DOWN:
                 case KeyEvent.KEYCODE_PAGE_UP:
                 case KeyEvent.KEYCODE_DPAD_UP:
                     zap(-1); return true;
-                case KeyEvent.KEYCODE_CHANNEL_DOWN:
+                case KeyEvent.KEYCODE_CHANNEL_UP:
                 case KeyEvent.KEYCODE_PAGE_DOWN:
                 case KeyEvent.KEYCODE_DPAD_DOWN:
                     zap(1); return true;

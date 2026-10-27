@@ -189,7 +189,8 @@ body[data-view="home"] main { padding-top: 0; }
 .hero {
   min-height: clamp(420px, 62vh, 720px);
   display: flex; align-items: flex-end; justify-content: flex-end;
-  padding: 140px var(--gutter) 24px;
+  /* the first row slides up 150px over the backdrop: keep the banner text above it */
+  padding: 140px var(--gutter) 172px;
 }
 .hero-info { width: min(760px, 48%); }
 .hero.in .hero-info > * { animation: rise .5s ease both; }

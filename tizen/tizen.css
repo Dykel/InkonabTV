@@ -1,0 +1,39 @@
+/* Samsung TV (Tizen) only: AVPlay video plane, VOD progress bar, and fallbacks for older engines. */
+
+/* AVPlay draws the video on a layer *behind* the web page: everything above it must be transparent
+   while a video plays. */
+html.tizen body.playing, html.tizen body.playing .player { background: transparent !important; }
+html.tizen body.playing #app, html.tizen body.playing .bg { visibility: hidden; }
+html.tizen #video { display: none; }
+html.tizen #avplayer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+html.tizen .player:focus { outline: none; }
+
+/* Movies / episodes: progress bar (AVPlay has no on-screen controls). */
+.tz-progress {
+  position: absolute; left: 48px; right: 48px; bottom: 36px; z-index: 3;
+  display: flex; align-items: center;
+  font: 600 1.05rem var(--font-display); color: #fff; text-shadow: 0 1px 8px #000;
+  transition: opacity .3s;
+}
+.tz-progress[hidden] { display: none; }
+.tz-progress .bar { flex: 1; height: 6px; margin: 0 18px; background: rgba(255,255,255,.25); }
+.tz-progress .bar i { background: var(--accent); }
+.player:not(.ui) .tz-progress { opacity: 0; }
+
+/* ---------- older engines ---------- */
+/* No aspect-ratio (Chromium < 88): give boxes their height with the padding trick. */
+html.no-aspect .poster, html.no-aspect .detail-poster { height: 0; padding-top: 150%; }
+html.no-aspect .wide-img, html.no-aspect .ep-img { height: 0; padding-top: 56.25%; }
+html.no-aspect .wide-img img, html.no-aspect .ep-img img { position: absolute; top: 0; left: 0; }
+html.no-aspect .tile-logo { height: 0; padding-top: 62.5%; position: relative; }
+html.no-aspect .tile-logo img { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+
+/* No gap in flex rows (Chromium < 84): space items with margins instead. */
+html.no-flexgap .row-scroll > * + *, html.no-flexgap .hero-actions > * + *, html.no-flexgap .detail-actions > * + *,
+html.no-flexgap .top-right > * + *, html.no-flexgap .tabs > * + *, html.no-flexgap .nav-pill > * + *,
+html.no-flexgap .p-zap > * + *, html.no-flexgap .p-vers > * + *, html.no-flexgap .gp-days > * + *,
+html.no-flexgap .seasons > * + *, html.no-flexgap .detail-chips > * + *, html.no-flexgap .hero-meta > * + *,
+html.no-flexgap .detail-meta > * + *, html.no-flexgap .ch > * + *, html.no-flexgap .p-c > * + *,
+html.no-flexgap .guide-head > * + *, html.no-flexgap .set-actions > * + *, html.no-flexgap .cast > * + *,
+html.no-flexgap .ver-tags > * + *, html.no-flexgap .p-error-actions > * + * { margin-left: 12px; }
+html.no-flexgap .cats > * + *, html.no-flexgap .p-side-col > * + *, html.no-flexgap .gp-controls > * + * { margin-top: 10px; }

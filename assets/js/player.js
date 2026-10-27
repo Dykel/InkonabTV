@@ -11,7 +11,8 @@
 
     init() {
       this.el = $('#player');
-      this.video = $('#video');
+      // Samsung TVs: AVPlay (native player) through an adapter with the same API (tizen.js).
+      this.video = window.TizenAV ? TizenAV.create() : $('#video');
       this.el.querySelector('[data-act="close"]').addEventListener('click', () => this.close());
       this.el.querySelector('[data-act="prev"]').addEventListener('click', () => this.zap(-1));
       this.el.querySelector('[data-act="next"]').addEventListener('click', () => this.zap(1));
@@ -137,7 +138,9 @@
 
       const v = this.video;
       v.removeAttribute('src');
-      if (ext === 'm3u8' && window.Hls && Hls.isSupported()) {
+      if (v.isAV) {
+        v.src = url; // AVPlay handles HLS, MPEG-TS and files itself
+      } else if (ext === 'm3u8' && window.Hls && Hls.isSupported()) {
         this.hls = new Hls({ enableWorker: true, lowLatencyMode: item.kind === 'live', backBufferLength: 60 });
         this.hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) this.fail(d.details); });
         this.hls.loadSource(url);
@@ -392,30 +395,42 @@
       this.hideTimer = setTimeout(() => { if (this.el.dataset.state === 'playing') this.el.classList.remove('ui'); }, 3500);
     },
 
+    // The video has the remote's attention (the AVPlay adapter focuses the player itself).
+    mediaFocused() {
+      const a = document.activeElement;
+      return a === this.video || a === document.body || a === this.el || !!this.video.isAV && !this.el.contains(a);
+    },
+
     onKey(e) {
       if (!this.isOpen()) return;
       this.poke();
       const v = this.video, live = this.item && this.item.kind === 'live';
       if (live && this.sideOpen()) { if (this.sideKey(e)) e.stopPropagation(); return; }
       if (live && /^[0-9]$/.test(e.key) && !e.target.matches('input')) { e.preventDefault(); this.digit(e.key); return; }
-      if (live && e.key === 'Enter' && (document.activeElement === v || document.activeElement === document.body)) {
+      if (live && e.key === 'Enter' && this.mediaFocused()) {
         e.preventDefault(); e.stopPropagation(); this.openSide(); return;
       }
       switch (e.key) {
         case 'Escape': case 'Backspace': case 'BrowserBack': case 'GoBack':
           e.preventDefault(); e.stopPropagation(); this.close(); break;
-        case 'ArrowUp': case 'ChannelUp': case 'PageUp':
+        // ▲/▼ move up/down the list; CH+/CH− go to the next/previous channel number, like a TV.
+        case 'ArrowUp': case 'PageUp': case 'ChannelDown':
           if (live) { e.preventDefault(); e.stopPropagation(); this.zap(-1); } break;
-        case 'ArrowDown': case 'ChannelDown': case 'PageDown':
+        case 'ArrowDown': case 'PageDown': case 'ChannelUp':
           if (live) { e.preventDefault(); e.stopPropagation(); this.zap(1); } break;
         case 'ArrowLeft':
           if (live) { e.preventDefault(); e.stopPropagation(); this.openSide(); }
-          else if (document.activeElement === v) { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 10); } break;
+          else if (this.mediaFocused()) { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 10); } break;
         case 'ArrowRight':
           if (live) { if (this.stepVersion(1)) { e.preventDefault(); e.stopPropagation(); } }
-          else if (document.activeElement === v) { e.preventDefault(); v.currentTime += 10; } break;
+          else if (this.mediaFocused()) { e.preventDefault(); v.currentTime += 10; } break;
         case ' ': case 'MediaPlayPause':
-          if (document.activeElement === v || document.activeElement === document.body) { e.preventDefault(); v.paused ? v.play() : v.pause(); } break;
+          if (this.mediaFocused() || e.key === 'MediaPlayPause') { e.preventDefault(); v.paused ? v.play() : v.pause(); } break;
+        case 'MediaPlay': e.preventDefault(); v.play(); break;
+        case 'MediaPause': e.preventDefault(); v.pause(); break;
+        case 'MediaFastForward': if (!live) { e.preventDefault(); v.currentTime += 30; } break;
+        case 'MediaRewind': if (!live) { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 30); } break;
+        case 'MediaStop': e.preventDefault(); this.close(); break;
         case 'f':
           if (document.fullscreenElement) document.exitFullscreen(); else this.el.requestFullscreen && this.el.requestFullscreen().catch(() => {}); break;
       }
