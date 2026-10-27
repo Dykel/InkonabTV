@@ -7,8 +7,8 @@ android {
         applicationId "tv.inkonab.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 5
+        versionName "1.0.4"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,14 +16,40 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    // The OpenVPN engine (libovpnexec.so) runs as a process, so native libs must be extracted to disk.
+    // Two versions from the same code:
+    //   play  Google Play: a pure player (people add their own playlist), no VPN, no built-in server.
+    //   full  sideload APK: built-in InkonabTV server, MBC PLAY and the free VPN (OpenVPN + VPN Gate).
+    flavorDimensions "store"
+    productFlavors {
+        play { dimension "store" }
+        full {
+            dimension "store"
+            applicationIdSuffix ".full"
+        }
+    }
+    // The OpenVPN engine (libovpnexec.so, full version) runs as a process, so native libs are extracted.
     packagingOptions {
         jniLibs { useLegacyPackaging true }
+    }
+    // Release signing: android/keystore.properties (not in git), see README → Google Play.
+    def ks = rootProject.file('keystore.properties')
+    signingConfigs {
+        release {
+            if (ks.exists()) {
+                def p = new Properties()
+                ks.withInputStream { p.load(it) }
+                storeFile rootProject.file(p['storeFile'])
+                storePassword p['storePassword']
+                keyAlias p['keyAlias']
+                keyPassword p['keyPassword']
+            }
+        }
     }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (ks.exists()) signingConfig signingConfigs.release
         }
     }
 }

@@ -99,3 +99,8 @@ app/src/main/assets/public
 app/src/main/assets/capacitor.config.json
 app/src/main/assets/capacitor.plugins.json
 app/src/main/res/xml/config.xml
+
+# Release signing (never commit) and the generated Google Play config
+keystore.properties
+keystore/
+app/src/play/assets/public/

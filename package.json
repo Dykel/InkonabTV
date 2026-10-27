@@ -6,8 +6,9 @@
   "scripts": {
     "build:web": "node scripts/build-web.mjs",
     "sync": "npm run build:web && npx cap sync android",
-    "apk": "npm run sync && cd android && ./gradlew assembleDebug",
-    "apk:release": "npm run sync && cd android && ./gradlew assembleRelease",
+    "apk": "npm run sync && cd android && ./gradlew assembleFullDebug assemblePlayDebug",
+    "apk:release": "npm run sync && cd android && ./gradlew assembleFullRelease assemblePlayRelease",
+    "aab": "npm run sync && cd android && ./gradlew bundlePlayRelease",
     "tizen": "node scripts/build-tizen.mjs"
   },
   "dependencies": {

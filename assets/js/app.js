@@ -1852,7 +1852,7 @@
           <div class="kv"><span>Parental PIN</span><b id="pinState">${Settings.adultPin ? 'Set' : 'Not set'}</b></div>
           ${Settings.adultPin ? '<div class="set-row vpn-actions"><button class="btn ghost" id="pinChange">Change PIN</button></div>' : ''}
         </section>
-        ${window.Native ? `<section class="set-group" id="vpnGroup">
+        ${window.Native && CFG.vpn !== false ? `<section class="set-group" id="vpnGroup">
           <h3>Free VPN</h3>
           <label class="set"><span>When to use it<small>Only InkonabTV's traffic goes through it — the rest of the device is untouched.</small></span>
             <select class="field" id="vpnMode"><option value="auto">Automatic — when a channel won’t play</option><option value="always">Always on</option><option value="off">Off</option></select></label>

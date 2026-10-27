@@ -311,6 +311,17 @@ public class InkonabVpnService extends VpnService {
         else startForeground(1, n.build());
     }
 
+    // Swiped away from recent apps: end the session with the app.
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        stopping = true;
+        shutdown();
+        VpnManager.get().onServiceState(VpnManager.State.DISCONNECTED, null);
+        stopForeground(true);
+        stopSelf();
+        super.onTaskRemoved(rootIntent);
+    }
+
     @Override
     public void onRevoke() {
         stopping = true;

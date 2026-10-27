@@ -1,6 +1,9 @@
 package tv.inkonab.app.vpn;
 
+import android.app.Activity;
+import android.app.Application;
 import android.content.Context;
+import android.os.Bundle;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.VpnService;
@@ -36,6 +39,11 @@ public final class VpnManager {
     public interface Listener { void onVpn(State state, String detail); }
     public interface Done { void done(boolean ok, String detail); }
 
+    /** This version has the VPN (the Google Play version's stand-in says false). */
+    public static final boolean AVAILABLE = true;
+    /** Left in the background this long (Home / Source on a TV): the VPN session ends. */
+    private static final long BACKGROUND_STOP = 30000;
+
     private static final String TAG = "InkonabVPN";
     private static final long CONNECT_TIMEOUT = 20000;
     private static final int MAX_TRIES = 8;
@@ -66,7 +74,36 @@ public final class VpnManager {
         return instance;
     }
 
-    public void init(Context c) { if (app == null) app = c.getApplicationContext(); }
+    public void init(Context c) {
+        if (app != null) return;
+        app = c.getApplicationContext();
+        if (app instanceof Application) ((Application) app).registerActivityLifecycleCallbacks(lifecycle);
+    }
+
+    // The VPN session lasts while the app is in use: it ends a short while after the app leaves
+    // the screen (a quick switch to the player screen doesn't count) and comes back in "always" mode.
+    private int startedActivities;
+    private final Runnable leftApp = () -> {
+        if (startedActivities == 0 && (wanted || busy())) { Log.i(TAG, "App left: ending the VPN session"); disconnect(); }
+    };
+    private final Application.ActivityLifecycleCallbacks lifecycle = new Application.ActivityLifecycleCallbacks() {
+        @Override public void onActivityStarted(Activity a) {
+            startedActivities++;
+            main.removeCallbacks(leftApp);
+            if ("always".equals(mode()) && !busy() && consentIntent(a) == null) connect(null);
+        }
+        @Override public void onActivityStopped(Activity a) {
+            startedActivities = Math.max(0, startedActivities - 1);
+            if (startedActivities == 0) main.postDelayed(leftApp, BACKGROUND_STOP);
+        }
+        @Override public void onActivityDestroyed(Activity a) {
+            if (a.isFinishing() && a.isTaskRoot()) { main.removeCallbacks(leftApp); disconnect(); }
+        }
+        @Override public void onActivityCreated(Activity a, Bundle b) {}
+        @Override public void onActivityResumed(Activity a) {}
+        @Override public void onActivityPaused(Activity a) {}
+        @Override public void onActivitySaveInstanceState(Activity a, Bundle b) {}
+    };
 
     private SharedPreferences prefs() { return app.getSharedPreferences("vpn", Context.MODE_PRIVATE); }
     public String mode() { return prefs().getString("mode", "auto"); }

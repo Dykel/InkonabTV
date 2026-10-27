@@ -78,6 +78,7 @@ public class NativePlayerPlugin extends Plugin {
     private JSObject vpnJson() {
         VpnManager v = VpnManager.get();
         JSObject o = new JSObject();
+        o.put("available", VpnManager.AVAILABLE);
         o.put("state", v.state().name().toLowerCase());
         o.put("detail", v.detail());
         o.put("server", v.serverLabel());

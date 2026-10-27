@@ -59,14 +59,29 @@ Differences from the website, all improvements:
 - **Free VPN (built in):** when a channel won't play even after trying its other copies and formats, the app connects an app-only VPN through free [VPN Gate](https://www.vpngate.net) servers and retries — no separate VPN app. MBC PLAY always plays directly (it refuses VPN addresses): the VPN drops for it and comes back for provider channels. A channel that won't play tries VPN servers one country at a time (up to 6) with a message showing which; the server it plays through is remembered and used first next time (Settings → Free VPN shows it, *Forget server* resets it). A green/amber badge in the top bar and in the player shows the VPN status. Settings → Free VPN: *Automatic* (default), *Always on* or *Off*, and a preferred server country. Android asks once for permission to create the VPN. Free servers are run by volunteers — use them to unblock channels, not for privacy. See `THIRD_PARTY_NOTICES.md` (OpenVPN is GPL).
 - The remote works everywhere: the D-pad moves around the app, **Back** closes dialogs or goes Home, and in live TV **▲/▼** (or CH+/CH−) change channel and **◀/▶** change quality.
 
-Build it (needs Node, Java 21 and the Android SDK):
+**Two versions** are built from the same code:
+
+| Version | App ID / name | What's inside | Where it goes |
+| --- | --- | --- | --- |
+| `play` | `tv.inkonab.app` · InkonabTV | Pure player like the Samsung app: sign in with your own Xtream account or M3U link (or from a phone), extra playlists, no built-in server, no VPN | Google Play (`store/google-play/Play_Listing.md`) |
+| `full` | `tv.inkonab.app.full` · InkonabTV+ | Built-in InkonabTV server, MBC PLAY and the free VPN | Installed by hand (sideload) |
+
+Both can be installed side by side. In the full version the VPN session follows the app: it ends
+when you quit (Back on Home), swipe the app away, or leave it in the background for 30 seconds
+(Home / Source); "Always on" reconnects when you come back.
+
+Build them (needs Node, Java 21 and the Android SDK with API 36):
 
 ```bash
 npm install
 npm run apk
 ```
 
-The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. To install it on an Android TV, enable *Developer options → USB/Network debugging* on the TV, then run `adb connect <tv-ip>` and `adb install -r app-debug.apk`. Or copy the APK to a USB stick and open it with a file manager.
+Debug APKs: `android/app/build/outputs/apk/full/debug/` and `…/apk/play/debug/`. Signed release
+builds: `npm run apk:release` (both APKs) and `npm run aab` (the Google Play bundle,
+`android/app/build/outputs/bundle/playRelease/app-play-release.aab`). Release signing reads
+`android/keystore.properties` and `android/keystore/inkonab-upload.jks`, which are never
+committed: keep a backup of both. To install an APK on an Android TV, enable *Developer options → USB/Network debugging* on the TV, then run `adb connect <tv-ip>` and `adb install -r app-debug.apk`. Or copy the APK to a USB stick and open it with a file manager.
 
 After changing the web app, run `npm run sync` (or `npm run apk`) so the Android app gets the new files.
 

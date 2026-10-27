@@ -15,10 +15,9 @@ public class MainActivity extends BridgeActivity {
         WebSettings s = getBridge().getWebView().getSettings();
         s.setUseWideViewPort(true);
         s.setLoadWithOverviewMode(true);
-        // "Always on" VPN mode: reconnect at start when Android has already allowed it.
-        tv.inkonab.app.vpn.VpnManager vpn = tv.inkonab.app.vpn.VpnManager.get();
-        vpn.init(this);
-        if ("always".equals(vpn.mode()) && vpn.consentIntent(this) == null) vpn.connect(null);
+        // The VPN (sideload version) follows the app: "always on" connects while it is on screen
+        // and the session ends when the app is quit or left in the background (VpnManager).
+        tv.inkonab.app.vpn.VpnManager.get().init(this);
     }
 
     // On a focused text field the WebView swallows the remote's OK button, so the page never sees

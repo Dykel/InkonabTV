@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- Sideload version: its own name so it can sit next to the Google Play version. -->
+<resources>
+    <string name="app_name">InkonabTV+</string>
+    <string name="title_activity_main">InkonabTV+</string>
+</resources>

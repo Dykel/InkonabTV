@@ -70,7 +70,10 @@
             flat.push({
               title: ch.label || ch.name || '', img: ch.stream_icon || '', num: String(ch.num || ''), radio: !!ch.radio,
               gkey: ch.gkey || '', fav: App.isFav('live', ch.gkey), free: !!ch.source, // free playlist (MBC PLAY): never via the VPN
-              versions: (ch.versions || [ch]).map(v => (v.url ? { url: v.url, label: label(v) } : { id: String(v.stream_id), label: label(v) })),
+              // An M3U playlist has no URL template: each channel brings its own link.
+              versions: (ch.versions || [ch]).map(v => (v.url ? { url: v.url, label: label(v) }
+                : App.api && App.api.isM3U ? { url: App.api.streamUrl('live', v.stream_id), label: label(v) }
+                : { id: String(v.stream_id), label: label(v) })),
             });
           }
           return at.get(ch);
