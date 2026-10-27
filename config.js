@@ -25,7 +25,7 @@ window.INKONAB_CONFIG = {
   // Remote setup: the sign-in screen shows a code that someone enters on setupUrl to fill in
   // the account from a phone. pairApi is the pairing worker (proxy/pair-worker.js, see README);
   // leave it empty to hide remote setup.
-  pairApi: '',
+  pairApi: 'https://inkonab-pair.inkonab.workers.dev',
   setupUrl: 'https://dykel.github.io/InkonabTV/setup.html',
 
   privacyUrl: 'https://dykel.github.io/InkonabTV/privacy.html',
