@@ -48,7 +48,9 @@
     if (active && active.matches('input[type="text"], input[type="search"], input[type="password"], input[type="url"], textarea')) {
       if (dir === 'left' || dir === 'right') return;
     }
-    if (active && active.tagName === 'SELECT') return;
+    // On a TV the remote's arrows would change a dropdown's value and trap the focus there: move
+    // on instead (OK opens the dropdown). Elsewhere the arrows keep changing the value.
+    if (active && active.tagName === 'SELECT' && !document.documentElement.classList.contains('tv')) return;
     const next = find(active, dir);
     if (!next) return;
     e.preventDefault();

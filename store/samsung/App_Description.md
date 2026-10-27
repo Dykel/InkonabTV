@@ -1,6 +1,6 @@
 # InkonabTV — Application description (for Samsung TV app certification)
 
-Copy each section into the matching part of Samsung's App Description template.
+Seller: Joseph Jonathan COLLET · Support: https://github.com/Dykel/InkonabTV/issues
 
 ## 1. Application information
 
@@ -8,7 +8,7 @@ Copy each section into the matching part of Samsung's App Description template.
 | --- | --- |
 | App name | InkonabTV |
 | Tizen application ID | InkonabTV1.InkonabTV |
-| Version | 1.0.0 |
+| Version | 1.0.1 |
 | Type | Tizen web application (TV) |
 | Category | Video |
 | Supported resolution | 1920 × 1080 (FHD); the layout is scaled by the TV on UHD models |
