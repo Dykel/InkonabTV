@@ -55,7 +55,8 @@ public class NativePlayerPlugin extends Plugin {
     public void showKeyboard(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             WebView w = getBridge().getWebView();
-            w.requestFocus();
+            // Re-focusing a focused WebView makes it jump back to the last field it knew.
+            if (!w.hasFocus()) w.requestFocus();
             InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
             //noinspection deprecation — SHOW_FORCED is what makes the TV keyboard appear for a WebView field
             if (imm != null) imm.showSoftInput(w, InputMethodManager.SHOW_FORCED);

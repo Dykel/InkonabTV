@@ -24,13 +24,41 @@
       if (isText(e.target) && !e.target.dataset.typing) e.target.setAttribute('inputmode', 'none');
     }, true);
     document.addEventListener('focusout', e => {
-      if (isText(e.target)) delete e.target.dataset.typing;
+      // The WebView briefly blurs and refocuses a field when OK is pressed: keep it editable then.
+      if (isText(e.target) && Date.now() > (Number(e.target.dataset.hold) || 0)) delete e.target.dataset.typing;
     }, true);
+    // The web engine needs a moment to register the attribute change before Android will show
+    // the keyboard for the field (tested: immediately = ignored, 400 ms = shown).
     const openKeyboard = t => {
-      t.dataset.typing = '1';
-      t.removeAttribute('inputmode');
+      const editable = () => { t.dataset.typing = '1'; t.removeAttribute('inputmode'); };
+      t.dataset.hold = String(Date.now() + 1500);
+      editable();
       if (document.activeElement !== t) t.focus();
-      NativePlayer.showKeyboard().catch(() => {});
+      // Re-apply after the WebView's own OK handling, then ask Android for the keyboard.
+      setTimeout(() => {
+        if (document.activeElement !== t) t.focus();
+        editable();
+        setTimeout(() => { if (document.activeElement === t) NativePlayer.showKeyboard().catch(() => {}); }, 400);
+      }, 150);
+    };
+    // Called by MainActivity when OK is pressed (the WebView doesn't pass it on for text fields).
+    window.InkonabTV = {
+      okPressed() {
+        const t = document.activeElement;
+        if (!isText(t)) return false;
+        openKeyboard(t);
+        return true;
+      },
+      // ▲/▼ on a field that is still editable (keyboard closed with Back): the WebView moves the
+      // focus itself; make the field we leave remote-friendly again (no keyboard on next visit).
+      arrow() {
+        const t = document.activeElement;
+        if (!isText(t) || t.getAttribute('inputmode') === 'none') return false;
+        delete t.dataset.typing;
+        t.dataset.hold = '0';
+        t.setAttribute('inputmode', 'none');
+        return true;
+      },
     };
     document.addEventListener('keydown', e => {
       const t = e.target;

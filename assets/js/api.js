@@ -161,6 +161,8 @@
       try {
         data = await this.call('', {}, { cache: false });
       } catch (e) {
+        // The server answers a wrong account with 401/403/404: say so plainly (no offline fallback).
+        if (/Server error 40[134]/.test(e.message)) throw new Error('Wrong username or password');
         const remembered = Store.get('creds');
         data = remembered && remembered.u === this.username && remembered.p === this.password ? Store.get(savedKey) : null;
         if (!data) throw e;
