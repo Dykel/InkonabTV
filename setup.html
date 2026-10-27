@@ -27,11 +27,14 @@
       <div class="login-modes">
         <button type="button" class="login-mode active" data-mode="xtream">Xtream Codes</button>
         <button type="button" class="login-mode" data-mode="m3u">M3U playlist</button>
+        <button type="button" class="login-mode" data-mode="extra">Extra playlist</button>
       </div>
+      <p class="login-note" data-for="extra" hidden>Adds an M3U playlist next to the TV’s account (Settings → Extra playlists → Add from phone on the TV).</p>
+      <label class="lf" data-for="extra" hidden><span>Name</span><input class="field" id="xname" maxlength="40" placeholder="My channels" spellcheck="false"></label>
       <label class="lf" data-for="xtream"><span>Server address</span><input class="field" id="server" type="url" inputmode="url" placeholder="http://server.example:8080" autocapitalize="none" spellcheck="false"></label>
       <label class="lf" data-for="xtream"><span>Username</span><input class="field" id="user" autocapitalize="none" spellcheck="false"></label>
       <label class="lf" data-for="xtream"><span>Password</span><input class="field" id="pass" type="password"></label>
-      <label class="lf" data-for="m3u" hidden><span>Playlist link (M3U)</span><input class="field" id="m3u" type="url" inputmode="url" placeholder="https://example.com/playlist.m3u" autocapitalize="none" spellcheck="false"></label>
+      <label class="lf" data-for="m3u extra" hidden><span>Playlist link (M3U)</span><input class="field" id="m3u" type="url" inputmode="url" placeholder="https://example.com/playlist.m3u" autocapitalize="none" spellcheck="false"></label>
       <p class="login-error" id="err" role="alert"></p>
       <button class="btn primary wide-btn" id="send" type="submit">Send to TV</button>
       <p class="login-note">The account goes straight to the TV that shows this code and is deleted as soon as the TV receives it (at most 15 minutes later). InkonabTV is a media player: it doesn’t include or sell any channels or content.</p>
@@ -48,7 +51,7 @@
       document.querySelectorAll('.login-mode').forEach(b => b.addEventListener('click', () => {
         mode = b.dataset.mode;
         document.querySelectorAll('.login-mode').forEach(x => x.classList.toggle('active', x === b));
-        document.querySelectorAll('[data-for]').forEach(el => { el.hidden = el.dataset.for !== mode; });
+        document.querySelectorAll('[data-for]').forEach(el => { el.hidden = !el.dataset.for.split(' ').includes(mode); });
       }));
       // The TV's QR code opens this page as setup.html#ABC123.
       const fromHash = location.hash.slice(1).replace(/[^A-Za-z0-9]/g, '');
@@ -61,11 +64,11 @@
         if (!CFG.pairApi) return say('Remote setup isn’t available right now. Try again later.');
         const code = $('#code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
         if (code.length !== 6) return say('Enter the 6-character code shown on the TV.');
-        const body = mode === 'm3u'
-          ? { m: $('#m3u').value.trim() }
-          : { s: $('#server').value.trim(), u: $('#user').value.trim(), p: $('#pass').value };
-        if (mode === 'm3u' ? !body.m : !(body.s && body.u && body.p)) {
-          return say(mode === 'm3u' ? 'Enter the playlist link.' : 'Enter the server address, username and password.');
+        const body = mode === 'xtream'
+          ? { s: $('#server').value.trim(), u: $('#user').value.trim(), p: $('#pass').value }
+          : mode === 'extra' ? { m: $('#m3u').value.trim(), name: $('#xname').value.trim(), extra: true } : { m: $('#m3u').value.trim() };
+        if (mode === 'xtream' ? !(body.s && body.u && body.p) : !body.m) {
+          return say(mode === 'xtream' ? 'Enter the server address, username and password.' : 'Enter the playlist link.');
         }
         const btn = $('#send');
         btn.disabled = true;

@@ -8,7 +8,7 @@ Seller: Joseph Jonathan COLLET · Support: https://github.com/Dykel/InkonabTV/is
 | --- | --- |
 | App name | InkonabTV |
 | Tizen application ID | InkonabTV1.InkonabTV |
-| Version | 1.0.3 |
+| Version | 1.0.4 |
 | Type | Tizen web application (TV) |
 | Category | Video |
 | Supported resolution | 1920 × 1080 (FHD); the layout is scaled by the TV on UHD models |
@@ -27,6 +27,8 @@ InkonabTV is a media player for IPTV playlists. **It does not provide, host or s
 - **Xtream Codes:** server address, username and password.
 - **M3U playlist:** a link to an M3U/M3U8 playlist file.
 - **Set up from phone:** the TV shows a 6-character code and a QR code. On a phone or computer, the user opens `dykel.github.io/InkonabTV/setup.html`, enters the code, and types the playlist details there. The TV then signs in by itself. The code works once and expires after 15 minutes.
+
+Users can also add extra M3U playlists of their own (Settings → Extra playlists), for example free TV channels; each one appears as a group on top of Live TV and as a row on Home.
 
 The app then shows Live TV, a TV guide (when the provider supplies programme information), Movies and Series. Artwork, summaries and cast come from TMDB. Playback uses Samsung's native player (AVPlay): HLS, MPEG-TS, MP4, MKV, MOV and AVI.
 
@@ -77,6 +79,7 @@ Main screen (top bar: Home · Live TV · TV Guide · Movies · Series · Search 
     ├── Playback (live format, info language, catch-up correction)
     ├── Parental control (Show adult categories, protected by a 4-digit PIN; Change PIN)
     ├── Playlist on this device (last updated, Refresh now)
+    ├── Extra playlists (add the user's own M3U links by hand or from a phone; each shows as a group on top of Live TV)
     ├── Playlist links, privacy policy
     └── Clear Continue Watching · Sign out
 ```

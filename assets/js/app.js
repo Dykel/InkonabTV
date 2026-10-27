@@ -248,13 +248,17 @@
 
     // ---------- remote setup: the TV shows a code, someone fills the account in from a phone ----------
     // CFG.pairApi is the pairing worker (proxy/pair-worker.js); CFG.setupUrl the page that sends to it.
-    async startPair() {
+    // opts.box: element holding .pair-url / .pair-code / .pair-qr / .pair-note (the sign-in screen by
+    // default); opts.onData(d): what to do with what the phone sent (sign in by default).
+    async startPair(opts = {}) {
       this.stopPair();
       const run = this.pairRun = {};
-      const note = $('#pairNote');
-      $('#pairUrl').textContent = CFG.setupUrl.replace(/^https?:\/\//, '');
-      $('#pairCode').textContent = '…';
-      $('#pairQr').removeAttribute('src');
+      const box = opts.box || $('#loginForm .pair');
+      const el = c => box.querySelector('.pair-' + c);
+      const note = el('note');
+      el('url').textContent = CFG.setupUrl.replace(/^https?:\/\//, '');
+      el('code').textContent = '…';
+      el('qr').removeAttribute('src');
       note.textContent = 'Getting a code…';
       let pair;
       try {
@@ -264,31 +268,32 @@
       } catch {
         if (run !== this.pairRun) return;
         note.textContent = 'Remote setup isn’t available right now. Try again later.';
-        run.timer = setTimeout(() => run === this.pairRun && this.startPair(), 20000);
+        run.timer = setTimeout(() => run === this.pairRun && this.startPair(opts), 20000);
         return;
       }
       if (run !== this.pairRun) return;
-      $('#pairCode').textContent = pair.code.slice(0, 3) + '-' + pair.code.slice(3);
+      el('code').textContent = pair.code.slice(0, 3) + '-' + pair.code.slice(3);
       note.textContent = 'or scan the QR code. The code works once and changes every 15 minutes.';
       try {
         const qr = qrcode(0, 'M');
         qr.addData(CFG.setupUrl + '#' + pair.code);
         qr.make();
-        $('#pairQr').src = qr.createDataURL(6, 0);
+        el('qr').src = qr.createDataURL(6, 0);
       } catch {}
       const until = Date.now() + (pair.ttl || 900) * 1000 - 5000;
       const poll = async () => {
         if (run !== this.pairRun) return;
-        if (Date.now() > until) return this.startPair();
+        if (Date.now() > until) return this.startPair(opts);
         try {
           const r = await fetch(`${CFG.pairApi.replace(/\/+$/, '')}/pair/${pair.code}?token=${encodeURIComponent(pair.token)}`, { cache: 'no-store' });
           if (r.status === 200) {
             const d = await r.json();
             if (run !== this.pairRun) return;
+            this.pairRun = null;
+            if (opts.onData) return opts.onData(d);
             const c = d.m ? { m: d.m } : { s: CFG.playerMode ? normServer(d.s) : undefined, u: d.u, p: d.p };
             if (c.m) $('#loginM3u').value = c.m; else { $('#loginUser').value = c.u || ''; if (c.s) $('#loginServer').value = c.s; }
             note.textContent = 'Received — signing in…';
-            this.pairRun = null;
             return this.signIn(c);
           }
         } catch {}
@@ -300,6 +305,78 @@
     stopPair() {
       if (this.pairRun) clearTimeout(this.pairRun.timer);
       this.pairRun = null;
+    },
+
+    // ---------- extra playlists (the viewer's own M3U links, shown on top of Live TV) ----------
+    async addExtraPlaylist(name, url) {
+      url = String(url || '').trim();
+      if (!/^\w+:\/\//.test(url)) url = 'http://' + url;
+      name = String(name || '').trim().slice(0, 40) || 'My playlist';
+      const list = await M3U.load(url);
+      if (!list.length) throw new Error('This playlist is empty');
+      Settings.extraPlaylists = [...(Settings.extraPlaylists || []).filter(p => p.url !== url && p.name !== name), { name, url }];
+      Settings.save();
+      this.extraChanged();
+      this.toast('Playlist added: ' + name);
+    },
+
+    removeExtraPlaylist(i) {
+      Settings.extraPlaylists = (Settings.extraPlaylists || []).filter((p, n) => n !== i);
+      Settings.save();
+      this.extraChanged();
+    },
+
+    extraChanged() {
+      this.free = null;
+      delete this.data.liveCatalog;
+      this.redrawLater = true;
+    },
+
+    // Settings section: list, add by hand, or add from a phone with a code.
+    bindExtraPlaylists(m) {
+      const list = $('#xpList', m), note = $('#xpError', m);
+      const paint = () => {
+        const xs = Settings.extraPlaylists || [];
+        list.innerHTML = xs.length ? xs.map((p, i) => `<div class="kv link"><span>${esc(p.name)}</span><code>${esc(p.url)}</code>
+          <button class="round-btn sm" data-xp-del="${i}" aria-label="Remove">${ICONS.close}</button></div>`).join('')
+          : '<p class="muted small-note">No extra playlists yet.</p>';
+      };
+      paint();
+      list.addEventListener('click', e => {
+        const b = e.target.closest('[data-xp-del]');
+        if (!b) return;
+        this.removeExtraPlaylist(Number(b.dataset.xpDel));
+        paint();
+        $('#xpAdd', m).focus();
+      });
+      const add = async (name, url) => {
+        note.textContent = 'Checking the playlist…';
+        try {
+          await this.addExtraPlaylist(name, url);
+          note.textContent = '';
+          $('#xpName', m).value = ''; $('#xpUrl', m).value = '';
+          paint();
+        } catch (err) {
+          note.textContent = err.message === 'This playlist is empty' ? err.message : 'Can’t load the playlist. Check the link and your connection.';
+        }
+      };
+      $('#xpAdd', m).addEventListener('click', () => {
+        if (!$('#xpUrl', m).value.trim()) { note.textContent = 'Enter the playlist link.'; return; }
+        add($('#xpName', m).value, $('#xpUrl', m).value);
+      });
+      const phone = $('#xpPhone', m);
+      if (phone) phone.addEventListener('click', () => {
+        const box = $('#xpPair', m);
+        box.hidden = false;
+        this.startPair({
+          box,
+          onData: d => {
+            box.hidden = true;
+            if (!d.m) { note.textContent = 'Send an M3U playlist link from the phone.'; return; }
+            add(d.name, d.m);
+          },
+        });
+      });
     },
 
     // ---------- network lost / back ----------
@@ -585,12 +662,15 @@
       })().catch(() => ({ byDate: [], byPop: [] })));
     },
 
-    // ---------- free playlists (MBC PLAY) — available signed in or not ----------
+    // ---------- free playlists — available signed in or not ----------
+    // Built-in ones (config.js freePlaylists, e.g. MBC PLAY) and the viewer's own extra M3U
+    // playlists (Settings → Extra playlists). Each is a group pinned on top of Live TV.
     loadFree() {
       if (!this.free) {
-        this.free = Promise.all((CFG.freePlaylists || []).map(p =>
+        const lists = [...(CFG.freePlaylists || []).map(p => ({ ...p, builtin: true })), ...(Settings.extraPlaylists || [])];
+        this.free = Promise.all(lists.map(p =>
           M3U.load(p.url).then(list => list.map((c, i) => {
-            const ch = { num: i + 1, name: c.name, label: c.name, stream_icon: c.logo, url: c.url, radio: c.radio, source: p.name,
+            const ch = { num: i + 1, name: c.name, label: c.name, stream_icon: c.logo, url: c.url, radio: c.radio, source: p.name, builtin: !!p.builtin,
               quality: '', tags: [], key: fold(c.name), gkey: 'free:' + p.name + ':' + fold(c.name) };
             ch.versions = [ch];
             return ch;
@@ -606,7 +686,10 @@
       if (!this.data.liveCatalog) {
         this.data.liveCatalog = (async () => {
           const free = await this.loadFree();
-          const groups = [...new Set(free.map(c => c.source))].map(src => ({ key: '@free:' + src, name: src, free: true, channels: free.filter(c => c.source === src) }));
+          const groups = [...new Set(free.map(c => c.source))].map(src => {
+            const channels = free.filter(c => c.source === src);
+            return { key: '@free:' + src, name: src, free: true, builtin: channels[0].builtin, channels };
+          });
           let catName = {};
           if (this.api) {
             const [channels, cats] = await Promise.all([this.loadLive(), this.loadCats('live')]);
@@ -691,7 +774,7 @@
       const rows = groups.filter(g => g.free || (withMine && g.special)).map(g => ({ group: g, list: g.channels }));
       slot.innerHTML = rows.map(r => this.channelRow(
         r.group.key === '@fav' ? 'Favorite channels' : r.group.key === '@recent' ? 'Recently watched channels' : r.group.name,
-        r.list, r.group, r.group.free ? 'Free · Live TV & radio' : '')).join('');
+        r.list, r.group, r.group.free ? (r.group.builtin ? 'Free · Live TV & radio' : 'Your playlist') : '')).join('');
       this.bindChannelRows(slot, rows);
     },
 
@@ -1428,6 +1511,7 @@
       m.innerHTML = '';
       document.body.classList.remove('modal-open');
       if (this.modalReturn && this.modalReturn.isConnected) this.modalReturn.focus({ preventScroll: true });
+      if ($('#login').classList.contains('hidden')) this.stopPair();
       if (this.redrawLater && !Player.isOpen()) this.redraw();
     },
     closeBtn: () => `<button class="round-btn close" data-close aria-label="Close">${ICONS.close}</button>`,
@@ -1785,6 +1869,20 @@
           <p class="muted small-note">Movies, series and channels are saved on this device so the app opens instantly. They refresh by themselves in the background every 6 hours.</p>
           <div class="set-row vpn-actions"><button class="btn ghost" id="plRefresh">Refresh now</button></div>
         </section>
+        <section class="set-group" id="xpGroup">
+          <h3>Extra playlists</h3>
+          <p class="muted small-note">Add M3U playlists of your own, for example free TV channels. Each one shows as a group on top of Live TV and as a row on Home.</p>
+          <div id="xpList"></div>
+          <label class="set"><span>Name</span><input class="field" id="xpName" maxlength="40" placeholder="My channels" autocapitalize="none" spellcheck="false"></label>
+          <label class="set"><span>Playlist link (M3U)</span><input class="field" id="xpUrl" type="url" inputmode="url" placeholder="https://example.com/playlist.m3u" autocapitalize="none" spellcheck="false"></label>
+          <p class="login-error" id="xpError" role="alert"></p>
+          <div class="set-row vpn-actions"><button class="btn ghost" id="xpAdd">Add playlist</button>${CFG.pairApi ? '<button class="btn ghost" id="xpPhone">Add from phone</button>' : ''}</div>
+          <div class="pair" id="xpPair" hidden>
+            <img class="pair-qr" alt="">
+            <div class="pair-text"><p>On your phone or computer, open</p><b class="pair-url"></b><p>choose “Extra playlist” and enter this code:</p>
+              <div class="pair-code">…</div><p class="muted pair-note"></p></div>
+          </div>
+        </section>
         <section class="set-group">
           <h3>Playlist links</h3>
           <div class="kv link"><span>M3U</span><code>${esc(this.api.m3uUrl())}</code><button class="round-btn sm" data-copy="${esc(this.api.m3uUrl())}" aria-label="Copy M3U link">${ICONS.copy}</button></div>
@@ -1842,6 +1940,7 @@
         if (!changed) this.toast('Couldn’t reach the server — keeping the saved playlist');
         else if (this.view !== 'home') this.route();
       });
+      this.bindExtraPlaylists(m);
       if (window.Native && $('#vpnGroup', m)) this.bindVpnSettings(m);
       $('[data-close]', m).focus();
     },

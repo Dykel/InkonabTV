@@ -214,6 +214,29 @@
     'Cleared': ['Effacé', 'Borrado', 'Geleert', 'Svuotato', 'Limpo'],
     'Not saved yet': ['Pas encore enregistrée', 'Aún no guardada', 'Noch nicht gespeichert', 'Non ancora salvata', 'Ainda não guardada'],
     'Just now': ['À l’instant', 'Ahora mismo', 'Gerade eben', 'Proprio ora', 'Agora mesmo'],
+    'Extra playlists': ['Playlists supplémentaires', 'Listas adicionales', 'Weitere Playlists', 'Playlist aggiuntive', 'Listas adicionais'],
+    'Extra playlist': ['Playlist supplémentaire', 'Lista adicional', 'Weitere Playlist', 'Playlist aggiuntiva', 'Lista adicional'],
+    'Add M3U playlists of your own, for example free TV channels. Each one shows as a group on top of Live TV and as a row on Home.': [
+      'Ajoutez vos propres playlists M3U, par exemple des chaînes gratuites. Chacune apparaît comme un groupe en haut de la TV en direct et comme une rangée sur l’accueil.',
+      'Añade tus propias listas M3U, por ejemplo canales gratuitos. Cada una aparece como un grupo arriba en TV en directo y como una fila en Inicio.',
+      'Füge eigene M3U-Playlists hinzu, zum Beispiel kostenlose Sender. Jede erscheint als Gruppe oben im Live-TV und als Reihe auf der Startseite.',
+      'Aggiungi le tue playlist M3U, ad esempio canali gratuiti. Ognuna appare come gruppo in cima alla TV in diretta e come riga nella Home.',
+      'Adicione as suas listas M3U, por exemplo canais gratuitos. Cada uma aparece como um grupo no topo da TV em direto e como uma linha no Início.'],
+    'Name': ['Nom', 'Nombre', 'Name', 'Nome', 'Nome'],
+    'Add playlist': ['Ajouter la playlist', 'Añadir lista', 'Playlist hinzufügen', 'Aggiungi playlist', 'Adicionar lista'],
+    'Add from phone': ['Ajouter depuis le téléphone', 'Añadir desde el móvil', 'Per Handy hinzufügen', 'Aggiungi dal telefono', 'Adicionar pelo telemóvel'],
+    'No extra playlists yet.': ['Aucune playlist supplémentaire.', 'Aún no hay listas adicionales.', 'Noch keine weiteren Playlists.', 'Nessuna playlist aggiuntiva.', 'Ainda não há listas adicionais.'],
+    'Checking the playlist…': ['Vérification de la playlist…', 'Comprobando la lista…', 'Playlist wird geprüft…', 'Verifica della playlist…', 'A verificar a lista…'],
+    'Send an M3U playlist link from the phone.': ['Envoyez un lien de playlist M3U depuis le téléphone.', 'Envía un enlace de lista M3U desde el móvil.', 'Sende einen M3U-Playlist-Link vom Handy.', 'Invia un link di playlist M3U dal telefono.', 'Envie um link de lista M3U pelo telemóvel.'],
+    'Your playlist': ['Votre playlist', 'Tu lista', 'Deine Playlist', 'La tua playlist', 'A sua lista'],
+    'Remove': ['Supprimer', 'Quitar', 'Entfernen', 'Rimuovi', 'Remover'],
+    'choose “Extra playlist” and enter this code:': ['choisissez « Playlist supplémentaire » et saisissez ce code :', 'elige «Lista adicional» e introduce este código:', 'wähle „Weitere Playlist“ und gib diesen Code ein:', 'scegli «Playlist aggiuntiva» e inserisci questo codice:', 'escolha «Lista adicional» e introduza este código:'],
+    'Adds an M3U playlist next to the TV’s account (Settings → Extra playlists → Add from phone on the TV).': [
+      'Ajoute une playlist M3U en plus du compte du téléviseur (sur le téléviseur : Paramètres → Playlists supplémentaires → Ajouter depuis le téléphone).',
+      'Añade una lista M3U junto a la cuenta de la TV (en la TV: Ajustes → Listas adicionales → Añadir desde el móvil).',
+      'Fügt eine M3U-Playlist zum Konto des Fernsehers hinzu (am Fernseher: Einstellungen → Weitere Playlists → Per Handy hinzufügen).',
+      'Aggiunge una playlist M3U all’account della TV (sulla TV: Impostazioni → Playlist aggiuntive → Aggiungi dal telefono).',
+      'Adiciona uma lista M3U à conta da TV (na TV: Definições → Listas adicionais → Adicionar pelo telemóvel).'],
     'Privacy policy': ['Politique de confidentialité', 'Política de privacidad', 'Datenschutzerklärung', 'Informativa sulla privacy', 'Política de privacidade'],
   };
   const P = [
@@ -225,6 +248,7 @@
     [/^(.*\d+(?:m| min)) left$/,['$1 restant', 'quedan $1', 'noch $1', 'mancano $1', 'faltam $1']],
     [/^(\d+) min ago$/, ['il y a $1 min', 'hace $1 min', 'vor $1 Min.', '$1 min fa', 'há $1 min']],
     [/^(\d+) hours? ago$/, ['il y a $1 h', 'hace $1 h', 'vor $1 Std.', '$1 ore fa', 'há $1 h']],
+    [/^Playlist added: (.+)$/, ['Playlist ajoutée : $1', 'Lista añadida: $1', 'Playlist hinzugefügt: $1', 'Playlist aggiunta: $1', 'Lista adicionada: $1']],
     [/^No channel (\d+)$/, ['Pas de chaîne $1', 'No hay canal $1', 'Kein Sender $1', 'Nessun canale $1', 'Sem canal $1']],
     [/^Quality: (.+)$/, ['Qualité : $1', 'Calidad: $1', 'Qualität: $1', 'Qualità: $1', 'Qualidade: $1']],
   ];

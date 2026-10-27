@@ -1,7 +1,7 @@
 // InkonabTV remote setup (Cloudflare Worker + Durable Object, free plan).
 //
 //   TV     POST /pair                       → { code, token, ttl }   (shows the code on screen)
-//   phone  PUT  /pair/<code>  {s,u,p}|{m}   → 204 (404: wrong/expired code, 409: already used)
+//   phone  PUT  /pair/<code>  {s,u,p}|{m, name?, extra?}  → 204 (404: wrong/expired code, 409: already used)
 //   TV     GET  /pair/<code>?token=<token>  → 204 while waiting, 200 + the account once sent
 //
 // The account is kept only until the TV collects it (then deleted) and never longer than
@@ -52,7 +52,8 @@ export default {
       if (text.length > MAX_BODY) return reply(413, { error: 'too large' });
       let d;
       try { d = JSON.parse(text); } catch { return reply(400, { error: 'bad json' }); }
-      const data = d && typeof d.m === 'string' && d.m ? { m: d.m }
+      const data = d && typeof d.m === 'string' && d.m
+        ? { m: d.m, ...(typeof d.name === 'string' && d.name ? { name: d.name.slice(0, 40) } : {}), ...(d.extra === true ? { extra: true } : {}) }
         : d && typeof d.u === 'string' && typeof d.p === 'string' && d.u && d.p ? { s: typeof d.s === 'string' ? d.s : '', u: d.u, p: d.p } : null;
       if (!data) return reply(400, { error: 'missing account' });
       const r = await room(code).fetch('https://do/data', { method: 'PUT', body: JSON.stringify(data) });

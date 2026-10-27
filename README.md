@@ -103,6 +103,9 @@ with an Xtream Codes account (server, username, password), an M3U link, or **Set
 Italian, Portuguese). Other Samsung store requirements are also covered: the screensaver turns
 off during playback, a message appears when the network drops, adult categories need a parental
 PIN, and movies have on-screen play controls.
+**Extra playlists:** Settings → *Extra playlists* adds M3U links of your own (for example
+MBC PLAY), by hand or with *Add from phone* (the setup page's *Extra playlist* option). Each
+one shows as a group on top of Live TV and as a row on Home, in every version of the app.
 Store files are in `store/samsung/`: icons, 1920×1080 screenshots, `App_Description.md` for
 Samsung's description template and `Store_Listing.md` with the store texts. The free test
 playlist for Samsung's reviewers is `test/samsung-review.m3u`. It holds only Blender open movies

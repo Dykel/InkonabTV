@@ -1,6 +1,6 @@
 {
   "name": "inkonabtv",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "description": "InkonabTV player — web (GitHub Pages) and Android phone/TV app from one codebase",
   "scripts": {
