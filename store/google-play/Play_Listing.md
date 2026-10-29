@@ -11,10 +11,11 @@ built-in server, no built-in playlists and no VPN. The sideload build with the V
 | App bundle to upload | `android/app/build/outputs/bundle/playRelease/app-play-release.aab` (`npm run aab`) |
 | App icon 512 × 512 | `icon_512.png` |
 | Feature graphic 1024 × 500 | `feature_graphic_1024x500.png` |
-| Phone screenshots (1080 × 2160) | `phone/1-home.png` … `phone/4-signin.png` |
+| Phone screenshots (1080 × 1920, 9:16 as Play requires) | `phone_9x16/1-home.png` … `phone_9x16/4-signin.png` (made from `phone/`) |
 | Android TV banner 1280 × 720 | `tv_banner_1280x720.png` |
 | Android TV screenshots 1920 × 1080 | `tv/*.png` |
 | Privacy policy | https://dykel.github.io/InkonabTV/privacy.html |
+| Promo video (YouTube, unlisted) | https://youtu.be/iLCxLLb1YjM, built from the HyperFrames project `inkonab-promo/play-promo` (outside this repo) |
 
 Signing: the bundle is signed with the **upload key** in `android/keystore/inkonab-upload.jks`
 (passwords in `android/keystore.properties`). Keep a backup of both somewhere safe outside the
@@ -79,6 +80,8 @@ least 12 testers for 14 days in a row** before it can publish to Production:
    the test), then create the Production release with the same AAB.
 
 ## Updates
+
+The minimum Android version is 7.0 (minSdk 24): Play's automatic app protection rejects bundles below it.
 
 Every upload needs a higher `versionCode` (in `android/app/build.gradle`, now 5 for 1.0.4) and the
 same upload key. Run `npm run aab` and upload the new bundle.

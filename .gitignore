@@ -6,3 +6,5 @@ build/
 vendor/
 Self_Checklist*.xlsx
 .wrangler/
+release/
+beta-testers.csv
