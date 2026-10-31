@@ -1,8 +1,8 @@
 // InkonabTV configuration — edit these values, commit, and GitHub Pages picks them up.
 window.INKONAB_CONFIG = {
   appName: 'InkonabTV',
-  logo: 'https://raw.githubusercontent.com/Dykel/inkonab/refs/heads/main/logo1.svg',
-  icon: 'https://raw.githubusercontent.com/Dykel/inkonab/refs/heads/main/icon.svg',
+  logo: 'logo1.svg',
+  icon: 'icon.svg',
 
   // Xtream Codes server (HTTPS so it works from GitHub Pages).
   server: 'https://inkonabtv.ottb.xyz:443',

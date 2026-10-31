@@ -6,12 +6,10 @@
   <meta name="theme-color" content="#0b1518">
   <meta name="referrer" content="no-referrer">
   <title>InkonabTV</title>
-  <link rel="icon" type="image/svg+xml" href="https://raw.githubusercontent.com/Dykel/inkonab/refs/heads/main/icon.svg">
-  <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/Dykel/inkonab/refs/heads/main/icon.svg">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700&family=Saira:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
   <link rel="stylesheet" href="assets/css/app.css">
 </head>
 <body>
@@ -104,6 +102,17 @@
     </div>
     <div class="p-epg"></div>
     <div class="p-num hidden" aria-live="polite"></div>
+    <div class="p-info hidden" aria-live="polite"></div>
+    <div class="p-strip hidden">
+      <h4></h4>
+      <div class="p-strip-row"></div>
+      <p class="p-side-hint">OK: watch · ◀ ▶: browse · ▲: all groups · ▼: close</p>
+    </div>
+    <aside class="p-sched hidden" aria-label="Programmes">
+      <h4>Programmes</h4>
+      <div class="p-sched-list"></div>
+      <p class="p-side-hint">OK: watch / replay · ▲ ▼: move · ◀: close</p>
+    </aside>
     <aside class="p-side hidden" aria-label="Channels">
       <div class="p-side-col"><h4>Groups</h4><div class="p-groups"></div></div>
       <div class="p-side-col wide"><h4 class="p-side-title"></h4><div class="p-chans"></div></div>
@@ -123,8 +132,6 @@
 
   <div id="toast" class="toast" role="status"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
   <script src="assets/js/vendor/capacitor.js"></script>
   <script src="config.js"></script>
   <script src="assets/js/i18n.js"></script>

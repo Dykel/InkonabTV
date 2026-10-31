@@ -9,11 +9,18 @@ import android.content.SharedPreferences;
 import android.net.VpnService;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,6 +39,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * the remaining servers are ordered one country at a time, so each retry tries a new country.
  * Free channels (MBC PLAY) refuse VPN addresses: pauseForDirect() drops the VPN for them and
  * provider channels bring it back (shouldUseForProvider()).
+ *
+ * Speed: each new connection downloads a short test file through the tunnel. A server slower
+ * than MIN_KBPS is left for the next one; after SPEED_TRIES slow servers the fastest of them is
+ * used. Every result is saved per server, so the next session tries the known-fast ones first
+ * and the known-slow ones last.
  */
 public final class VpnManager {
     public enum State { DISCONNECTED, CONNECTING, CONNECTED, FAILED }
@@ -47,6 +59,10 @@ public final class VpnManager {
     private static final String TAG = "InkonabVPN";
     private static final long CONNECT_TIMEOUT = 20000;
     private static final int MAX_TRIES = 8;
+    private static final String SPEED_URL = "https://speed.cloudflare.com/__down?bytes=4000000";
+    private static final long MIN_KBPS = 3000;       // enough for an HD channel
+    private static final int SPEED_TRIES = 4;        // slow servers tried before keeping the fastest
+    private static final long SPEED_KEEP = 7L * 24 * 3600 * 1000; // a saved speed counts this long
     private static VpnManager instance;
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -60,7 +76,11 @@ public final class VpnManager {
     private int tries;
     private boolean wanted;    // the viewer (or auto mode) wants the VPN up
     private boolean autoStarted; // connected by the player for a failing channel (automatic mode)
-    private Done pending;
+    private final List<Done> pending = new ArrayList<>(); // everyone waiting for this connection
+    private long speedKbps;                  // measured speed of the current server (0: not yet)
+    private final Map<String, Long> tested = new LinkedHashMap<>(); // slow servers of this search
+    private VpnGate.Server fastestSlow;      // the fastest of them
+    private boolean settling;                // going back to fastestSlow: no new speed search
     private boolean resume;      // dropped for a free channel; reconnect for the next provider stream
     private final Runnable timeout = () -> {
         if (state == State.CONNECTING) {
@@ -117,6 +137,7 @@ public final class VpnManager {
     public String serverLabel() { return current == null ? "" : current.label(); }
     public boolean busy() { return state == State.CONNECTED || state == State.CONNECTING; }
     public boolean autoStarted() { return autoStarted; }
+    public long speedKbps() { return state == State.CONNECTED ? speedKbps : 0; }
 
     // ---------- learned behaviour (saved) ----------
 
@@ -203,7 +224,106 @@ public final class VpnManager {
             }
             if (!any) break;
         }
+        // Saved speeds: known-fast servers first (fastest first), untested ones next, known-slow last.
+        Map<String, Long> speeds = speeds();
+        List<VpnGate.Server> fast = new ArrayList<>(), unknown = new ArrayList<>(), slow = new ArrayList<>();
+        for (VpnGate.Server s : out) {
+            Long k = speeds.get(s.ip);
+            (k == null ? unknown : k >= MIN_KBPS ? fast : slow).add(s);
+        }
+        java.util.Comparator<VpnGate.Server> bySpeed = (a, b) -> Long.compare(speeds.get(b.ip), speeds.get(a.ip));
+        Collections.sort(fast, bySpeed);
+        Collections.sort(slow, bySpeed);
+        out.clear();
+        out.addAll(fast); out.addAll(unknown); out.addAll(slow);
         return out;
+    }
+
+    // ---------- speed ----------
+
+    /** Saved speeds (kbit/s) per server address, from the last SPEED_KEEP. */
+    private Map<String, Long> speeds() {
+        Map<String, Long> out = new LinkedHashMap<>();
+        try {
+            JSONObject j = new JSONObject(prefs().getString("speeds", "{}"));
+            long now = System.currentTimeMillis();
+            for (Iterator<String> it = j.keys(); it.hasNext(); ) {
+                String ip = it.next();
+                JSONArray v = j.getJSONArray(ip);
+                if (now - v.getLong(1) < SPEED_KEEP) out.put(ip, v.getLong(0));
+            }
+        } catch (Exception ignored) { }
+        return out;
+    }
+
+    private void saveSpeed(String ip, long kbps) {
+        try {
+            JSONObject j = new JSONObject(prefs().getString("speeds", "{}"));
+            long now = System.currentTimeMillis();
+            for (Iterator<String> it = j.keys(); it.hasNext(); ) {
+                if (now - j.getJSONArray(it.next()).getLong(1) >= SPEED_KEEP) it.remove();
+            }
+            j.put(ip, new JSONArray().put(kbps).put(now));
+            prefs().edit().putString("speeds", j.toString()).apply();
+        } catch (Exception ignored) { }
+    }
+
+    /** Download speed through the tunnel in kbit/s (0: nothing came through). At most ~8 s. */
+    private static long speedTest() {
+        long t0 = SystemClock.elapsedRealtime(), bytes = 0;
+        try {
+            HttpURLConnection c = (HttpURLConnection) new URL(SPEED_URL).openConnection();
+            c.setConnectTimeout(6000);
+            c.setReadTimeout(6000);
+            c.setUseCaches(false);
+            try (InputStream in = c.getInputStream()) {
+                byte[] b = new byte[32768];
+                for (int n; (n = in.read(b)) > 0; ) {
+                    bytes += n;
+                    if (SystemClock.elapsedRealtime() - t0 > 8000) break;
+                }
+            }
+        } catch (Exception e) {
+            if (bytes == 0) return 0;
+        }
+        return bytes * 8 / Math.max(1, SystemClock.elapsedRealtime() - t0);
+    }
+
+    private static String mbps(long kbps) { return String.format(java.util.Locale.US, "%.1f Mbps", kbps / 1000.0); }
+
+    private void measure(VpnGate.Server s) {
+        new Thread(() -> {
+            try { Thread.sleep(800); } catch (InterruptedException ignored) { } // let the routes settle
+            long kbps = speedTest();
+            main.post(() -> onMeasured(s, kbps));
+        }, "vpn-speed").start();
+    }
+
+    private void onMeasured(VpnGate.Server s, long kbps) {
+        if (state != State.CONNECTED || current != s) return;
+        saveSpeed(s.ip, kbps);
+        Log.i(TAG, "Speed " + s.label() + ": " + kbps + " kbit/s");
+        if (kbps >= MIN_KBPS || settling || (fastestSlow == s)) { connectedAt(kbps); return; }
+        if (fastestSlow == null || kbps > tested.get(fastestSlow.ip)) fastestSlow = s;
+        tested.put(s.ip, kbps);
+        if (tested.size() >= SPEED_TRIES) { settle(); return; }
+        set(State.CONNECTING, "Slow server (" + mbps(kbps) + "), finding a faster one…");
+        failCurrent("slow");
+    }
+
+    /** No fast server found: go back to the fastest one tried (or stay, when that's this one). */
+    private void settle() {
+        if (fastestSlow == null) { finish(false, "No free server answered"); return; }
+        if (fastestSlow == current && state == State.CONNECTED) { connectedAt(tested.get(current.ip)); return; }
+        settling = true;
+        start(fastestSlow, "Using the fastest server found · ");
+    }
+
+    private void connectedAt(long kbps) {
+        speedKbps = kbps;
+        settling = false;
+        set(State.CONNECTED, current.label() + (kbps > 0 ? " · " + mbps(kbps) : ""));
+        finish(true, current.label());
     }
 
     /** Connect on behalf of the player; automatic mode turns it off again afterwards. */
@@ -222,10 +342,11 @@ public final class VpnManager {
     public void connect(Done done) {
         main.post(() -> {
             if (state == State.CONNECTED) { if (done != null) done.done(true, serverLabel()); return; }
-            if (done != null) pending = done;
+            if (done != null) pending.add(done);
             if (state == State.CONNECTING) return;
             wanted = true;
             tries = 0;
+            newSearch();
             set(State.CONNECTING, "Finding a free server…");
             new Thread(() -> {
                 try {
@@ -242,8 +363,9 @@ public final class VpnManager {
     public void switchServer(Done done) {
         main.post(() -> {
             if (state != State.CONNECTED) { connect(done); return; }
-            pending = done;
+            if (done != null) pending.add(done);
             tries = 0;
+            newSearch();
             set(State.CONNECTING, "Trying another server…");
             failCurrent("channel failed");
         });
@@ -264,15 +386,31 @@ public final class VpnManager {
         finish(false, "Disconnected");
     }
 
+    private void newSearch() {
+        tested.clear();
+        fastestSlow = null;
+        settling = false;
+        speedKbps = 0;
+    }
+
     private void next() {
         if (!wanted) return;
         VpnGate.Server pick = null;
-        if (servers != null) for (VpnGate.Server s : servers) if (!bad.contains(s.id())) { pick = s; break; }
+        if (servers != null) for (VpnGate.Server s : servers) if (!bad.contains(s.id()) && !tested.containsKey(s.ip)) { pick = s; break; }
         if (pick == null && servers != null && !servers.isEmpty()) { bad.clear(); pick = servers.get(0); }
-        if (pick == null || tries >= MAX_TRIES) { finish(false, "No free server answered"); return; }
+        if (pick == null || tries >= MAX_TRIES) {
+            if (fastestSlow != null && !settling) settle(); // slow but working beats nothing
+            else finish(false, "No free server answered");
+            return;
+        }
         tries++;
+        start(pick, "Connecting to VPN · ");
+    }
+
+    private void start(VpnGate.Server pick, String what) {
         current = pick;
-        set(State.CONNECTING, "Connecting to VPN · " + pick.label());
+        speedKbps = 0;
+        set(State.CONNECTING, what + pick.label());
         Intent i = new Intent(app, InkonabVpnService.class)
             .setAction(InkonabVpnService.ACTION_CONNECT)
             .putExtra(InkonabVpnService.EXTRA_CONFIG, pick.config)
@@ -300,8 +438,8 @@ public final class VpnManager {
                 main.removeCallbacks(timeout);
                 tries = 0;
                 resume = false;
-                set(State.CONNECTED, info);
-                finish(true, info);
+                set(State.CONNECTED, info + " · testing speed…");
+                if (current != null) measure(current); else finish(true, info);
             } else if (s == State.FAILED) {
                 if (!wanted) return;
                 main.removeCallbacks(timeout);
@@ -321,9 +459,9 @@ public final class VpnManager {
             try { app.startService(i); } catch (Exception ignored) { }
             set(State.FAILED, info);
         }
-        Done d = pending;
-        pending = null;
-        if (d != null) d.done(ok, info);
+        List<Done> waiting = new ArrayList<>(pending);
+        pending.clear();
+        for (Done d : waiting) d.done(ok, info);
     }
 
     private void set(State s, String info) {

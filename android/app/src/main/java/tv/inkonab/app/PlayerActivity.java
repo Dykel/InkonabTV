@@ -1,6 +1,7 @@
 package tv.inkonab.app;
 
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -9,6 +10,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Base64;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -18,9 +20,11 @@ import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -38,9 +42,11 @@ import androidx.media3.common.Player;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
 import androidx.media3.ui.PlayerView;
 
 import org.json.JSONArray;
@@ -49,7 +55,18 @@ import org.json.JSONObject;
 
 import tv.inkonab.app.vpn.VpnManager;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.TimeZone;
 import java.util.HashSet;
 import java.util.List;
 
@@ -60,8 +77,11 @@ import java.util.List;
  *   { live, template, group, index, version, startAt,
  *     channels: [{ title, subtitle, img, num, radio, gkey, fav, versions: [{ url | id, label }] }],
  *     groups:   [{ key, name, items: [channel index…] }] }
- * VOD sends one channel and no groups. Live sends every group so the remote can zap (▲/▼),
- * switch quality (◀/▶), type a channel number, and open the channel list (OK).
+ *   live extras: epg (guide link, {id}), catchup (replay link, {min} {start} {id}), tz, shift;
+ *   each channel: epgId (stream whose guide we read), cu (catch-up stream).
+ * VOD sends one channel and no groups. Live remote (Apple-style, each panel closes with the
+ * opposite arrow or Back): ▼ / OK info panel, ▲ channel strip (▲ again: every group),
+ * ◀ channel list, ▶ this channel's programmes, CH+/CH− change channel, digits type a number.
  */
 @OptIn(markerClass = UnstableApi.class)
 public class PlayerActivity extends AppCompatActivity {
@@ -87,6 +107,12 @@ public class PlayerActivity extends AppCompatActivity {
     // Automatic recovery: copies (version × format) already tried for the current channel.
     private final HashSet<String> tried = new HashSet<>();
     private boolean altFormat, readyOnce;
+    private int reconnects;              // quiet reconnects in a row (reset once it plays again)
+    private final List<Long> freezes = new ArrayList<>();
+    private String epgTpl = "", cuTpl = "", tz = "UTC";
+    private double shift;                // "Catch-up time correction" (hours)
+    private String replayUrl;            // a past programme playing from the channel's archive
+    private String replayTitle = "";
     private int vpnAttempts;             // VPN servers (countries) tried for the current channel
     private boolean vpnTried, directTried, vpnWatch;
     private TextView vpnChip;
@@ -121,6 +147,10 @@ public class PlayerActivity extends AppCompatActivity {
             channels = p.getJSONArray("channels");
             live = p.optBoolean("live", false);
             template = p.optString("template", "");
+            epgTpl = p.optString("epg", "");
+            cuTpl = p.optString("catchup", "");
+            tz = p.optString("tz", "UTC");
+            shift = p.optDouble("shift", 0);
             group = p.optInt("group", 0);
             index = p.optInt("index", 0);
             version = p.optInt("version", 0);
@@ -152,24 +182,36 @@ public class PlayerActivity extends AppCompatActivity {
         DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
             .setUserAgent("InkonabTV/1.0 (Android)")
             .setAllowCrossProtocolRedirects(true) // the provider redirects HTTPS → HTTP
-            .setConnectTimeoutMs(20000)
-            .setReadTimeoutMs(20000);
+            .setConnectTimeoutMs(10000)
+            .setReadTimeoutMs(10000);
         DefaultRenderersFactory renderers = new DefaultRenderersFactory(this)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true);
+        // Slow or unsteady lines: keep up to 2 minutes ahead, start after 2.5 s, and after a freeze
+        // wait for 6 s of video so it doesn't stop again straight away. A lost segment is retried
+        // 8 times before it counts as an error.
+        DefaultLoadControl buffers = new DefaultLoadControl.Builder()
+            .setBufferDurationsMs(30000, 120000, 2500, 6000)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build();
         player = new ExoPlayer.Builder(this, renderers)
-            .setMediaSourceFactory(new DefaultMediaSourceFactory(new DefaultDataSource.Factory(this, http)))
+            .setMediaSourceFactory(new DefaultMediaSourceFactory(new DefaultDataSource.Factory(this, http))
+                .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(8)))
+            .setLoadControl(buffers)
             .build();
         view.setPlayer(player);
         player.addListener(new Player.Listener() {
             @Override
             public void onPlaybackStateChanged(int state) {
+                if (state == Player.STATE_BUFFERING && readyOnce) onFreeze();
                 if (state == Player.STATE_READY) {
                     readyOnce = true;
+                    reconnects = 0;
                     main.removeCallbacks(watchdog);
                     errorView.setVisibility(View.GONE);
                     onPlaying();
                 }
+                if (state == Player.STATE_ENDED && replayUrl != null) load(0);
                 if (state == Player.STATE_ENDED && !live) {
                     ended = true;
                     finishWithResult();
@@ -178,6 +220,7 @@ public class PlayerActivity extends AppCompatActivity {
 
             @Override
             public void onPlayerError(@NonNull PlaybackException error) {
+                if (reconnect(error)) return;
                 onFail(error.getErrorCodeName());
             }
         });
@@ -186,7 +229,9 @@ public class PlayerActivity extends AppCompatActivity {
             @Override
             public void handleOnBackPressed() {
                 if (sideShown()) hideSide();
+                else if (panelShown()) hidePanels();
                 else if (barActive) hideBar();
+                else if (replayUrl != null) load(0); // leaving a replay goes back to the live channel
                 else if (controlsShown && !live) view.hideController();
                 else finishWithResult();
             }
@@ -222,6 +267,53 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     // ---------- automatic recovery ----------
+
+    /**
+     * A stream that played and then dropped (network error, or fell behind a live window)
+     * reconnects quietly at the same position, waiting a little longer each time.
+     */
+    private boolean reconnect(PlaybackException e) {
+        boolean net = e.errorCode >= 2000 && e.errorCode < 3000;
+        boolean behind = e.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW;
+        if (!readyOnce || !(net || behind) || reconnects >= 8) return false;
+        reconnects++;
+        main.postDelayed(() -> {
+            if (isFinishing()) return;
+            if (behind) player.seekToDefaultPosition();
+            player.prepare();
+            player.play();
+        }, Math.min(8000, 1000L * reconnects));
+        return true;
+    }
+
+    // A channel that plays is kept: a freeze is waited out. Only when it goes back to loading
+    // more than 3 times within 15 s does it move to another copy of the channel, and when every
+    // copy has been tried, to a VPN server in another country (VPN version only).
+    private void onFreeze() {
+        long now = System.currentTimeMillis();
+        while (!freezes.isEmpty() && now - freezes.get(0) > 15000) freezes.remove(0);
+        freezes.add(now);
+        if (freezes.size() <= 3 || !live) return;
+        freezes.clear();
+        if (nextCopy()) return;
+        tryVpn();
+    }
+
+    private boolean nextCopy() {
+        JSONArray vs = current().optJSONArray("versions");
+        if (vs == null) return false;
+        int flat = flatIndex();
+        tried.add(flat + ":" + version + ":" + altFormat);
+        for (int i = 0; i < vs.length(); i++) {
+            if (!tried.contains(flat + ":" + i + ":" + altFormat)) {
+                version = i;
+                Toast.makeText(this, "Keeps stopping · trying another copy (" + vs.optJSONObject(i).optString("label", "") + ")…", Toast.LENGTH_SHORT).show();
+                load(0);
+                return true;
+            }
+        }
+        return false;
+    }
 
     // A stream that never starts within 15 s counts as failed.
     private final Runnable watchdog = () -> { if (!readyOnce && live) onFail("timeout"); };
@@ -487,7 +579,10 @@ public class PlayerActivity extends AppCompatActivity {
         numLp.setMargins(0, dp(28), dp(36), 0);
         root.addView(numView, numLp);
 
-        if (live) buildSide(root);
+        if (live) {
+            buildSide(root);
+            buildPanels(root);
+        }
         setContentView(root);
     }
 
@@ -572,6 +667,383 @@ public class PlayerActivity extends AppCompatActivity {
         topBar.setVisibility(View.VISIBLE);
         main.removeCallbacks(hideTopBar);
         main.postDelayed(hideTopBar, 3500);
+    }
+
+    // ---------- guide panels: info (▼), channel strip (▲), programmes (▶) ----------
+
+    private static final class Prog {
+        final String title;
+        final long start, end;
+        final boolean archive;
+        Prog(String title, long start, long end, boolean archive) { this.title = title; this.start = start; this.end = end; this.archive = archive; }
+    }
+
+    private interface Got { void on(List<Prog> list); }
+
+    private LinearLayout info, infoActs, strip, stripRow, sched;
+    private TextView infoTitle, infoTime, infoLeft, infoNext, stripTitle, schedTitle;
+    private ProgressBar infoBar;
+    private HorizontalScrollView stripScroll;
+    private ListView schedList;
+    private BaseAdapter schedAdapter;
+    private final List<Prog> schedRows = new ArrayList<>();
+    private final Map<String, Object[]> epgCache = new HashMap<>();
+    private final Runnable panelTimeout = this::hidePanels;
+
+    private String hm(long t) { return android.text.format.DateFormat.getTimeFormat(this).format(new Date(t)); }
+
+    /** The channel's guide (a week back, a few days ahead), cached 20 minutes. */
+    @SuppressWarnings("unchecked")
+    private void programmes(JSONObject ch, Got got) {
+        String id = ch.optString("epgId", "");
+        if (id.isEmpty() || epgTpl.isEmpty()) { got.on(new ArrayList<>()); return; }
+        Object[] hit = epgCache.get(id);
+        if (hit != null && System.currentTimeMillis() - (long) hit[0] < 20 * 60000) { got.on((List<Prog>) hit[1]); return; }
+        String link = epgTpl.replace("{id}", id);
+        new Thread(() -> {
+            List<Prog> out = new ArrayList<>();
+            try {
+                String at = link;
+                HttpURLConnection c = null;
+                for (int hops = 0; hops < 4; hops++) { // the provider redirects HTTPS → HTTP
+                    c = (HttpURLConnection) new URL(at).openConnection();
+                    c.setConnectTimeout(10000);
+                    c.setReadTimeout(15000);
+                    c.setInstanceFollowRedirects(false);
+                    c.setRequestProperty("User-Agent", "InkonabTV/1.0 (Android)");
+                    int code = c.getResponseCode();
+                    if (code < 300 || code >= 400) break;
+                    at = new URL(new URL(at), c.getHeaderField("Location")).toString();
+                }
+                ByteArrayOutputStream b = new ByteArrayOutputStream();
+                try (InputStream in = c.getInputStream()) {
+                    byte[] buf = new byte[16384];
+                    int n;
+                    while ((n = in.read(buf)) > 0) b.write(buf, 0, n);
+                }
+                JSONArray a = new JSONObject(b.toString("UTF-8")).optJSONArray("epg_listings");
+                for (int i = 0; a != null && i < a.length(); i++) {
+                    JSONObject e = a.optJSONObject(i);
+                    if (e == null) continue;
+                    Prog pr = new Prog(b64(e.optString("title")), e.optLong("start_timestamp") * 1000, e.optLong("stop_timestamp") * 1000, e.optInt("has_archive") == 1);
+                    if (pr.end > pr.start) out.add(pr);
+                }
+            } catch (Exception ignored) {
+            }
+            out.sort((x, y) -> Long.compare(x.start, y.start));
+            runOnUiThread(() -> {
+                if (!out.isEmpty()) epgCache.put(id, new Object[]{System.currentTimeMillis(), out});
+                got.on(out);
+            });
+        }).start();
+    }
+
+    private static String b64(String s) {
+        try { return new String(Base64.decode(s, Base64.DEFAULT), "UTF-8"); } catch (Exception e) { return s; }
+    }
+
+    private boolean canReplay(JSONObject ch, Prog p) {
+        return p.archive && p.end <= System.currentTimeMillis() && !ch.optString("cu").isEmpty() && !cuTpl.isEmpty();
+    }
+
+    /** The provider's catch-up link; the start time is written in the server's timezone. */
+    private String catchupUrl(String id, Prog p) {
+        SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
+        f.setTimeZone(TimeZone.getTimeZone(tz.isEmpty() ? "UTC" : tz));
+        String start = f.format(new Date(p.start + (long) (shift * 3600e3)));
+        long min = Math.max(1, Math.round((p.end - p.start) / 60000.0 + 2));
+        return cuTpl.replace("{min}", String.valueOf(min)).replace("{start}", start).replace("{id}", id);
+    }
+
+    private void playReplay(Prog p) {
+        replayUrl = catchupUrl(current().optString("cu"), p);
+        replayTitle = p.title;
+        hidePanels();
+        startPlayback(0);
+    }
+
+    private LinearLayout panelBox(int orientation) {
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(orientation);
+        l.setVisibility(View.GONE);
+        return l;
+    }
+
+    private void buildPanels(FrameLayout root) {
+        // Info panel (▼): now / next, progress, and actions.
+        info = panelBox(LinearLayout.VERTICAL);
+        info.setPadding(dp(26), dp(20), dp(26), dp(20));
+        info.setBackground(rounded(0xEE081013, 20));
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView tag = text(12, 0xFF1D1600, true);
+        tag.setText("NOW");
+        tag.setPadding(dp(8), dp(2), dp(8), dp(2));
+        tag.setBackground(rounded(ACCENT, 6));
+        infoTitle = text(22, Color.WHITE, true);
+        infoTitle.setPadding(dp(12), 0, 0, 0);
+        head.addView(tag);
+        head.addView(infoTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        info.addView(head);
+        infoBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        infoBar.setMax(1000);
+        infoBar.setProgressTintList(ColorStateList.valueOf(ACCENT));
+        infoBar.setProgressBackgroundTintList(ColorStateList.valueOf(0x55FFFFFF));
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(8));
+        barLp.setMargins(0, dp(12), 0, dp(6));
+        info.addView(infoBar, barLp);
+        LinearLayout meta = new LinearLayout(this);
+        infoTime = text(14, 0xFFC2CED1, false);
+        infoLeft = text(14, 0xFFC2CED1, false);
+        meta.addView(infoTime, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        meta.addView(infoLeft);
+        info.addView(meta);
+        infoNext = text(14, MUTED, false);
+        infoNext.setPadding(0, dp(6), 0, dp(12));
+        info.addView(infoNext);
+        infoActs = new LinearLayout(this);
+        infoActs.setGravity(Gravity.CENTER_VERTICAL);
+        info.addView(infoActs);
+        FrameLayout.LayoutParams infoLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+        infoLp.setMargins(dp(36), 0, dp(36), dp(28));
+        root.addView(info, infoLp);
+
+        // Channel strip (▲): the group's channels in a row, the video keeps playing.
+        strip = panelBox(LinearLayout.VERTICAL);
+        strip.setPadding(dp(26), dp(16), dp(26), dp(18));
+        strip.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[]{0xF2081013, 0xCC081013}));
+        stripTitle = text(12, ACCENT, true);
+        stripTitle.setLetterSpacing(0.12f);
+        stripTitle.setPadding(dp(4), 0, 0, dp(10));
+        strip.addView(stripTitle);
+        stripScroll = new HorizontalScrollView(this);
+        stripScroll.setHorizontalScrollBarEnabled(false);
+        stripRow = new LinearLayout(this);
+        stripRow.setPadding(dp(6), dp(6), dp(6), dp(6));
+        stripScroll.addView(stripRow);
+        strip.addView(stripScroll);
+        TextView stripHint = text(12, MUTED, false);
+        stripHint.setText("OK: watch · ◀ ▶: browse · ▲: all groups · ▼: close");
+        stripHint.setPadding(dp(4), dp(8), 0, 0);
+        strip.addView(stripHint);
+        root.addView(strip, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
+
+        // Programmes (▶): today on this channel; past ones replay when the channel keeps them.
+        sched = panelBox(LinearLayout.VERTICAL);
+        sched.setPadding(dp(22), dp(24), dp(18), dp(16));
+        sched.setBackground(new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, new int[]{0xF7081013, 0xE6081013}));
+        schedTitle = text(18, ACCENT, true);
+        schedTitle.setPadding(dp(4), 0, 0, dp(12));
+        sched.addView(schedTitle);
+        schedList = list();
+        sched.addView(schedList, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        TextView schedHint = text(12, MUTED, false);
+        schedHint.setText("OK: watch / replay · ▲ ▼: move · ◀: close");
+        schedHint.setPadding(dp(4), dp(10), 0, 0);
+        sched.addView(schedHint);
+        root.addView(sched, new FrameLayout.LayoutParams(dp(470), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END));
+        schedAdapter = new BaseAdapter() {
+            public int getCount() { return schedRows.size(); }
+            public Object getItem(int p) { return schedRows.get(p); }
+            public long getItemId(int p) { return p; }
+            public View getView(int p, View convert, ViewGroup parent) {
+                LinearLayout row = convert instanceof LinearLayout ? (LinearLayout) convert : schedRow();
+                Prog pr = schedRows.get(p);
+                long now = System.currentTimeMillis();
+                boolean on = pr.start <= now && pr.end > now, past = pr.end <= now, replay = past && canReplay(current(), pr);
+                ((TextView) row.getChildAt(0)).setText(hm(pr.start));
+                ((TextView) row.getChildAt(1)).setText(pr.title);
+                ((TextView) row.getChildAt(2)).setText(on ? "NOW" : replay ? "⟲ REPLAY" : "");
+                row.setBackground(on ? rounded(0x30FBC50C, 12) : null);
+                row.setAlpha(past && !replay ? 0.5f : 1f);
+                return row;
+            }
+        };
+        schedList.setAdapter(schedAdapter);
+        schedList.setOnItemClickListener((a, v, p, id) -> pickProgramme(schedRows.get(p)));
+    }
+
+    private LinearLayout schedRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(10), dp(10), dp(10));
+        TextView time = text(14, MUTED, false);
+        time.setMinWidth(dp(64));
+        TextView title = text(15, Color.WHITE, true);
+        TextView tag = text(11, ACCENT, true);
+        tag.setPadding(dp(8), 0, 0, 0);
+        row.addView(time);
+        row.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(tag);
+        return row;
+    }
+
+    private boolean infoShown() { return info != null && info.getVisibility() == View.VISIBLE; }
+    private boolean stripShown() { return strip != null && strip.getVisibility() == View.VISIBLE; }
+    private boolean schedShown() { return sched != null && sched.getVisibility() == View.VISIBLE; }
+    private boolean panelShown() { return infoShown() || stripShown() || schedShown(); }
+
+    private void hidePanels() {
+        main.removeCallbacks(panelTimeout);
+        if (info == null) return;
+        info.setVisibility(View.GONE);
+        strip.setVisibility(View.GONE);
+        sched.setVisibility(View.GONE);
+        view.requestFocus();
+    }
+
+    private void showPanel(View panel, boolean timeout) {
+        hidePanels();
+        if (sideShown()) hideSide();
+        view.hideController();
+        topBar.setVisibility(View.GONE);
+        panel.setVisibility(View.VISIBLE);
+        if (timeout) main.postDelayed(panelTimeout, 10000);
+    }
+
+    private TextView act(String label, View.OnClickListener click) {
+        TextView t = chip(label, false);
+        t.setOnClickListener(click);
+        infoActs.addView(t);
+        return t;
+    }
+
+    private void openInfo() {
+        if (info == null) return;
+        JSONObject ch = current();
+        showPanel(info, true);
+        infoTitle.setText(ch.optString("title"));
+        infoTime.setText("");
+        infoLeft.setText("");
+        infoNext.setText("Loading the guide…");
+        infoBar.setProgress(0);
+        infoActs.removeAllViews();
+        Prog[] now = new Prog[1];
+        if (!ch.optString("cu").isEmpty() && !cuTpl.isEmpty()) act("⟲ Start over", v -> {
+            if (now[0] != null) playReplay(now[0]); else Toast.makeText(this, "No guide information for this channel.", Toast.LENGTH_SHORT).show();
+        });
+        act(ch.optBoolean("fav") ? "★ Favorite" : "☆ Favorite", v -> {
+            toggleFav(flatIndex());
+            ((TextView) v).setText(current().optBoolean("fav") ? "★ Favorite" : "☆ Favorite");
+        });
+        if (hasVersions()) act("Quality · " + current().optJSONArray("versions").optJSONObject(version).optString("label", ""), v -> { hidePanels(); switchVersion(1); });
+        act("☰ Channels", v -> { hidePanels(); openSide(); });
+        act("Programmes", v -> openSched());
+        infoActs.getChildAt(0).requestFocus();
+        int flat = flatIndex();
+        programmes(ch, list -> {
+            if (!infoShown() || flatIndex() != flat) return;
+            long t = System.currentTimeMillis();
+            Prog cur = null, next = null;
+            for (Prog p : list) {
+                if (cur == null && p.start <= t && p.end > t) cur = p;
+                else if (next == null && p.start >= (cur != null ? cur.end : t)) next = p;
+            }
+            now[0] = cur;
+            if (cur == null) { infoNext.setText("No guide information for this channel."); return; }
+            infoTitle.setText(cur.title);
+            infoTime.setText(hm(cur.start) + " – " + hm(cur.end) + "   ·   " + ch.optString("title"));
+            infoLeft.setText(Math.max(1, Math.round((cur.end - t) / 60000.0)) + " min left");
+            infoBar.setProgress((int) (1000 * (t - cur.start) / (cur.end - cur.start)));
+            infoNext.setText(next != null ? "NEXT  " + hm(next.start) + " · " + next.title : "");
+        });
+    }
+
+    private void openStrip() {
+        if (strip == null) return;
+        showPanel(strip, true);
+        Group g = groups.get(group);
+        stripTitle.setText(g.name.isEmpty() ? "CHANNELS" : g.name.toUpperCase(Locale.getDefault()));
+        stripRow.removeAllViews();
+        // A window around the channel playing keeps big groups quick to open.
+        int from = Math.max(0, index - 60), to = Math.min(g.items.length, index + 61);
+        View playing = null;
+        for (int i = from; i < to; i++) {
+            final int at = i;
+            JSONObject c = channelAt(g.items[i]);
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setGravity(Gravity.CENTER_HORIZONTAL);
+            card.setPadding(dp(10), dp(10), dp(10), dp(8));
+            card.setFocusable(true);
+            card.setClickable(true);
+            android.graphics.drawable.StateListDrawable bg = new android.graphics.drawable.StateListDrawable();
+            GradientDrawable focused = rounded(0x665AA9C8, 14);
+            focused.setStroke(dp(3), Color.WHITE);
+            bg.addState(new int[]{android.R.attr.state_focused}, focused);
+            bg.addState(new int[]{}, rounded(i == index ? 0x40FBC50C : 0x1FFFFFFF, 14));
+            card.setBackground(bg);
+            ImageView logo = new ImageView(this);
+            logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            logos.load(logo, c.optString("img"));
+            card.addView(logo, new LinearLayout.LayoutParams(dp(96), dp(54)));
+            TextView name = text(13, Color.WHITE, true);
+            name.setText((c.optString("num").isEmpty() ? "" : c.optString("num") + "  ") + c.optString("title"));
+            name.setGravity(Gravity.CENTER);
+            card.addView(name, new LinearLayout.LayoutParams(dp(150), ViewGroup.LayoutParams.WRAP_CONTENT));
+            card.setOnFocusChangeListener((v, has) -> v.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f).setDuration(120).start());
+            card.setOnClickListener(v -> {
+                hidePanels();
+                if (at == index) return;
+                freshStart();
+                index = at;
+                version = 0;
+                load(0);
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMarginEnd(dp(10));
+            stripRow.addView(card, lp);
+            if (i == index) playing = card;
+        }
+        View target = playing;
+        if (target != null) stripScroll.post(() -> {
+            target.requestFocus();
+            stripScroll.scrollTo(Math.max(0, target.getLeft() - stripScroll.getWidth() / 2 + target.getWidth() / 2), 0);
+        });
+    }
+
+    private void openSched() {
+        if (sched == null) return;
+        JSONObject ch = current();
+        showPanel(sched, false);
+        schedTitle.setText(ch.optString("title"));
+        schedRows.clear();
+        schedAdapter.notifyDataSetChanged();
+        schedList.requestFocus();
+        int flat = flatIndex();
+        programmes(ch, all -> {
+            if (!schedShown() || flatIndex() != flat) return;
+            // Today (and the last 6 hours, for replays just after midnight), at least the next few programmes.
+            long t = System.currentTimeMillis();
+            Calendar c = Calendar.getInstance();
+            c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0);
+            long from = Math.min(c.getTimeInMillis(), t - 6 * 3600000L), to = c.getTimeInMillis() + 86400000L;
+            int ahead = 0, nowAt = 0;
+            for (Prog p : all) {
+                if (p.end <= from) continue;
+                if (p.start >= to && ahead >= 6) break;
+                if (p.start > t) ahead++;
+                if (p.start <= t && p.end > t) nowAt = schedRows.size();
+                schedRows.add(p);
+            }
+            schedAdapter.notifyDataSetChanged();
+            if (schedRows.isEmpty()) schedTitle.setText(ch.optString("title") + " · No guide information for this channel.");
+            schedList.requestFocus();
+            schedList.setSelection(nowAt);
+        });
+    }
+
+    // Now → back to the channel; past with catch-up → replay (Back returns to the channel).
+    private void pickProgramme(Prog p) {
+        long t = System.currentTimeMillis();
+        JSONObject ch = current();
+        if (p.start <= t && p.end > t) { hidePanels(); return; }
+        if (p.end <= t) {
+            if (canReplay(ch, p)) playReplay(p);
+            else Toast.makeText(this, ch.optString("cu").isEmpty() ? "Replay isn’t available on this channel" : "This programme is no longer in the replay archive", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, p.title + " starts at " + hm(p.start), Toast.LENGTH_SHORT).show();
     }
 
     // ---------- channel list (groups | channels) ----------
@@ -766,6 +1238,7 @@ public class PlayerActivity extends AppCompatActivity {
     // ---------- playback ----------
 
     private void load(long startAtMs) {
+        replayUrl = null;
         if (gateVpn(startAtMs)) return;
         startPlayback(startAtMs);
     }
@@ -776,7 +1249,7 @@ public class PlayerActivity extends AppCompatActivity {
             JSONArray versions = ch.getJSONArray("versions");
             version = clamp(version, versions.length());
             JSONObject v = versions.getJSONObject(version);
-            String url = urlOf(v);
+            String url = replayUrl != null ? replayUrl : urlOf(v);
 
             titleView.setText(live && !ch.optString("num").isEmpty() ? ch.optString("num") + "  " + ch.optString("title") : ch.optString("title"));
             String gname = groups.get(group).name;
@@ -784,6 +1257,10 @@ public class PlayerActivity extends AppCompatActivity {
             String label = v.optString("label", "");
             qualityView.setText(versions.length() > 1 ? label + "  " + (version + 1) + "/" + versions.length() : label);
             qualityView.setVisibility(label.isEmpty() && versions.length() < 2 ? View.GONE : View.VISIBLE);
+            if (replayUrl != null) {
+                titleView.setText(replayTitle);
+                subView.setText("Replay · " + ch.optString("title"));
+            }
             favChip.setText(ch.optBoolean("fav") ? "★" : "☆");
             errorView.setVisibility(View.GONE);
             showRadioArt(ch);
@@ -793,6 +1270,12 @@ public class PlayerActivity extends AppCompatActivity {
             }
 
             MediaItem.Builder item = new MediaItem.Builder().setUri(Uri.parse(url));
+            // Live: play 25 s behind the edge and never speed up to catch up, so a slow patch
+            // eats into that margin instead of freezing the picture.
+            if (live && replayUrl == null) item.setLiveConfiguration(new MediaItem.LiveConfiguration.Builder()
+                .setTargetOffsetMs(25000).setMinPlaybackSpeed(1f).setMaxPlaybackSpeed(1f).build());
+            freezes.clear();
+            reconnects = 0;
             String path = Uri.parse(url).getPath();
             if (path != null && path.toLowerCase().endsWith(".m3u8")) item.setMimeType(MimeTypes.APPLICATION_M3U8);
             readyOnce = false;
@@ -801,7 +1284,7 @@ public class PlayerActivity extends AppCompatActivity {
             player.setMediaItem(item.build(), startAtMs);
             player.prepare();
             player.play();
-            if (live) flashTopBar(); else view.showController();
+            if (live && replayUrl == null) flashTopBar(); else view.showController();
         } catch (JSONException e) {
             showError("This item has no playable link.");
         }
@@ -885,7 +1368,20 @@ public class PlayerActivity extends AppCompatActivity {
 
         // The OK press that opened the list must not also "click" the first channel.
         if (center && !down && swallowCenterUp) { swallowCenterUp = false; return true; }
-        if (!live) return super.dispatchKeyEvent(e);
+        if (!live || replayUrl != null) return super.dispatchKeyEvent(e);
+        if (down && panelShown()) { main.removeCallbacks(panelTimeout); main.postDelayed(panelTimeout, 10000); }
+
+        if (infoShown() || stripShown() || schedShown()) {
+            if (down) {
+                if (infoShown() && code == KeyEvent.KEYCODE_DPAD_UP) { hidePanels(); return true; }
+                if (infoShown() && code == KeyEvent.KEYCODE_DPAD_DOWN) return true;
+                if (stripShown() && code == KeyEvent.KEYCODE_DPAD_DOWN) { hidePanels(); return true; }
+                if (stripShown() && code == KeyEvent.KEYCODE_DPAD_UP) { hidePanels(); openSide(); return true; }
+                if (schedShown() && code == KeyEvent.KEYCODE_DPAD_LEFT) { hidePanels(); return true; }
+                if (schedShown() && code == KeyEvent.KEYCODE_DPAD_RIGHT) return true;
+            }
+            return super.dispatchKeyEvent(e);
+        }
 
         if (barActive && !sideShown()) {
             if (down && (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_DPAD_UP)) {
@@ -920,28 +1416,30 @@ public class PlayerActivity extends AppCompatActivity {
                     if (controlsShown) break; // OK on a visible player button
                     if (e.getRepeatCount() == 0) {
                         swallowCenterUp = center;
-                        if (code == KeyEvent.KEYCODE_GUIDE) openSide(); else showBar();
+                        if (code == KeyEvent.KEYCODE_GUIDE) openSched(); else openInfo();
                     }
                     return true;
-                case KeyEvent.KEYCODE_MENU:
                 case KeyEvent.KEYCODE_INFO:
+                    openInfo();
+                    return true;
+                case KeyEvent.KEYCODE_MENU:
                     view.showController();
                     return true;
-                // ▲/▼ always change channel, like a TV remote. ◀/▶ change quality while the controls are hidden.
-                // ▲/▼ move up/down the list; CH+/CH− go to the next/previous channel number.
+                // CH+/CH− change channel. ▼ info panel, ▲ channel strip, ◀ channel list, ▶ programmes.
                 case KeyEvent.KEYCODE_CHANNEL_DOWN:
                 case KeyEvent.KEYCODE_PAGE_UP:
-                case KeyEvent.KEYCODE_DPAD_UP:
                     zap(-1); return true;
                 case KeyEvent.KEYCODE_CHANNEL_UP:
                 case KeyEvent.KEYCODE_PAGE_DOWN:
-                case KeyEvent.KEYCODE_DPAD_DOWN:
                     zap(1); return true;
-                // ◀ opens the channel list; ▶ switches quality.
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                    if (!controlsShown) { openInfo(); return true; } break;
+                case KeyEvent.KEYCODE_DPAD_UP:
+                    if (!controlsShown) { openStrip(); return true; } break;
                 case KeyEvent.KEYCODE_DPAD_LEFT:
                     if (!controlsShown) { openSide(); return true; } break;
                 case KeyEvent.KEYCODE_DPAD_RIGHT:
-                    if (!controlsShown && hasVersions()) { switchVersion(1); return true; } break;
+                    if (!controlsShown) { openSched(); return true; } break;
             }
         }
         return super.dispatchKeyEvent(e);

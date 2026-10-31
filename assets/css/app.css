@@ -973,3 +973,73 @@ img.broken { visibility: hidden; }
 .lang-chip.on { background: rgba(251,197,12,.16); border-color: var(--accent); }
 .lang-chip.on b::before { content: '✓ '; color: var(--accent); }
 .lang-chip:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+
+/* "Optimising your internet" screen while the VPN connects (VPN version). */
+.vpn-wait { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; background: rgba(5, 8, 16, .96); }
+.vpn-wait-box { max-width: 560px; padding: 32px; text-align: center; }
+.vpn-wait-box .loader { padding: 0 0 24px; }
+.vpn-wait-box h2 { margin: 0 0 10px; font-size: 1.6rem; }
+.vpn-wait-box p { margin: 0 0 18px; opacity: .8; }
+.vpn-wait-box small { opacity: .65; }
+.retry-count { display: block; margin-top: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.retry-count:empty { display: none; }
+
+/* Language picker: only the list scrolls; "All languages / Save" stay pinned at the bottom. */
+.modal.langs { overflow: hidden; }
+.modal.langs .sheet { display: flex; flex-direction: column; max-height: 92vh; padding-bottom: 22px; }
+.modal.langs .lang-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0 -8px; padding: 6px 8px 14px; align-content: start; }
+.modal.langs .set-actions { flex: none; }
+@media (max-width: 860px) {
+  .modal.langs .sheet { height: 100vh; max-height: none; min-height: 0; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+}
+
+/* ---------- player: programme bar (▼) and the channel's programmes (◀) ---------- */
+.p-info {
+  position: absolute; left: var(--gutter); right: var(--gutter); bottom: 40px; z-index: 3;
+  display: grid; gap: 10px; padding: 18px 24px; border-radius: 18px;
+  background: rgba(8,16,19,.9); box-shadow: 0 20px 60px rgba(0,0,0,.5); animation: fade .2s ease;
+}
+.p-info .loader { padding: 4px 0; }
+.pp-acts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.pp-acts .btn { padding: 10px 18px; }
+.pp-acts .btn:focus { outline: 3px solid #fff; outline-offset: 2px; background: rgba(90,169,200,.35); }
+.p-strip {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; padding: 18px var(--gutter) 16px;
+  background: linear-gradient(0deg, rgba(8,16,19,.96) 60%, rgba(8,16,19,.8)); animation: fade .2s ease;
+}
+.p-strip h4 { margin: 0 0 10px; font: 600 .85rem var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.p-strip-row { display: flex; gap: 12px; overflow-x: auto; padding: 6px 4px; scrollbar-width: none; }
+.p-strip-row::-webkit-scrollbar { display: none; }
+.p-card { flex: none; width: 170px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 10px 10px; border-radius: 14px; background: rgba(255,255,255,.07); color: #fff; }
+.p-card .ch-logo { width: 96px; height: 54px; }
+.p-card-name { width: 100%; text-align: center; font-size: .85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-card-name small { color: var(--muted); font-weight: 400; }
+.p-card.playing { background: rgba(251,197,12,.18); box-shadow: inset 0 -3px 0 var(--accent); }
+.p-card:focus { outline: 3px solid #fff; outline-offset: -3px; background: rgba(90,169,200,.35); transform: scale(1.05); }
+.p-strip .p-side-hint { margin-top: 8px; }
+.player.prog .p-epg { opacity: 0; }
+.pp-now { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.pp-now b { font: 600 1.35rem var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.18); overflow: hidden; }
+.pp-bar i { display: block; height: 100%; background: var(--accent); }
+.pp-meta { display: flex; justify-content: space-between; color: #c2ced1; font-variant-numeric: tabular-nums; }
+.pp-next { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-next span { font-weight: 700; text-transform: uppercase; font-size: .75rem; margin-right: 6px; }
+.pp-none { margin: 0; color: #c2ced1; }
+.p-sched {
+  position: absolute; inset: 0 0 0 auto; z-index: 4;
+  width: min(560px, 92vw); display: flex; flex-direction: column; padding: 28px 24px 18px;
+  background: linear-gradient(270deg, rgba(8,16,19,.97) 70%, rgba(8,16,19,.88));
+  box-shadow: -30px 0 60px rgba(0,0,0,.5); animation: slideInRight .22s ease;
+}
+@keyframes slideInRight { from { transform: translateX(30px); opacity: 0; } }
+.p-sched h4 { margin: 0 0 12px; font: 600 1.1rem var(--font-display); color: var(--accent); }
+.p-sched-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 4px; padding: 2px; }
+.p-s { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 12px; text-align: left; color: #cad7da; }
+.p-s time { flex: none; width: 3.2em; color: var(--muted); font-variant-numeric: tabular-nums; }
+.p-s-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-s.now { background: rgba(251,197,12,.12); box-shadow: inset 3px 0 0 var(--accent); color: #fff; }
+.p-s.off { opacity: .5; }
+.p-s:focus-visible, .p-s:focus { outline: 2px solid #fff; outline-offset: -2px; background: rgba(90,169,200,.3); }
+.p-sched .p-side-hint { margin-top: 12px; }
+@media (max-width: 860px) { .p-sched { width: 100vw; } .p-info { bottom: 24px; } .p-card { width: 130px; } }

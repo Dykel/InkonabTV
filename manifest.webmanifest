@@ -6,6 +6,6 @@
   "background_color": "#05090b",
   "theme_color": "#0b1518",
   "icons": [
-    { "src": "https://raw.githubusercontent.com/Dykel/inkonab/refs/heads/main/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
   ]
 }

@@ -29,6 +29,7 @@ public final class VpnManager {
     public String serverLabel() { return ""; }
     public boolean busy() { return false; }
     public boolean autoStarted() { return false; }
+    public long speedKbps() { return 0; }
     public boolean needVpn() { return false; }
     public boolean shouldUseForProvider() { return false; }
     public void markGood() {}

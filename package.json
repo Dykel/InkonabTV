@@ -1,6 +1,6 @@
 {
   "name": "inkonabtv",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "private": true,
   "description": "InkonabTV player — web (GitHub Pages) and Android phone/TV app from one codebase",
   "scripts": {
@@ -9,7 +9,8 @@
     "apk": "npm run sync && cd android && ./gradlew assembleFullDebug assemblePlayDebug",
     "apk:release": "npm run sync && cd android && ./gradlew assembleFullRelease assemblePlayRelease",
     "aab": "npm run sync && cd android && ./gradlew bundlePlayRelease",
-    "tizen": "node scripts/build-tizen.mjs"
+    "tizen": "node scripts/build-tizen.mjs",
+    "test": "node test/smoke.mjs"
   },
   "dependencies": {
     "@capacitor/android": "7.6.9",
@@ -19,6 +20,7 @@
   "devDependencies": {
     "@capacitor/cli": "7.6.9",
     "esbuild": "^0.28.2",
+    "puppeteer-core": "^25.13.0",
     "qrcode-generator": "^1.4.4"
   }
 }

@@ -5,6 +5,7 @@
 // - CSS: `inset`, clamp()/min()/max(), :focus-visible and grid `gap` are rewritten into forms
 //   older engines understand; tizen/tizen.css adds AVPlay styles and other fallbacks.
 // - hls.js / mpegts.js / Capacitor are left out: Samsung's AVPlay plays the streams.
+// - Fonts come from assets/fonts (no Google Fonts), so the app starts without the internet.
 // - Player mode (store version): no built-in server or free playlists; people add their own
 //   Xtream account or M3U link (config.js → playerMode).
 import { cpSync, rmSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, copyFileSync } from 'node:fs';
@@ -23,6 +24,8 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'assets', 'js', 'vendor'), { recursive: true });
 mkdirSync(join(out, 'assets', 'css'), { recursive: true });
 cpSync(join(root, 'config.js'), join(out, 'config.js'));
+cpSync(join(root, 'assets/fonts'), join(out, 'assets/fonts'), { recursive: true });
+for (const f of ['icon.svg', 'logo1.svg']) cpSync(join(root, f), join(out, f));
 
 // ---------- JS ----------
 const lower = (code, file) => transformSync(code, { target: TARGET, loader: 'js', sourcefile: file, charset: 'utf8' }).code;
@@ -96,7 +99,6 @@ writeFileSync(join(out, 'assets/css/app.css'), css);
 // ---------- index.html ----------
 let page = readFileSync(join(root, 'index.html'), 'utf8');
 page = page
-  .replace(/\s*<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/(hls\.js|mpegts\.js)[^"]*"><\/script>/g, '')
   .replace(/\s*<script src="assets\/js\/vendor\/capacitor\.js"><\/script>/, '')
   .replace(/\s*<script src="assets\/js\/native\.js"><\/script>/, '')
   .replace(/\s*<link rel="manifest"[^>]*>/, '')

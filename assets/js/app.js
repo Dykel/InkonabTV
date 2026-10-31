@@ -157,22 +157,131 @@
       if (!creds) return this.showLogin();
       this.showSplash(true);
       try {
-        await this.connect(creds);
+        // Signed in before: open at once with the saved playlist; the server is checked after.
+        await this.connect(creds, { quick: true });
         this.start();
       } catch (err) {
-        this.showLogin(this.loginError(err, creds));
+        this.showLogin();
+        this.loginFailed(err, creds, 0);
       } finally {
         this.showSplash(false);
       }
     },
 
     // creds: { u, p, s? } for an Xtream account (s: server, player mode only) or { m } for an M3U link.
-    async connect(creds) {
+    // `quick`: use the saved sign-in without waiting for the server (checkServer does it after).
+    async connect(creds, { quick } = {}) {
       const api = creds.m ? new M3UPlaylist(creds.m) : new Xtream(creds.s || Settings.server, creds.u, creds.p);
-      await api.login();
+      const saved = quick && api.savedLogin && api.savedLogin();
+      if (saved) {
+        api.info = saved;
+        api.offline = null; // not checked yet
+      } else {
+        try { await api.login(); }
+        catch (err) {
+          if (!this.unreachable(err) || !(await this.vpnRescue())) throw err;
+          await this.loginThroughVpn(api);
+        }
+      }
       if (api.setLangs) api.setLangs(Store.get(this.langKey(api)));
       this.api = api;
       this.data = {};
+    },
+
+    // The server didn't answer (as opposed to a wrong account or an empty playlist).
+    unreachable: err => !/^Wrong username|^Account |empty$/.test(err.message),
+
+    // VPN version: the server can't be reached, so connect the free VPN (unless it's set to Off)
+    // and say whether it worked. The app's own traffic goes through it, sign-in included.
+    // The "optimising your internet" screen stays up until loginThroughVpn has finished.
+    async vpnRescue() {
+      const P = window.Native && Native.player;
+      if (!P || CFG.vpn === false) return false;
+      const v = await P.vpnStatus().catch(() => null);
+      if (!v || !v.available || v.mode === 'off' || v.state === 'connected') return false;
+      this.vpnWait(true);
+      const r = await P.vpnConnect().catch(() => null);
+      if (!(r && r.ok)) { this.vpnWait(false); this.toast('No free server answered'); }
+      return !!(r && r.ok);
+    },
+
+    // Sign in through the VPN that just connected. The tunnel can need a few seconds before the
+    // server answers, so each server gets 3 tries; a server that never reaches the provider is
+    // swapped for the next one (3 servers at most).
+    async loginThroughVpn(api) {
+      const P = Native.player;
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      this.vpnWait(true);
+      try {
+        for (let server = 0; server < 3; server++) {
+          for (let i = 0; i < 3; i++) {
+            await wait(1500 * (i + 1));
+            try { return await api.login({ strict: true }); }
+            catch (err) { if (!this.unreachable(err)) throw err; }
+          }
+          const r = await P.vpnSwitch().catch(() => null);
+          if (!(r && r.ok)) break;
+        }
+        throw new Error('Failed to fetch');
+      } finally { this.vpnWait(false); }
+    },
+
+    // Full-screen "optimising your internet" message while the VPN connects, with the step it's
+    // on (from the VPN's status updates).
+    vpnWait(on) {
+      let el = $('#vpnWait');
+      if (!on) { if (el) el.remove(); if (this.vpnWaitOff) this.vpnWaitOff(); this.vpnWaitOff = null; return; }
+      if (el) return;
+      el = document.createElement('div');
+      el.id = 'vpnWait';
+      el.className = 'vpn-wait';
+      el.setAttribute('role', 'alert');
+      el.innerHTML = `<div class="vpn-wait-box"><div class="loader"><span></span></div>
+        <h2>We’re optimising your internet connection</h2>
+        <p>Please wait, this can take up to a minute.</p>
+        <small id="vpnWaitStep">Looking for the fastest route…</small></div>`;
+      document.body.appendChild(el);
+      const step = v => {
+        const d = (v && v.detail) || '';
+        const t = /^Slow server/.test(d) ? 'Finding a faster route…' : /testing speed/.test(d) ? 'Testing the speed…'
+          : v && v.state === 'connected' ? 'Connected · signing you in…' : 'Looking for the fastest route…';
+        const s = $('#vpnWaitStep');
+        if (s && s.textContent !== t) s.textContent = t;
+      };
+      const h = Native.player.addListener('vpn', step);
+      this.vpnWaitOff = () => Promise.resolve(h).then(x => x && x.remove && x.remove());
+    },
+
+    // After opening: check the account with the server (it was opened from the saved sign-in, or
+    // the server didn't answer at sign-in), connecting the VPN if needed, then update the saved
+    // playlist in the background when it was last checked more than 10 minutes ago.
+    async checkServer() {
+      const api = this.api;
+      if (api.offline !== false && !api.isM3U) {
+        try { await api.login({ strict: true }); }
+        catch (err) {
+          if (this.api !== api) return;
+          if (!this.unreachable(err)) return this.signedOut(err.message);
+          let ok = await this.vpnRescue();
+          if (ok) ok = await this.loginThroughVpn(api).then(() => true, () => false);
+          if (!ok) {
+            // Keep the saved playlist on screen and check again every 30 s until the server answers.
+            if (!api.warned) this.toast('Server not reachable · showing your saved playlist');
+            api.warned = true;
+            return setTimeout(() => this.api === api && this.checkServer(), 30000);
+          }
+        }
+      }
+      if (this.api === api) setTimeout(() => this.api === api && api.refreshIfOlder(10 * 60e3), 3000);
+    },
+
+    // The server refused the saved account (password changed, subscription ended): back to sign-in.
+    signedOut(message) {
+      this.api = null;
+      this.data = {};
+      this.closeModal();
+      $('#app').classList.add('hidden');
+      this.showLogin(message);
     },
 
     // ---------- playlist languages (CFG.langPicker) ----------
@@ -196,6 +305,13 @@
           this.closeModal();
           resolve(codes);
         };
+        // The buttons work at once, even while the list is still loading.
+        $('#langAll', m).addEventListener('click', () => done([]));
+        $('#langSave', m).addEventListener('click', () => {
+          const codes = $$('.lang-chip.on', m).map(b => b.dataset.code);
+          if (!codes.length) return this.toast('Choose at least one language, or All languages');
+          done(codes);
+        });
         let list;
         try { list = summary || await this.api.langSummary(); }
         catch { $('#langGrid', m).innerHTML = '<p class="login-error">Can’t read the playlist. Check your connection.</p>'; }
@@ -213,12 +329,6 @@
             b.setAttribute('aria-pressed', b.classList.contains('on'));
           });
         }
-        $('#langAll', m).addEventListener('click', () => done([]));
-        $('#langSave', m).addEventListener('click', () => {
-          const codes = $$('.lang-chip.on', m).map(b => b.dataset.code);
-          if (!codes.length) return this.toast('Choose at least one language, or All languages');
-          done(codes);
-        });
         $(list ? '.lang-chip' : '#langAll', m).focus();
       });
     },
@@ -313,7 +423,8 @@
       await this.signIn(c);
     },
 
-    async signIn(c) {
+    async signIn(c, attempt = 0) {
+      this.cancelRetry();
       const btn = $('#loginBtn');
       btn.disabled = true; btn.textContent = 'Signing in…';
       $('#loginError').textContent = '';
@@ -325,12 +436,40 @@
         this.stopPair();
         this.start();
       } catch (err) {
-        $('#loginError').textContent = this.loginError(err, c);
+        this.loginFailed(err, c, attempt);
         if (this.loginMode === 'remote') this.setLoginMode(c.m ? 'm3u' : 'xtream');
       } finally {
         btn.disabled = false; btn.textContent = 'Sign in';
       }
     },
+
+    // Shows why sign-in failed; when the server just didn't answer, signs in again by itself
+    // after a countdown, until it works or the viewer changes something.
+    loginFailed(err, c, attempt) {
+      const box = $('#loginError');
+      box.textContent = this.loginError(err, c);
+      if (!this.unreachable(err)) return;
+      const count = document.createElement('span');
+      count.className = 'retry-count';
+      box.append(' ', count);
+      this.autoRetry(count, attempt, () => this.signIn(c, attempt + 1));
+    },
+
+    // "Failed to fetch": count down ("Retrying in 10 s") in `el`, then run `fn`. The wait grows
+    // with each failure (10 s, 20 s, then every 30 s). Stops when `el` leaves the page.
+    autoRetry(el, attempt, fn) {
+      this.cancelRetry();
+      let left = Math.min(30, 10 * (attempt + 1));
+      const tick = () => {
+        if (!el.isConnected) return this.cancelRetry();
+        if (left <= 0) { this.cancelRetry(); fn(); return; }
+        el.textContent = `Retrying in ${left} s`;
+        left--;
+      };
+      tick();
+      this.retryTimer = setInterval(tick, 1000);
+    },
+    cancelRetry() { clearInterval(this.retryTimer); this.retryTimer = null; },
 
     // ---------- remote setup: the TV shows a code, someone fills the account in from a phone ----------
     // CFG.pairApi is the pairing worker (proxy/pair-worker.js); CFG.setupUrl the page that sends to it.
@@ -553,15 +692,21 @@
       this.showLogin();
     },
 
-    // Saved playlists were refreshed in the background: rebuild from the new data, forget what the
-    // provider removed, and redraw the page (later, if a dialog or the player is open).
-    async onCatalogRefreshed() {
-      this.data = {};
-      this.epgCache = null;
-      try { await this.pruneRemoved(); } catch (e) { console.warn('[refresh]', e); }
-      if (Player.isOpen() || !$('#modal').classList.contains('hidden')) this.redrawLater = true;
-      else this.redraw();
-      this.toast('Playlist updated');
+    // Saved playlists were refreshed in the background and something changed: rebuild only the
+    // changed sections, forget what the provider removed, and redraw the page if it shows one of
+    // them (later, if a dialog or the player is open).
+    async onCatalogRefreshed(e) {
+      const d = (e && e.detail) || { sections: { live: true, movie: true, series: true } };
+      const drop = { live: ['live', 'liveCats', 'liveCatalog'], movie: ['vod', 'movieCats', 'moviePicks'], series: ['series', 'seriesCats', 'seriesPicks'] };
+      for (const s of Object.keys(d.sections)) for (const k of drop[s] || []) delete this.data[k];
+      if (d.sections.live) this.epgCache = null;
+      try { await this.pruneRemoved(); } catch (err) { console.warn('[refresh]', err); }
+      const shows = { home: true, live: d.sections.live, guide: d.sections.live, movies: d.sections.movie, series: d.sections.series }[this.view];
+      if (shows) {
+        if (Player.isOpen() || !$('#modal').classList.contains('hidden')) this.redrawLater = true;
+        else this.redraw();
+      }
+      this.toast(d.added != null ? `Playlist updated: ${d.added} new, ${d.removed} removed, ${d.changed} changed` : 'Playlist updated');
     },
 
     // Drop favorites, history, Continue Watching and My List entries whose channel or title is gone.
@@ -607,7 +752,7 @@
     async start() {
       if (!this.catalogHooked) {
         this.catalogHooked = true;
-        window.addEventListener('inkonab:catalog', () => this.onCatalogRefreshed());
+        window.addEventListener('inkonab:catalog', e => this.onCatalogRefreshed(e));
         // Long sessions (a TV left on): refresh the saved playlists every 6 hours.
         setInterval(() => this.api && this.api.refreshAll(), 6 * 3600e3);
       }
@@ -624,10 +769,17 @@
         this.api.setLangs(Store.get(this.langKey(this.api)));
       }
       this.route();
+      this.checkServer();
     },
 
     bindChrome() {
       $('#loginForm').addEventListener('submit', e => this.submitLogin(e));
+      // Typing stops the automatic sign-in retry (the details are being changed).
+      $('#loginForm').addEventListener('input', () => {
+        if (!this.retryTimer) return;
+        this.cancelRetry();
+        $$('#loginError .retry-count').forEach(e => e.remove());
+      });
       $$('[data-view]').forEach(b => b.addEventListener('click', () => { location.hash = b.dataset.view; }));
       $('#searchBtn').addEventListener('click', () => this.openSearch());
       $('#settingsBtn').addEventListener('click', () => this.openSettings());
@@ -673,11 +825,19 @@
       window.scrollTo(0, 0);
       const main = $('#view');
       main.innerHTML = '<div class="loader"><span></span></div>';
+      this.cancelRetry();
       const render = { home: this.renderHome, live: this.renderLive, guide: this.renderGuide, movies: this.renderMovies, series: this.renderSeries }[this.view];
-      return render.call(this, main).catch(err => {
+      return render.call(this, main).then(() => { this.routeFails = 0; }).catch(err => {
         console.error(err);
-        main.innerHTML = `<div class="empty"><h3>Couldn’t load this page</h3><p>${esc(err.message)}</p><button class="btn" id="retry">Try again</button></div>`;
-        $('#retry').addEventListener('click', () => this.route());
+        main.innerHTML = `<div class="empty"><h3>Couldn’t load this page</h3><p>${esc(err.message)}</p><p class="retry-count"></p><button class="btn" id="retry">Try again</button></div>`;
+        // A failed download stays failed in this.data: start the page's data afresh.
+        const again = () => { this.data = {}; this.route(); };
+        $('#retry').addEventListener('click', again);
+        // The server didn't answer: try again by itself after a countdown.
+        if (this.unreachable(err)) {
+          this.routeFails = (this.routeFails || 0) + 1;
+          this.autoRetry($('.retry-count', main), this.routeFails - 1, again);
+        }
       });
     },
 
@@ -1220,7 +1380,8 @@
       const els = $$('.slide', host), dots = $$('.dot', host);
       const go = k => {
         at = (k + slides.length) % slides.length;
-        els.forEach((el, i) => { el.classList.toggle('on', i === at); el.inert = i !== at; });
+        // The attribute (not the property): 2018–2021 TVs don't know `inert`, and nav.js skips [inert].
+        els.forEach((el, i) => { el.classList.toggle('on', i === at); if (i === at) el.removeAttribute('inert'); else el.setAttribute('inert', ''); });
         dots.forEach((d, i) => d.classList.toggle('on', i === at));
       };
       host.addEventListener('click', e => {
@@ -1407,14 +1568,16 @@
       return !!prog && prog.archive && prog.end <= Date.now() && ch.versions.some(v => Number(v.tv_archive));
     },
 
-    playCatchup(ch, prog) {
+    playCatchup(ch, prog) { Player.open(this.catchupItem(ch, prog)); },
+
+    catchupItem(ch, prog) {
       const v = ch.versions.find(x => Number(x.tv_archive));
       const minutes = (prog.end - prog.start) / 60000 + 2;
-      Player.open({
+      return {
         kind: 'catchup', url: this.api.catchupUrl(v.stream_id, prog.start, minutes), relay: true,
         title: prog.title, subtitle: `${ch.label} · ${this.dayLabel(prog.start)} ${hm(prog.start)}–${hm(prog.end)} · Replay`,
         img: ch.stream_icon,
-      });
+      };
     },
 
     dayLabel(t) {
@@ -1894,7 +2057,7 @@
       const paint = v => {
         const el = $('#vpnState', m);
         if (!el) return;
-        const label = { connected: `Connected · ${v.server || ''}`, connecting: v.detail || 'Connecting…', failed: v.detail || 'Failed', disconnected: 'Off' }[v.state] || v.state;
+        const label = { connected: `Connected · ${v.server || ''}${v.speed ? ' · ' + (v.speed / 1000).toFixed(1) + ' Mbps' : ''}`, connecting: v.detail || 'Connecting…', failed: v.detail || 'Failed', disconnected: 'Off' }[v.state] || v.state;
         el.textContent = label;
         el.className = v.state === 'connected' ? 'ok' : v.state === 'failed' ? 'bad' : '';
         $('#vpnGood', m).textContent = v.remembered ? v.remembered + (v.need ? ' · used for provider channels' : '') : 'None yet — found automatically when a channel needs it';

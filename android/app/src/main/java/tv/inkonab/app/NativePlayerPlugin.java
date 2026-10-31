@@ -86,6 +86,7 @@ public class NativePlayerPlugin extends Plugin {
         o.put("country", v.country());
         o.put("remembered", v.rememberedLabel());
         o.put("need", v.needVpn());
+        o.put("speed", v.speedKbps());
         return o;
     }
 
@@ -117,6 +118,16 @@ public class NativePlayerPlugin extends Plugin {
 
     private void doConnect(PluginCall call) {
         VpnManager.get().connect((ok, detail) -> {
+            JSObject o = vpnJson();
+            o.put("ok", ok);
+            call.resolve(o);
+        });
+    }
+
+    /** Leave the current server for the next one (it connects but can't reach the provider). */
+    @PluginMethod
+    public void vpnSwitch(PluginCall call) {
+        VpnManager.get().switchServer((ok, detail) -> {
             JSObject o = vpnJson();
             o.put("ok", ok);
             call.resolve(o);

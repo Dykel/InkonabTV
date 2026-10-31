@@ -2,6 +2,29 @@
 (function () {
   const $ = s => document.querySelector(s);
 
+  // hls.js / mpegts.js ship with the app but load only on the website, the first time a stream
+  // needs them (the Android app plays with ExoPlayer, Samsung TVs with AVPlay).
+  const LIBS = { Hls: 'assets/js/vendor/hls.min.js', mpegts: 'assets/js/vendor/mpegts.js' };
+  const loading = {}, missing = {};
+  const lib = name => window[name] ? Promise.resolve() : (loading[name] = loading[name] || new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = LIBS[name];
+    s.onload = resolve;
+    s.onerror = () => { delete loading[name]; reject(new Error('Could not load ' + name)); };
+    document.head.appendChild(s);
+  }));
+
+  // Tuned for slow or unsteady lines (measured: no freezes on 20–25 s drops to 1 Mbps, where the
+  // old low-latency setup froze). Live plays about 25 s behind with no speed-up to catch up;
+  // films and series buffer up to 2 minutes ahead. Lost segments are retried, not given up on.
+  const hlsConfig = live => ({
+    enableWorker: true, lowLatencyMode: false, backBufferLength: 30,
+    liveSyncDurationCount: 6, liveMaxLatencyDurationCount: 15, maxLiveSyncPlaybackRate: 1,
+    maxBufferLength: live ? 60 : 120, maxMaxBufferLength: 120, maxBufferSize: 120e6,
+    fragLoadingMaxRetry: 8, fragLoadingRetryDelay: 500, manifestLoadingMaxRetry: 8, levelLoadingMaxRetry: 8,
+    fragLoadingTimeOut: 20000, nudgeMaxRetry: 10, startLevel: -1, capLevelToPlayerSize: true,
+  });
+
   const Player = {
     item: null,
     hls: null,
@@ -20,6 +43,12 @@
       this.el.querySelector('[data-act="fav"]').addEventListener('click', () => this.toggleFav());
       this.side = this.el.querySelector('.p-side');
       this.side.addEventListener('click', e => this.onSideClick(e));
+      this.sched = this.el.querySelector('.p-sched');
+      this.info = this.el.querySelector('.p-info');
+      this.strip = this.el.querySelector('.p-strip');
+      this.sched.addEventListener('click', e => { const b = e.target.closest('[data-p]'); if (b) this.pickProgramme(Number(b.dataset.p)); });
+      this.info.addEventListener('click', e => { const b = e.target.closest('[data-a]'); if (b) this.infoAction(b.dataset.a); });
+      this.strip.addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (b) this.tune(Number(b.dataset.i)); });
       this.side.addEventListener('focusin', e => {
         const g = e.target.closest('[data-g]');
         if (g) { clearTimeout(this.sidePreview); this.sidePreview = setTimeout(() => this.renderSideChannels(Number(g.dataset.g)), 120); }
@@ -33,10 +62,12 @@
       this.el.addEventListener('mousemove', () => this.poke());
       this.el.addEventListener('click', () => this.poke());
       this.video.addEventListener('playing', () => { this.setState('playing'); });
-      this.video.addEventListener('waiting', () => this.setState('loading'));
+      this.video.addEventListener('waiting', () => { const was = this.el.dataset.state; this.setState('loading'); if (was === 'playing') this.onFreeze(); });
       this.video.addEventListener('error', () => this.fail());
       this.video.addEventListener('ended', () => this.ended());
       document.addEventListener('keydown', e => this.onKey(e), true);
+      // Website: fetch hls.js in the background once the app is up, so the first channel starts at once.
+      setTimeout(() => { if (!window.Native && !this.video.isAV) lib('Hls').catch(() => {}); }, 4000);
     },
 
     isOpen() { return !this.el.classList.contains('hidden'); },
@@ -70,6 +101,9 @@
             flat.push({
               title: ch.label || ch.name || '', img: ch.stream_icon || '', num: String(ch.num || ''), radio: !!ch.radio,
               gkey: ch.gkey || '', fav: App.isFav('live', ch.gkey), free: !!ch.source, // free playlist (MBC PLAY): never via the VPN
+              // Guide (▼ / ◀ in the player): the stream whose guide we read, and the catch-up copy.
+              epgId: String(((ch.versions && App.epgStream(ch)) || {}).stream_id || ''),
+              cu: String(((ch.versions || []).find(v => Number(v.tv_archive)) || {}).stream_id || ''),
               // An M3U playlist has no URL template: each channel brings its own link.
               versions: (ch.versions || [ch]).map(v => (v.url ? { url: v.url, label: label(v) }
                 : App.api && App.api.isM3U ? { url: App.api.streamUrl('live', v.stream_id), label: label(v) }
@@ -87,6 +121,13 @@
           version: Math.max(0, ((cur && cur.versions) || [cur]).indexOf(item.version)),
         };
         payload.channels = flat;
+        const api = App.api;
+        if (api && !api.isM3U && api.apiUrl) {
+          payload.epg = api.apiUrl({ action: 'get_simple_data_table', stream_id: 'ID' }).replace(/stream_id=ID$/, 'stream_id={id}');
+          payload.catchup = api.catchupUrl('{id}', Date.now(), 1).replace(/\/\d+\/[^/]+\/\{id\}\.ts$/, '/{min}/{start}/{id}.ts');
+          payload.tz = (api.info && api.info.server_info && api.info.server_info.timezone) || 'UTC';
+          payload.shift = Number(Settings.catchupShift) || 0;
+        }
       } else {
         payload = {
           live: false, group: 0, index: 0, version: 0, startAt: item.resumeAt > 5 ? item.resumeAt : 0,
@@ -118,6 +159,8 @@
     play(item) {
       this.destroy();
       this.item = item;
+      this.freezes = [];
+      this.recovers = 0;
       // item.url: a direct link — a free playlist (MBC PLAY), or a catch-up replay (relay: true,
       // it comes from the provider's plain-HTTP host like live TV). Otherwise an Xtream stream.
       const ext = item.url
@@ -133,6 +176,7 @@
       this.el.querySelector('.p-sub').textContent = item.subtitle || '';
       this.el.querySelector('.p-zap').classList.toggle('hidden', !item.list);
       this.el.querySelector('.p-epg').innerHTML = '';
+      if (this.sched) this.hidePanels();
       this.renderVersions(item);
       if (item.kind === 'live') App.pushRecent(this.gkey());
       this.paintFav();
@@ -141,15 +185,24 @@
 
       const v = this.video;
       v.removeAttribute('src');
+      const need = !v.isAV && (ext === 'm3u8' ? 'Hls' : ext === 'ts' ? 'mpegts' : '');
+      if (need && !window[need] && !missing[need]) {
+        // Starts again once the library is here; without it, the browser tries the link itself.
+        lib(need).catch(() => { missing[need] = true; }).then(() => { if (this.item === item) this.play(item); });
+        return;
+      }
       if (v.isAV) {
         v.src = url; // AVPlay handles HLS, MPEG-TS and files itself
       } else if (ext === 'm3u8' && window.Hls && Hls.isSupported()) {
-        this.hls = new Hls({ enableWorker: true, lowLatencyMode: item.kind === 'live', backBufferLength: 60 });
-        this.hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) this.fail(d.details); });
+        const hls = this.hls = new Hls(hlsConfig(item.kind === 'live'));
+        hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal && !this.recover(d)) this.fail(d.details); });
+        hls.on(Hls.Events.FRAG_BUFFERED, () => { this.recovers = 0; });
         this.hls.loadSource(url);
         this.hls.attachMedia(v);
       } else if (ext === 'ts' && window.mpegts && mpegts.isSupported()) {
-        this.ts = mpegts.createPlayer({ type: 'mpegts', isLive: item.kind === 'live', url }, { enableStashBuffer: true, liveBufferLatencyChasing: true });
+        // No latency chasing: on a slow line it jumps ahead and empties the buffer again.
+        this.ts = mpegts.createPlayer({ type: 'mpegts', isLive: item.kind === 'live', url },
+          { enableStashBuffer: true, stashInitialSize: 1024 * 1024, liveBufferLatencyChasing: false, autoCleanupSourceBuffer: true });
         this.ts.on(mpegts.Events.ERROR, (t, d) => this.fail(d || t));
         this.ts.attachMediaElement(v);
         this.ts.load();
@@ -281,6 +334,182 @@
       return false;
     },
 
+    // ---------- live guide panels (Apple-style: each closes with the opposite arrow or Back) ----------
+    // ▼ / OK: info panel (now / next, progress, actions) · ▲: channel strip (▲ again: every group)
+    // ◀: channel list · ▶: this channel's programmes for today · CH+/CH−: change channel
+    channel() { const it = this.item; return (it && it.list && it.list[it.index]) || null; },
+
+    async programmes() {
+      const it = this.item, ch = this.channel();
+      if (!it || !App.api || it.url) return [];
+      let list = ch && ch.versions && App.epgStream(ch) ? await App.epgFor(ch) : [];
+      if (!list.length) list = await App.api.shortEpg(it.id, 10).catch(() => []);
+      return list;
+    },
+
+    panel() { return ['info', 'strip', 'sched'].find(k => !this[k].classList.contains('hidden')) || ''; },
+
+    hidePanels() {
+      clearTimeout(this.panelTimer);
+      ['info', 'strip', 'sched'].forEach(k => this[k].classList.add('hidden'));
+      this.el.classList.remove('prog');
+      if (this.el.contains(document.activeElement) && document.activeElement !== this.video) this.video.focus({ preventScroll: true });
+    },
+
+    showPanel(k, timeout) {
+      this.hidePanels();
+      if (this.sideOpen()) this.closeSide();
+      this.el.classList.remove('ui');
+      this[k].classList.remove('hidden');
+      if (timeout) this.panelTimer = setTimeout(() => this.hidePanels(), 10000);
+    },
+
+    async openInfo() {
+      const it = this.item, ch = this.channel(), box = this.info;
+      if (!it || it.kind !== 'live') return;
+      this.showPanel('info', true);
+      this.el.classList.add('prog');
+      const cu = ch && ch.versions && ch.versions.some(v => Number(v.tv_archive));
+      const versions = (it.version && it.version.versions) || [];
+      box.innerHTML = `<div class="pp-now"><span class="p-epg-tag">Now</span><b>${App.esc(it.title || '')}</b></div>
+        <div class="pp-guide"><div class="loader small"><span></span></div></div>
+        <div class="pp-acts">
+          ${cu ? '<button class="btn ghost" data-a="over">⟲ Start over</button>' : ''}
+          <button class="btn ghost" data-a="fav">${App.isFav('live', this.gkey()) ? '★' : '☆'} Favorite</button>
+          ${versions.length > 1 ? `<button class="btn ghost" data-a="quality">Quality · ${App.esc(it.version.quality || 'SD')}</button>` : ''}
+          <button class="btn ghost" data-a="list">☰ Channels</button>
+          <button class="btn ghost" data-a="sched">Programmes</button>
+        </div>`;
+      box.querySelector('.pp-acts .btn').focus({ preventScroll: true });
+      const list = await this.programmes();
+      if (this.item !== it || this.panel() !== 'info') return;
+      const now = Date.now(), cur = list.find(e => e.start <= now && e.end > now), next = list.find(e => e.start >= (cur ? cur.end : now));
+      this.infoNow = cur;
+      const guide = box.querySelector('.pp-guide');
+      if (!cur) { guide.innerHTML = '<p class="pp-none">No guide information for this channel.</p>'; return; }
+      box.querySelector('.pp-now b').textContent = cur.title;
+      const pct = Math.min(100, ((now - cur.start) / (cur.end - cur.start)) * 100);
+      guide.innerHTML = `<div class="pp-bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+        <div class="pp-meta"><span>${App.hm(cur.start)} – ${App.hm(cur.end)} · ${App.esc(it.title || '')}</span><span>${Math.max(1, Math.round((cur.end - now) / 60000))} min left</span></div>
+        ${next ? `<div class="pp-next"><span>Next</span> ${App.hm(next.start)} · ${App.esc(next.title)}</div>` : ''}`;
+    },
+
+    infoAction(a) {
+      const it = this.item, ch = this.channel();
+      if (a === 'over') {
+        if (!this.infoNow) return App.toast('No guide information for this channel.');
+        return this.replay(ch, this.infoNow);
+      }
+      if (a === 'fav') { this.toggleFav(); const b = this.info.querySelector('[data-a="fav"]'); b.textContent = (App.isFav('live', this.gkey()) ? '★' : '☆') + ' Favorite'; return; }
+      if (a === 'quality') { this.hidePanels(); this.stepVersion(1); return; }
+      if (a === 'list') { this.hidePanels(); this.openSide(); return; }
+      if (a === 'sched') this.openSched();
+    },
+
+    // A past (or the current) programme from the channel's archive; leaving it goes back to live.
+    replay(ch, prog) {
+      this.hidePanels();
+      this.play({ ...App.catchupItem(ch, prog), liveReturn: { ...this.item, tried: null, fmtOverride: null } });
+    },
+
+    async openStrip() {
+      const it = this.item, row = this.strip.querySelector('.p-strip-row');
+      if (!it || !it.list || it.list.length < 2) return;
+      this.showPanel('strip', true);
+      this.strip.querySelector('h4').textContent = it.subtitle || 'Channels';
+      // A window around the channel playing keeps big groups quick to open.
+      const from = Math.max(0, it.index - 60), to = Math.min(it.list.length, it.index + 61);
+      let html = '';
+      for (let i = from; i < to; i++) {
+        const c = it.list[i];
+        html += `<button class="p-card${i === it.index ? ' playing' : ''}" data-i="${i}">
+          <span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${App.esc(c.stream_icon)}" alt="">` : ''}</span>
+          <span class="p-card-name">${c.num ? `<small>${App.esc(c.num)}</small> ` : ''}${App.esc(c.label || c.name || '')}</span></button>`;
+      }
+      row.innerHTML = html;
+      const cur = row.querySelector('.p-card.playing');
+      if (cur) { cur.focus({ preventScroll: true }); cur.scrollIntoView({ inline: 'center', block: 'nearest' }); }
+    },
+
+    tune(index) {
+      const it = this.item;
+      this.hidePanels();
+      if (!it || !it.list || index === it.index) return;
+      this.zap(index - it.index);
+    },
+
+    async openSched() {
+      const it = this.item, list = this.sched.querySelector('.p-sched-list');
+      if (!it || it.kind !== 'live') return;
+      this.showPanel('sched', false);
+      this.sched.querySelector('h4').textContent = it.title || 'Programmes';
+      list.innerHTML = '<div class="loader small"><span></span></div>';
+      this.sched.tabIndex = -1;
+      this.sched.focus({ preventScroll: true });
+      const all = await this.programmes();
+      if (this.item !== it || this.panel() !== 'sched') return;
+      // Today (and the last 6 hours, for replays just after midnight), at least the next few programmes.
+      const now = Date.now(), day = new Date(); day.setHours(0, 0, 0, 0);
+      const from = Math.min(day.getTime(), now - 6 * 3600e3), to = day.getTime() + 864e5;
+      const rows = this.schedRows = all.filter((e, i) => e.end > from && (e.start < to || all.slice(0, i).filter(x => x.start > now).length < 6));
+      const ch = this.channel();
+      list.innerHTML = rows.length ? rows.map((e, i) => {
+        const live = e.start <= now && e.end > now, past = e.end <= now, replay = past && ch && App.canReplay(ch, e);
+        return `<button class="p-s${live ? ' now' : ''}${past && !replay ? ' off' : ''}" data-p="${i}">
+          <time>${App.hm(e.start)}</time><span class="p-s-title">${App.esc(e.title)}</span>${live ? '<span class="p-epg-tag">Now</span>' : replay ? '<span class="chip">Replay</span>' : ''}</button>`;
+      }).join('') : '<p class="muted">No guide information for this channel.</p>';
+      const at = list.querySelector('.p-s.now') || list.querySelector('.p-s:not(.off)') || list.querySelector('.p-s');
+      if (at) { at.focus({ preventScroll: true }); at.scrollIntoView({ block: 'center' }); }
+    },
+
+    // Now → back to the channel; past with catch-up → replay.
+    pickProgramme(i) {
+      const prog = this.schedRows && this.schedRows[i], ch = this.channel(), now = Date.now();
+      if (!prog || !this.item) return;
+      if (prog.start <= now && prog.end > now) return this.hidePanels();
+      if (prog.end <= now) {
+        if (!ch || !App.canReplay(ch, prog)) return App.toast(ch && ch.versions && ch.versions.some(v => Number(v.tv_archive)) ? 'This programme is no longer in the replay archive' : 'Replay isn’t available on this channel');
+        return this.replay(ch, prog);
+      }
+      App.toast(`${prog.title} starts ${App.dayLabel(prog.start).toLowerCase()} at ${App.hm(prog.start)}`);
+    },
+
+    // Keys while a panel is open. Returns true when the key was used.
+    panelKey(e, k) {
+      const a = document.activeElement;
+      const move = el => { e.preventDefault(); if (el) { el.focus({ preventScroll: true }); el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } };
+      const back = ['Escape', 'Backspace', 'BrowserBack', 'GoBack'].includes(e.key);
+      clearTimeout(this.panelTimer);
+      if (k !== 'sched') this.panelTimer = setTimeout(() => this.hidePanels(), 10000);
+      if (back) { e.preventDefault(); this.hidePanels(); return true; }
+      if (k === 'info') {
+        const btn = a && a.closest('.pp-acts .btn');
+        switch (e.key) {
+          case 'ArrowUp': e.preventDefault(); this.hidePanels(); return true;
+          case 'ArrowDown': e.preventDefault(); return true;
+          case 'ArrowLeft': move(btn ? btn.previousElementSibling : this.info.querySelector('.pp-acts .btn')); return true;
+          case 'ArrowRight': move(btn ? btn.nextElementSibling : this.info.querySelector('.pp-acts .btn')); return true;
+        }
+      } else if (k === 'strip') {
+        const card = a && a.closest('.p-card');
+        switch (e.key) {
+          case 'ArrowDown': e.preventDefault(); this.hidePanels(); return true;
+          case 'ArrowUp': e.preventDefault(); this.hidePanels(); this.openSide(); return true;
+          case 'ArrowLeft': move(card ? card.previousElementSibling : this.strip.querySelector('.p-card')); return true;
+          case 'ArrowRight': move(card ? card.nextElementSibling : this.strip.querySelector('.p-card')); return true;
+        }
+      } else if (k === 'sched') {
+        const row = a && a.closest('.p-s');
+        switch (e.key) {
+          case 'ArrowUp': move(row ? row.previousElementSibling : this.sched.querySelector('.p-s')); return true;
+          case 'ArrowDown': move(row ? row.nextElementSibling : this.sched.querySelector('.p-s')); return true;
+          case 'ArrowLeft': e.preventDefault(); this.hidePanels(); return true;
+          case 'ArrowRight': e.preventDefault(); return true;
+        }
+      }
+      return false;
+    },
+
     // Remote number keys: type a channel number, it switches after a short pause.
     digit(d) {
       const box = this.el.querySelector('.p-num');
@@ -376,6 +605,33 @@
       return false;
     },
 
+    // A dropped connection reconnects quietly (same position) before anything is shown.
+    recover(d) {
+      const hls = this.hls;
+      if (!hls || this.recovers >= 8) return false;
+      this.recovers++;
+      if (d.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+      else setTimeout(() => { if (this.hls === hls) hls.startLoad(); }, Math.min(8000, 1000 * this.recovers));
+      console.warn('[player] reconnecting after', d.details, this.recovers);
+      return true;
+    },
+
+    // A channel that plays is kept: a freeze is waited out. Only when it goes back to loading
+    // more than 3 times within 15 s does it move to another copy of the channel.
+    onFreeze() {
+      const it = this.item, now = Date.now();
+      if (!it || it.kind !== 'live') return;
+      this.freezes = (this.freezes || []).filter(t => now - t < 15000).concat(now);
+      if (this.freezes.length <= 3) return;
+      this.freezes = [];
+      it.tried = it.tried || new Set();
+      it.tried.add(`${it.id}:${it.fmt}`);
+      const next = ((it.version && it.version.versions) || []).find(v => !it.tried.has(`${v.stream_id}:${it.fmt}`));
+      if (!next) return;
+      App.toast(`Keeps stopping · trying another copy (${next.quality || 'SD'})…`);
+      this.play({ ...it, id: next.stream_id, version: next, tried: it.tried });
+    },
+
     fail(detail) {
       if (!this.item) return;
       const blocked = (!this.item.url || this.item.relay) && location.protocol === 'https:' && !Settings.relay;
@@ -409,11 +665,7 @@
     // ---------- top bar on a TV (live): OK brings it up on ☆, ◀ ▶ move along it ----------
     barFocused() { return this.el.querySelector('.p-top').contains(document.activeElement); },
 
-    focusBar() {
-      this.poke();
-      const fav = this.el.querySelector('[data-act="fav"]');
-      if (fav) fav.focus({ preventScroll: true });
-    },
+
 
     // Returns true when the key was used inside the bar.
     barKey(e) {
@@ -444,27 +696,33 @@
       this.poke();
       const v = this.video, live = this.item && this.item.kind === 'live';
       if (live && this.sideOpen()) { if (this.sideKey(e)) e.stopPropagation(); return; }
+      const panel = this.panel();
+      if (panel) { if (this.panelKey(e, panel)) e.stopPropagation(); return; }
       const tv = document.documentElement.classList.contains('tv');
       if (tv && this.barFocused() && this.barKey(e)) { e.preventDefault(); e.stopPropagation(); return; }
       if (live && /^[0-9]$/.test(e.key) && !e.target.matches('input')) { e.preventDefault(); this.digit(e.key); return; }
       if (live && e.key === 'Enter' && this.mediaFocused()) {
         e.preventDefault(); e.stopPropagation();
-        if (tv) this.focusBar(); else this.openSide();
+        this.openInfo();
         return;
       }
       switch (e.key) {
         case 'Escape': case 'Backspace': case 'BrowserBack': case 'GoBack':
           e.preventDefault(); e.stopPropagation(); this.close(); break;
         // ▲/▼ move up/down the list; CH+/CH− go to the next/previous channel number, like a TV.
-        case 'ArrowUp': case 'PageUp': case 'ChannelDown':
+        case 'PageUp': case 'ChannelDown':
           if (live) { e.preventDefault(); e.stopPropagation(); this.zap(-1); } break;
-        case 'ArrowDown': case 'PageDown': case 'ChannelUp':
+        case 'PageDown': case 'ChannelUp':
           if (live) { e.preventDefault(); e.stopPropagation(); this.zap(1); } break;
+        case 'ArrowUp':
+          if (live) { e.preventDefault(); e.stopPropagation(); this.openStrip(); } break;
+        case 'ArrowDown':
+          if (live) { e.preventDefault(); e.stopPropagation(); this.openInfo(); } break;
         case 'ArrowLeft':
           if (live) { e.preventDefault(); e.stopPropagation(); this.openSide(); }
           else if (this.mediaFocused()) { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 10); } break;
         case 'ArrowRight':
-          if (live) { if (this.stepVersion(1)) { e.preventDefault(); e.stopPropagation(); } }
+          if (live) { e.preventDefault(); e.stopPropagation(); this.openSched(); }
           else if (this.mediaFocused()) { e.preventDefault(); v.currentTime += 10; } break;
         case ' ': case 'MediaPlayPause':
           if (this.mediaFocused() || e.key === 'MediaPlayPause') { e.preventDefault(); v.paused ? v.play() : v.pause(); } break;
@@ -489,11 +747,14 @@
     },
 
     close() {
+      // Leaving a replay started from the programme list goes back to the live channel.
+      if (this.item && this.item.liveReturn) { this.play(this.item.liveReturn); return; }
       this.saveProgress();
       this.destroy();
       const it = this.item;
       this.item = null;
       this.side.classList.add('hidden');
+      this.hidePanels();
       if (it && it.kind === 'live') App.afterLive(it.groupKey, it.version && it.version.gkey);
       this.el.classList.add('hidden');
       document.body.classList.remove('playing');

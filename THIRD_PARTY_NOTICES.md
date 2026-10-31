@@ -17,3 +17,12 @@ obligations.
 
 Free VPN servers are provided by the VPN Gate Academic Experiment Project (University of Tsukuba,
 https://www.vpngate.net) and run by volunteers.
+
+## Shipped inside the app (web, Android, Samsung)
+
+| Component | License | Where |
+| --- | --- | --- |
+| hls.js 1.5.13 | Apache-2.0 | `assets/js/vendor/hls.min.js` (website only) |
+| mpegts.js 1.7.3 | Apache-2.0 | `assets/js/vendor/mpegts.js` (website only) |
+| Exo 2 font (via Fontsource 5.3.0) | SIL Open Font License 1.1 | `assets/fonts/exo-2-*.woff2` |
+| Saira font (via Fontsource 5.3.0) | SIL Open Font License 1.1 | `assets/fonts/saira-*.woff2` |

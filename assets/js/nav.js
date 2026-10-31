@@ -11,6 +11,7 @@
   }
 
   function visible(el) {
+    if (el.closest('[inert]')) return false; // hidden slides etc.; older TVs ignore inert themselves
     if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') return false;
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;

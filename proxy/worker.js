@@ -10,13 +10,14 @@
  *
  * Only URLs on ALLOWED_HOSTS are accepted directly. URLs that appear inside a
  * playlist (other hosts / IPs the provider redirects to) are signed with
- * SECRET so the relay can't be used as an open proxy.
+ * SECRET so the relay can't be used as an open proxy. Without a SECRET the
+ * relay refuses to run: a default one would be public, readable in this file.
  */
 const ALLOWED_HOSTS = ['inkonabtv.ottb.xyz'];
 
 export default {
   async fetch(request, env) {
-    const secret = (env && env.SECRET) || 'change-me-' + ALLOWED_HOSTS.join(',');
+    const secret = env && env.SECRET;
     const cors = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
@@ -24,6 +25,9 @@ export default {
       'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
     };
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+    if (!secret || secret.length < 16) {
+      return new Response('Relay not set up: add a secret named SECRET (16+ random characters) in Settings → Variables and Secrets.', { status: 503, headers: cors });
+    }
 
     const self = new URL(request.url);
     const target = self.searchParams.get('url');

@@ -65,6 +65,38 @@
   const PERSIST = new Set(['get_live_streams', 'get_vod_streams', 'get_series', 'get_live_categories', 'get_vod_categories', 'get_series_categories']);
   const MAX_AGE = 6 * 3600e3;
 
+  // A fetch that gives up: a server that doesn't answer must not keep the app waiting forever.
+  function getJson(url, ms) {
+    return Promise.race([
+      fetch(url, { cache: 'no-store' }).then(r => {
+        if (!r.ok) throw new Error('Server error ' + r.status);
+        return r.json();
+      }),
+      new Promise((resolve, reject) => setTimeout(() => reject(new Error('Failed to fetch')), ms)),
+    ]);
+  }
+
+  // The new download of a list against the saved copy, item by item (matched by id). Unchanged
+  // items keep the saved object; `same` means nothing to save or redraw. The position number
+  // (`num`) is left out of the comparison: one new channel would otherwise change all the others.
+  function mergeList(old, fresh) {
+    const id = x => String(x.stream_id ?? x.series_id ?? x.category_id ?? x.url ?? '');
+    const sig = x => JSON.stringify(x, (k, v) => (k === 'num' ? undefined : v));
+    const before = new Map((Array.isArray(old) ? old : []).map(x => [id(x), x]));
+    let added = 0, changed = 0, moved = false;
+    const list = fresh.map((x, i) => {
+      const o = before.get(id(x));
+      if (!o) { added++; return x; }
+      if (!moved && id(old[i] || {}) !== id(x)) moved = true;
+      before.delete(id(x));
+      if (sig(o) === sig(x)) return o;
+      changed++;
+      return x;
+    });
+    const removed = before.size;
+    return { list, added, removed, changed, same: !added && !removed && !changed && !moved };
+  }
+
   class Xtream {
     constructor(server, username, password) {
       this.server = server.replace(/\/+$/, '');
@@ -85,10 +117,7 @@
       const url = this.apiUrl(action ? { action, ...params } : params);
       if (cache && this.cache.has(url)) return this.cache.get(url);
       if (cache && PERSIST.has(action) && params.category_id == null) return this.persisted(action, url);
-      const p = fetch(url, { cache: 'no-store' }).then(r => {
-        if (!r.ok) throw new Error('Server error ' + r.status);
-        return r.json();
-      });
+      const p = getJson(url, action ? 120e3 : 15e3);
       if (cache) {
         this.cache.set(url, p);
         p.catch(() => this.cache.delete(url));
@@ -100,10 +129,7 @@
     persisted(action, url) {
       const key = `${this.server}|${this.username}|${action}`;
       this.saved = this.saved || new Map();
-      const net = () => fetch(url, { cache: 'no-store' }).then(r => {
-        if (!r.ok) throw new Error('Server error ' + r.status);
-        return r.json();
-      }).then(d => {
+      const net = () => getJson(url, 180e3).then(d => {
         const t = Date.now();
         Disk.set(key, { t, d });
         this.saved.set(action, { url, key, t });
@@ -111,8 +137,9 @@
       });
       const p = Disk.get(key).then(hit => {
         if (!hit || hit.d == null) return net();
-        this.saved.set(action, { url, key, t: hit.t });
-        if (Date.now() - hit.t > MAX_AGE) this.scheduleRefresh();
+        const t = checkedAt(key, hit.t);
+        this.saved.set(action, { url, key, t });
+        if (Date.now() - t > MAX_AGE) this.scheduleRefresh();
         return hit.d;
       });
       this.cache.set(url, p);
@@ -131,49 +158,74 @@
       this.refreshTimer = setTimeout(() => this.refreshAll(), delay);
     }
 
-    // Download every saved playlist again, one after another, without blocking the UI.
-    // Fires 'inkonab:catalog' when the new data is stored.
+    // Refresh when the saved playlists were last checked more than `age` ms ago.
+    refreshIfOlder(age) {
+      const t = this.savedAt();
+      if (t != null && Date.now() - t > age) this.refreshAll();
+    }
+
+    // Download every saved playlist again, one after another, without blocking the UI, and keep
+    // only the differences: new, removed and changed items. An unchanged list isn't saved again;
+    // a list that fails or comes back empty (a provider glitch) keeps the saved copy.
+    // Fires 'inkonab:catalog' with the changed sections ({ live, movie, series }) and counts.
     async refreshAll() {
       if (this.refreshing) return this.refreshing;
       this.refreshing = (async () => {
-        let changed = false;
+        const sections = {}, counts = { added: 0, removed: 0, changed: 0 };
         // Category lists first: the language downloads after them read the fresh lists.
         const entries = [...(this.saved || [])].sort((a, b) => (a[1].lang ? 1 : 0) - (b[1].lang ? 1 : 0));
         for (const [action, { url, key, lang }] of entries) {
           try {
+            const hit = await Disk.get(key);
+            const old = hit && hit.d;
             let d;
-            if (lang) d = await this.fetchLangs(lang.action, lang.catAction);
-            else {
-              const r = await fetch(url, { cache: 'no-store' });
-              if (!r.ok) continue;
-              d = await r.json();
-            }
+            if (lang) d = await this.fetchLangs(lang.action, lang.catAction, old);
+            else d = await getJson(url, 180e3);
+            const fresh = asArray(d);
+            if (!fresh.length && asArray(old).length) continue;
             const t = Date.now();
-            await Disk.set(key, { t, d });
+            const diff = mergeList(old, fresh);
+            if (!diff.same) {
+              await Disk.set(key, { t, d: diff.list });
+              this.cache.set(lang ? key : url, Promise.resolve(diff.list));
+              sections[SECTION[lang ? lang.action : action]] = true;
+              counts.added += diff.added; counts.removed += diff.removed; counts.changed += diff.changed;
+            }
+            Store.set('checked.' + key, t);
             this.saved.set(action, { url, key, t, lang });
-            this.cache.set(lang ? key : url, Promise.resolve(d));
-            changed = true;
           } catch {}
         }
         this.refreshing = null;
-        if (changed) window.dispatchEvent(new CustomEvent('inkonab:catalog'));
+        const changed = Object.keys(sections).length > 0;
+        if (changed) window.dispatchEvent(new CustomEvent('inkonab:catalog', { detail: { sections, ...counts } }));
         return changed;
       })();
       return this.refreshing;
     }
 
-    async login() {
+    // Saved sign-in for this account (the last time the server answered), or null.
+    savedLogin() {
+      const remembered = Store.get('creds');
+      if (!remembered || remembered.u !== this.username || remembered.p !== this.password) return null;
+      const data = Store.get('login.' + this.server + '|' + this.username);
+      return data && data.user_info ? data : null;
+    }
+
+    // `strict`: the server must answer (no saved sign-in). `offline` is set when the saved
+    // sign-in was used because the server didn't answer.
+    async login({ strict } = {}) {
       // Offline or server down: fall back to the last successful sign-in for this account.
       const savedKey = 'login.' + this.server + '|' + this.username;
       let data;
       try {
         data = await this.call('', {}, { cache: false });
+        this.offline = false;
       } catch (e) {
         // The server answers a wrong account with 401/403/404: say so plainly (no offline fallback).
         if (/Server error 40[134]/.test(e.message)) throw new Error('Wrong username or password');
-        const remembered = Store.get('creds');
-        data = remembered && remembered.u === this.username && remembered.p === this.password ? Store.get(savedKey) : null;
+        data = strict ? null : this.savedLogin();
         if (!data) throw e;
+        this.offline = true;
       }
       if (!data || !data.user_info || Number(data.user_info.auth) !== 1) throw new Error('Wrong username or password');
       if (data.user_info.status && data.user_info.status !== 'Active') throw new Error('Account ' + data.user_info.status.toLowerCase());
@@ -226,8 +278,9 @@
       });
       const p = Disk.get(key).then(hit => {
         if (!hit || hit.d == null) return net();
-        this.saved.set(key, { key, t: hit.t, lang });
-        if (Date.now() - hit.t > MAX_AGE) this.scheduleRefresh();
+        const t = checkedAt(key, hit.t);
+        this.saved.set(key, { key, t, lang });
+        if (Date.now() - t > MAX_AGE) this.scheduleRefresh();
         return hit.d;
       });
       this.cache.set(key, p);
@@ -236,19 +289,21 @@
     }
 
     // The streams of every category in the chosen languages, 6 requests at a time, in the
-    // provider's category order. A category that fails is skipped; all failing is an error.
-    async fetchLangs(action, catAction) {
+    // provider's category order. A category that fails is tried a second time, then keeps its
+    // items from `old` (the saved copy) or is skipped; all failing is an error.
+    async fetchLangs(action, catAction, old) {
       const cats = asArray(await this.call(catAction)).filter(c => this.langAllowed(c.category_name));
       const parts = new Array(cats.length);
       let next = 0, failed = 0;
+      const get = i => getJson(this.apiUrl({ action, category_id: cats[i].category_id }), 60e3).then(asArray);
       const worker = async () => {
         while (next < cats.length) {
           const i = next++;
-          try {
-            const r = await fetch(this.apiUrl({ action, category_id: cats[i].category_id }), { cache: 'no-store' });
-            if (!r.ok) throw new Error('Server error ' + r.status);
-            parts[i] = asArray(await r.json());
-          } catch { failed++; parts[i] = []; }
+          try { parts[i] = await get(i).catch(() => get(i)); }
+          catch {
+            failed++;
+            parts[i] = asArray(old).filter(x => String(x.category_id) === String(cats[i].category_id));
+          }
         }
       };
       await Promise.all(Array.from({ length: Math.min(6, cats.length) }, worker));
@@ -287,8 +342,11 @@
       const t = new Date(startMs + (Number(Settings.catchupShift) || 0) * 3600e3);
       let parts;
       try {
-        parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-          .formatToParts(t).map(x => [x.type, x.value]));
+        // formatToParts is missing on 2018 Samsung TVs (Chromium 56): read the formatted text instead.
+        const f = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+        const m = f.format(t).match(/(\d{2})\/(\d{2})\/(\d{4}),?\s+(\d{2}):(\d{2})/);
+        if (!m) throw new Error('date format');
+        parts = { year: m[3], month: m[1], day: m[2], hour: m[4] === '24' ? '00' : m[4], minute: m[5] };
       } catch {
         const z = n => String(n).padStart(2, '0');
         parts = { year: t.getUTCFullYear(), month: z(t.getUTCMonth() + 1), day: z(t.getUTCDate()), hour: z(t.getUTCHours()), minute: z(t.getUTCMinutes()) };
@@ -323,8 +381,8 @@
       if (!hit || !hit.d) {
         hit = { t: Date.now(), d: await M3U.load(this.url) };
         Disk.set(key, hit);
-      } else if (Date.now() - hit.t > MAX_AGE) this.scheduleRefresh();
-      this.savedT = hit.t;
+      } else if (Date.now() - checkedAt('m3u|' + this.url, hit.t) > MAX_AGE) this.scheduleRefresh();
+      this.savedT = checkedAt('m3u|' + this.url, hit.t);
       this.index(hit.d);
       if (!this.live.length && !this.vod.length && !this.series.length) throw new Error('This playlist is empty');
       this.info = { user_info: { username: this.username, status: 'Active' }, server_info: {} };
@@ -377,16 +435,26 @@
       clearTimeout(this.refreshTimer);
       this.refreshTimer = setTimeout(() => this.refreshAll(), delay);
     }
+    refreshIfOlder(age) { if (this.savedT && Date.now() - this.savedT > age) this.refreshAll(); }
+    // Same rules as Xtream: only a playlist that really changed is saved and redrawn.
     async refreshAll() {
-      try {
+      if (this.refreshing) return this.refreshing;
+      this.refreshing = (async () => {
+        const key = 'm3u|' + this.url;
         const d = await M3U.load(this.url);
         if (!d.length) return false;
+        const hit = await Disk.get(key);
+        const diff = mergeList(hit && hit.d, d);
         this.savedT = Date.now();
-        await Disk.set('m3u|' + this.url, { t: this.savedT, d });
+        Store.set('checked.' + key, this.savedT);
+        if (diff.same) return false;
+        await Disk.set(key, { t: this.savedT, d });
         this.index(d);
-        window.dispatchEvent(new CustomEvent('inkonab:catalog'));
+        window.dispatchEvent(new CustomEvent('inkonab:catalog', { detail: {
+          sections: { live: true, movie: true, series: true }, added: diff.added, removed: diff.removed, changed: diff.changed } }));
         return true;
-      } catch { return false; }
+      })().catch(() => false).then(r => { this.refreshing = null; return r; });
+      return this.refreshing;
     }
 
     byCat(list, categoryId) { return Promise.resolve(categoryId == null ? list : list.filter(x => x.category_id === categoryId)); }
@@ -502,6 +570,15 @@
   }
 
   // The language code a category name starts with ("FR: Sport" → "FR", "UK | News" → "UK"); '' when none.
+  // Which section of the app a saved list belongs to.
+  const SECTION = {
+    get_live_streams: 'live', get_live_categories: 'live', get_vod_streams: 'movie',
+    get_vod_categories: 'movie', get_series: 'series', get_series_categories: 'series',
+  };
+
+  // When a saved list was last compared with the server (an unchanged list keeps its old date).
+  function checkedAt(key, t) { return Math.max(t || 0, Store.get('checked.' + key, 0)); }
+
   function langCode(name) {
     const m = /^\s*([A-Za-z]{2,8})\s*[:|]/.exec(name || '');
     return m ? m[1].toUpperCase() : '';

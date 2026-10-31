@@ -147,9 +147,12 @@
     removeAttribute(attr) { if (attr === 'src') this.stop(); },
     load() {},
     focus() { const p = document.getElementById('player'); if (p) p.focus({ preventScroll: true }); },
-    open(url) {
+    open(url, again) {
+      const at = this.t;
       this.stop();
       this.url = url;
+      if (!again) { this.reconnects = 0; this.played = false; }
+      else if (isFinite(this.dur) && at > 5) this.pendingSeek = at; // films: carry on where it dropped
       this.t = 0;
       this.dur = NaN;
       this.isPaused = false;
@@ -158,12 +161,20 @@
         av.open(url);
         av.setDisplayRect(0, 0, 1920, 1080);
         av.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX');
+        // Slow lines: start after 5 s of video, and after a freeze wait for 10 s so it doesn't
+        // stop again straight away. Adaptive streams start on their lowest level and climb.
+        try {
+          av.setBufferingParam('PLAYER_BUFFER_FOR_PLAY', 'PLAYER_BUFFER_SIZE_IN_SECOND', 5);
+          av.setBufferingParam('PLAYER_BUFFER_FOR_RESUME', 'PLAYER_BUFFER_SIZE_IN_SECOND', 10);
+        } catch (e) {}
+        try { av.setTimeoutForBuffering(20); } catch (e) {}
+        try { av.setStreamingProperty('ADAPTIVE_INFO', 'STARTBITRATE=LOWEST'); } catch (e) {}
         av.setListener({
           onbufferingstart: () => this.emit('waiting'),
           onbufferingcomplete: () => this.emit('playing'),
           oncurrentplaytime: ms => { this.t = ms / 1000; },
           onstreamcompleted: () => { screenSaver(true); this.emit('ended'); },
-          onerror: err => { if (this.url === mine) { this.error = err; this.emit('error'); } },
+          onerror: err => { if (this.url === mine && !this.reconnect()) { this.error = err; this.emit('error'); } },
           onevent: () => {},
         });
         av.prepareAsync(() => {
@@ -175,13 +186,27 @@
           av.play();
           this.isPaused = false;
           screenSaver(false);
+          this.played = true;
+          this.reconnects = 0;
           this.emit('playing');
-        }, err => { if (this.url === mine) { this.error = err; this.emit('error'); } });
+        }, err => { if (this.url === mine && !this.reconnect()) { this.error = err; this.emit('error'); } });
       } catch (e) {
         setTimeout(() => { if (this.url === mine) this.emit('error'); }, 0);
       }
     },
+    // A stream that was playing and dropped reopens quietly (up to 8 times, waiting a little
+    // longer each time) before player.js hears about an error.
+    reconnect() {
+      if (!this.played || this.reconnects >= 8) return false;
+      const url = this.url;
+      this.reconnects++;
+      this.emit('waiting');
+      clearTimeout(this.again);
+      this.again = setTimeout(() => { if (this.url === url) this.open(url, true); }, Math.min(8000, 1000 * this.reconnects));
+      return true;
+    },
     stop() {
+      clearTimeout(this.again);
       this.url = '';
       screenSaver(true);
       try {

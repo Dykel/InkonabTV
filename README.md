@@ -28,7 +28,7 @@ GitHub Pages always uses HTTPS. Logging in and browsing the catalog work over HT
 
 1. Sign in at <https://dash.cloudflare.com> → **Workers & Pages** → **Create** → **Create Worker**. Name it e.g. `inkonab-relay` → **Deploy**.
 2. Click **Edit code**, replace everything with the contents of `proxy/worker.js`, then click **Deploy**.
-3. (Recommended) Open **Settings → Variables and Secrets**, add a secret named `SECRET` with a random value, and deploy again.
+3. **(Required)** Open **Settings → Variables and Secrets**, add a secret named `SECRET` with a random value of at least 16 characters (for example the output of `openssl rand -hex 24`), and deploy again. Without it the relay answers "Relay not set up" — otherwise anyone could use it as a free proxy.
 4. Copy the worker URL (e.g. `https://inkonab-relay.yourname.workers.dev`) and either
    - paste it into `relay:` in `config.js` (applies to everyone), or
    - paste it into **Settings → HTTPS relay URL** inside the app and press **Test**.
