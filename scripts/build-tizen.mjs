@@ -27,7 +27,7 @@ cpSync(join(root, 'config.js'), join(out, 'config.js'));
 // ---------- JS ----------
 const lower = (code, file) => transformSync(code, { target: TARGET, loader: 'js', sourcefile: file, charset: 'utf8' }).code;
 writeFileSync(join(out, 'config.js'), lower(readFileSync(join(root, 'config.js'), 'utf8') +
-  "\nObject.assign(window.INKONAB_CONFIG, { playerMode: true, server: '', freePlaylists: [] });\n", 'config.js'));
+  "\nObject.assign(window.INKONAB_CONFIG, { playerMode: true, server: '', freePlaylists: [], langPicker: false });\n", 'config.js'));
 writeFileSync(join(out, 'assets/js/vendor/qrcode.js'), lower(readFileSync(join(root, 'assets/js/vendor/qrcode.js'), 'utf8'), 'qrcode.js'));
 writeFileSync(join(out, 'assets/js/polyfills.js'), lower(readFileSync(join(root, 'tizen/polyfills.js'), 'utf8'), 'polyfills.js'));
 for (const f of readdirSync(join(root, 'assets/js'))) {

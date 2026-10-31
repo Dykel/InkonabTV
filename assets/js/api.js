@@ -137,15 +137,21 @@
       if (this.refreshing) return this.refreshing;
       this.refreshing = (async () => {
         let changed = false;
-        for (const [action, { url, key }] of this.saved || []) {
+        // Category lists first: the language downloads after them read the fresh lists.
+        const entries = [...(this.saved || [])].sort((a, b) => (a[1].lang ? 1 : 0) - (b[1].lang ? 1 : 0));
+        for (const [action, { url, key, lang }] of entries) {
           try {
-            const r = await fetch(url, { cache: 'no-store' });
-            if (!r.ok) continue;
-            const d = await r.json();
+            let d;
+            if (lang) d = await this.fetchLangs(lang.action, lang.catAction);
+            else {
+              const r = await fetch(url, { cache: 'no-store' });
+              if (!r.ok) continue;
+              d = await r.json();
+            }
             const t = Date.now();
             await Disk.set(key, { t, d });
-            this.saved.set(action, { url, key, t });
-            this.cache.set(url, Promise.resolve(d));
+            this.saved.set(action, { url, key, t, lang });
+            this.cache.set(lang ? key : url, Promise.resolve(d));
             changed = true;
           } catch {}
         }
@@ -180,9 +186,75 @@
     liveCategories() { return this.call('get_live_categories').then(asArray); }
     vodCategories() { return this.call('get_vod_categories').then(asArray); }
     seriesCategories() { return this.call('get_series_categories').then(asArray); }
-    liveStreams(categoryId) { return this.call('get_live_streams', { category_id: categoryId }).then(asArray); }
-    vodStreams(categoryId) { return this.call('get_vod_streams', { category_id: categoryId }).then(asArray); }
-    seriesList(categoryId) { return this.call('get_series', { category_id: categoryId }).then(asArray); }
+    liveStreams(categoryId) { return categoryId == null && this.langs ? this.langStreams('get_live_streams', 'get_live_categories') : this.call('get_live_streams', { category_id: categoryId }).then(asArray); }
+    vodStreams(categoryId) { return categoryId == null && this.langs ? this.langStreams('get_vod_streams', 'get_vod_categories') : this.call('get_vod_streams', { category_id: categoryId }).then(asArray); }
+    seriesList(categoryId) { return categoryId == null && this.langs ? this.langStreams('get_series', 'get_series_categories') : this.call('get_series', { category_id: categoryId }).then(asArray); }
+
+    // Playlist languages. Big providers start every category with a code ("FR: Sport", "UK: News").
+    // With languages chosen (codes; '' = categories without one), only their categories are
+    // downloaded, one category at a time, which keeps memory and storage small on a TV. A new
+    // category in a chosen language is picked up at the next refresh, since the category lists
+    // are read again first.
+    setLangs(codes) { this.langs = codes && codes.length ? new Set(codes) : null; }
+    langAllowed(name) { return !this.langs || this.langs.has(langCode(name)); }
+
+    // Languages found in the playlist, with how many categories each has per section.
+    async langSummary() {
+      const [live, movie, series] = await Promise.all([this.liveCategories(), this.vodCategories(), this.seriesCategories()]);
+      const m = new Map();
+      const add = (list, kind) => {
+        for (const c of list) {
+          const code = langCode(c.category_name);
+          if (!m.has(code)) m.set(code, { code, live: 0, movie: 0, series: 0 });
+          m.get(code)[kind]++;
+        }
+      };
+      add(live, 'live'); add(movie, 'movie'); add(series, 'series');
+      return [...m.values()];
+    }
+
+    langStreams(action, catAction) {
+      const key = `${this.server}|${this.username}|${action}|lang:${[...this.langs].sort().join(',')}`;
+      if (this.cache.has(key)) return this.cache.get(key);
+      this.saved = this.saved || new Map();
+      const lang = { action, catAction };
+      const net = () => this.fetchLangs(action, catAction).then(d => {
+        const t = Date.now();
+        Disk.set(key, { t, d });
+        this.saved.set(key, { key, t, lang });
+        return d;
+      });
+      const p = Disk.get(key).then(hit => {
+        if (!hit || hit.d == null) return net();
+        this.saved.set(key, { key, t: hit.t, lang });
+        if (Date.now() - hit.t > MAX_AGE) this.scheduleRefresh();
+        return hit.d;
+      });
+      this.cache.set(key, p);
+      p.catch(() => this.cache.delete(key));
+      return p;
+    }
+
+    // The streams of every category in the chosen languages, 6 requests at a time, in the
+    // provider's category order. A category that fails is skipped; all failing is an error.
+    async fetchLangs(action, catAction) {
+      const cats = asArray(await this.call(catAction)).filter(c => this.langAllowed(c.category_name));
+      const parts = new Array(cats.length);
+      let next = 0, failed = 0;
+      const worker = async () => {
+        while (next < cats.length) {
+          const i = next++;
+          try {
+            const r = await fetch(this.apiUrl({ action, category_id: cats[i].category_id }), { cache: 'no-store' });
+            if (!r.ok) throw new Error('Server error ' + r.status);
+            parts[i] = asArray(await r.json());
+          } catch { failed++; parts[i] = []; }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(6, cats.length) }, worker));
+      if (cats.length && failed === cats.length) throw new Error('Failed to fetch');
+      return parts.flat();
+    }
     vodInfo(id) { return this.call('get_vod_info', { vod_id: id }); }
     seriesInfo(id) { return this.call('get_series_info', { series_id: id }); }
     shortEpg(streamId, limit = 8) {
@@ -429,6 +501,12 @@
     return [];
   }
 
+  // The language code a category name starts with ("FR: Sport" → "FR", "UK | News" → "UK"); '' when none.
+  function langCode(name) {
+    const m = /^\s*([A-Za-z]{2,8})\s*[:|]/.exec(name || '');
+    return m ? m[1].toUpperCase() : '';
+  }
+
   function b64(s) {
     if (!s) return '';
     try {
@@ -445,4 +523,5 @@
   window.TMDB = TMDB;
   window.M3U = M3U;
   window.asArray = asArray;
+  window.langCode = langCode;
 })();

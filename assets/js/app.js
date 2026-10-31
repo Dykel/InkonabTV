@@ -20,6 +20,19 @@
   const LOCALE = (window.I18N && I18N.locale) || 'en-US';
   const T = window.T || (s => s);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // Names for the language / country codes providers put in front of category names.
+  const PLAYLIST_LANGS = {
+    FR: 'French', EN: 'English', UK: 'United Kingdom', USA: 'United States', US: 'United States', CAN: 'Canada', QC: 'Québec',
+    ESP: 'Spanish', ES: 'Spanish', DE: 'German', NL: 'Dutch', BE: 'Belgium', IT: 'Italian', PT: 'Portuguese', BR: 'Brazil',
+    ARA: 'Arabic', AR: 'Arabic', TR: 'Turkish', PL: 'Polish', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland',
+    SCAN: 'Scandinavia', IS: 'Israel', GR: 'Greek', RO: 'Romanian', BG: 'Bulgarian', RU: 'Russian', CZ: 'Czech', HU: 'Hungarian',
+    HR: 'Croatia', SL: 'Slovenia', AL: 'Albanian', EXYU: 'Ex-Yugoslavia', AT: 'Austria', CH: 'Switzerland', CY: 'Cyprus', MT: 'Malta',
+    IR: 'Persian', KU: 'Kurdish', AF: 'Afghanistan', PK: 'Pakistan', IN: 'India', PH: 'Philippines', ID: 'Indonesia', CN: 'Chinese',
+    JP: 'Japanese', AS: 'Asia', AU: 'Australia', NZ: 'New Zealand', ISR: 'Israel', SO: 'Somali', MU: 'Music', AFRICAN: 'Africa',
+    CG: 'Montenegro', LV: 'Latin America', LA: 'Latvia / Latino', EU: 'Europe', GLOBAL: 'International', MULTI: 'Multi-language', SPT: 'Sports',
+  };
+  const playlistLang = code => PLAYLIST_LANGS[code] || code;
   // "server.tv:8080" / "http://server.tv:8080/player_api.php?…" → "http://server.tv:8080".
   const normServer = v => {
     v = String(v || '').trim();
@@ -144,8 +157,68 @@
     async connect(creds) {
       const api = creds.m ? new M3UPlaylist(creds.m) : new Xtream(creds.s || Settings.server, creds.u, creds.p);
       await api.login();
+      if (api.setLangs) api.setLangs(Store.get(this.langKey(api)));
       this.api = api;
       this.data = {};
+    },
+
+    // ---------- playlist languages (CFG.langPicker) ----------
+    // The languages chosen for an account: an array of codes ([] = all), undefined = not asked yet.
+    langKey: api => 'langs.' + api.server + '|' + api.username,
+    langPickerOn() { return CFG.langPicker === true && !!(this.api && this.api.langSummary); },
+
+    // Shows the language list; resolves once saved. `first`: right after sign-in, before anything
+    // big is downloaded, with no way to close it other than choosing.
+    pickLangs(first) {
+      return new Promise(async resolve => {
+        const m = this.openModal(`${first ? '' : this.closeBtn()}
+          <h2 class="sheet-title">Choose your languages</h2>
+          <p class="muted lang-intro">Only the languages you choose are downloaded and shown, which keeps the app fast. New channels, movies and series in them are added by themselves when the playlist updates.</p>
+          <div class="lang-grid" id="langGrid"><div class="loader"><span></span></div></div>
+          <div class="set-actions"><button class="btn ghost" id="langAll">All languages</button><button class="btn primary" id="langSave">Save</button></div>`, 'settings langs');
+        if (first) this.modalLocked = true;
+        const done = codes => {
+          this.modalLocked = false;
+          Store.set(this.langKey(this.api), codes);
+          this.closeModal();
+          resolve(codes);
+        };
+        let list;
+        try { list = await this.api.langSummary(); }
+        catch { $('#langGrid', m).innerHTML = '<p class="login-error">Can’t read the playlist. Check your connection.</p>'; }
+        const prev = new Set(Store.get(this.langKey(this.api)) || []);
+        if (list) {
+          const total = e => e.live + e.movie + e.series;
+          list.sort((a, b) => (a.code === '') - (b.code === '') || total(b) - total(a));
+          const parts = e => [e.live && `Live ${e.live}`, e.movie && `Movies ${e.movie}`, e.series && `Series ${e.series}`].filter(Boolean).join(' · ');
+          $('#langGrid', m).innerHTML = list.map(e => `<button class="lang-chip${prev.has(e.code) ? ' on' : ''}" data-code="${esc(e.code)}" aria-pressed="${prev.has(e.code)}">
+              <b>${esc(e.code ? playlistLang(e.code) : 'Other')}</b><small>${esc(e.code ? e.code + ' · ' : '')}${esc(parts(e))}</small></button>`).join('');
+          $('#langGrid', m).addEventListener('click', ev => {
+            const b = ev.target.closest('.lang-chip');
+            if (!b) return;
+            b.classList.toggle('on');
+            b.setAttribute('aria-pressed', b.classList.contains('on'));
+          });
+        }
+        $('#langAll', m).addEventListener('click', () => done([]));
+        $('#langSave', m).addEventListener('click', () => {
+          const codes = $$('.lang-chip.on', m).map(b => b.dataset.code);
+          if (!codes.length) return this.toast('Choose at least one language, or All languages');
+          done(codes);
+        });
+        $(list ? '.lang-chip' : '#langAll', m).focus();
+      });
+    },
+
+    // A new choice: forget the downloaded playlist and load only the chosen languages.
+    async applyLangs(codes) {
+      this.api.setLangs(codes);
+      this.api.cache.clear();
+      this.api.saved = new Map();
+      await Disk.clear();
+      this.data = {};
+      this.epgCache = null;
+      this.route();
     },
 
     loginError(err, creds) {
@@ -518,7 +591,7 @@
       if (back) back.focus({ preventScroll: true });
     },
 
-    start() {
+    async start() {
       if (!this.catalogHooked) {
         this.catalogHooked = true;
         window.addEventListener('inkonab:catalog', () => this.onCatalogRefreshed());
@@ -528,6 +601,12 @@
       $('#login').classList.add('hidden');
       $('#app').classList.remove('hidden');
       $('#avatar').textContent = (this.api.username[0] || '?').toUpperCase();
+      // First sign-in with a multi-language playlist: choose the languages before downloading it.
+      if (this.langPickerOn() && Store.get(this.langKey(this.api)) == null) {
+        $('#view').innerHTML = '';
+        await this.pickLangs(true);
+        this.api.setLangs(Store.get(this.langKey(this.api)));
+      }
       this.route();
     },
 
@@ -640,7 +719,8 @@
         const fn = { live: 'liveCategories', movie: 'vodCategories', series: 'seriesCategories' }[kind];
         this.data[key] = this.api[fn]();
       }
-      const cats = await this.data[key];
+      let cats = await this.data[key];
+      if (this.api.langAllowed) cats = cats.filter(c => this.api.langAllowed(c.category_name));
       return Settings.showAdult ? cats : cats.filter(c => !ADULT.test(c.category_name));
     },
     allowed(list) { return Settings.showAdult ? list : list.filter(i => !i.adult); },
@@ -1506,7 +1586,7 @@
     },
     closeModal() {
       const m = $('#modal');
-      if (m.classList.contains('hidden')) return;
+      if (m.classList.contains('hidden') || this.modalLocked) return;
       m.classList.add('hidden');
       m.innerHTML = '';
       document.body.classList.remove('modal-open');
@@ -1863,6 +1943,12 @@
           <div class="set-row vpn-actions"><button class="btn ghost" id="vpnConnect">Connect now</button><button class="btn ghost" id="vpnOff">Disconnect</button><button class="btn ghost" id="vpnForget">Forget server</button></div>
           <p class="muted small-note">Servers come from the VPN Gate academic project and are run by volunteers: they can be slow, and their operators could see unencrypted traffic. Use it to unblock channels, not for privacy.</p>
         </section>` : ''}
+        ${this.langPickerOn() ? `<section class="set-group">
+          <h3>Playlist languages</h3>
+          <div class="kv"><span>Shown</span><b id="langState">${esc(((Store.get(this.langKey(this.api)) || []).map(c => c ? playlistLang(c) : 'Other').join(', ')) || 'All languages')}</b></div>
+          <p class="muted small-note">Only the chosen languages are downloaded and shown. New categories in them are added when the playlist updates.</p>
+          <div class="set-row vpn-actions"><button class="btn ghost" id="langChange">Change languages</button></div>
+        </section>` : ''}
         <section class="set-group">
           <h3>Playlist on this device</h3>
           <div class="kv"><span>Last updated</span><b id="plUpdated">${esc(this.ago(this.api.savedAt()))}</b></div>
@@ -1939,6 +2025,12 @@
         $('#plUpdated', m).textContent = this.ago(this.api.savedAt());
         if (!changed) this.toast('Couldn’t reach the server — keeping the saved playlist');
         else if (this.view !== 'home') this.route();
+      });
+      const langChange = $('#langChange', m);
+      if (langChange) langChange.addEventListener('click', async () => {
+        const before = JSON.stringify(Store.get(this.langKey(this.api)) || []);
+        const codes = await this.pickLangs(false);
+        if (JSON.stringify(codes) !== before) await this.applyLangs(codes);
       });
       this.bindExtraPlaylists(m);
       if (window.Native && $('#vpnGroup', m)) this.bindVpnSettings(m);

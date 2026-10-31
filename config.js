@@ -22,6 +22,10 @@ window.INKONAB_CONFIG = {
   // (server, username, password) or M3U link. The Samsung TV build turns this on.
   playerMode: false,
 
+  // Playlist languages: after sign-in, people choose the languages of a big multi-language playlist
+  // (category names starting with "FR:", "UK:"…) and only those are downloaded. Sideload/web for now.
+  langPicker: true,
+
   // Remote setup: the sign-in screen shows a code that someone enters on setupUrl to fill in
   // the account from a phone. pairApi is the pairing worker (proxy/pair-worker.js, see README);
   // leave it empty to hide remote setup.
