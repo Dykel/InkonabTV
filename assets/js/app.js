@@ -21,18 +21,31 @@
   const T = window.T || (s => s);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  // Names for the language / country codes providers put in front of category names.
+  // Names for the language / country codes providers put in front of category names, in the
+  // interface language: 'l:xx' is a language, 'r:XX' a country (both named by Intl), anything else
+  // a plain English name (translated by i18n.js).
   const PLAYLIST_LANGS = {
-    FR: 'French', EN: 'English', UK: 'United Kingdom', USA: 'United States', US: 'United States', CAN: 'Canada', QC: 'Québec',
-    ESP: 'Spanish', ES: 'Spanish', DE: 'German', NL: 'Dutch', BE: 'Belgium', IT: 'Italian', PT: 'Portuguese', BR: 'Brazil',
-    ARA: 'Arabic', AR: 'Arabic', TR: 'Turkish', PL: 'Polish', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland',
-    SCAN: 'Scandinavia', IS: 'Israel', GR: 'Greek', RO: 'Romanian', BG: 'Bulgarian', RU: 'Russian', CZ: 'Czech', HU: 'Hungarian',
-    HR: 'Croatia', SL: 'Slovenia', AL: 'Albanian', EXYU: 'Ex-Yugoslavia', AT: 'Austria', CH: 'Switzerland', CY: 'Cyprus', MT: 'Malta',
-    IR: 'Persian', KU: 'Kurdish', AF: 'Afghanistan', PK: 'Pakistan', IN: 'India', PH: 'Philippines', ID: 'Indonesia', CN: 'Chinese',
-    JP: 'Japanese', AS: 'Asia', AU: 'Australia', NZ: 'New Zealand', ISR: 'Israel', SO: 'Somali', MU: 'Music', AFRICAN: 'Africa',
-    CG: 'Montenegro', LV: 'Latin America', LA: 'Latvia / Latino', EU: 'Europe', GLOBAL: 'International', MULTI: 'Multi-language', SPT: 'Sports',
+    FR: 'l:fr', EN: 'l:en', UK: 'r:GB', USA: 'r:US', US: 'r:US', CAN: 'r:CA', QC: 'Québec', ESP: 'l:es', ES: 'l:es', DE: 'l:de',
+    NL: 'l:nl', BE: 'r:BE', IT: 'l:it', PT: 'l:pt', BR: 'r:BR', ARA: 'l:ar', AR: 'l:ar', TR: 'l:tr', PL: 'l:pl', SE: 'r:SE',
+    NO: 'r:NO', DK: 'r:DK', FI: 'r:FI', SCAN: 'Scandinavia', IS: 'r:IL', ISR: 'r:IL', GR: 'l:el', RO: 'l:ro', BG: 'l:bg', RU: 'l:ru',
+    CZ: 'r:CZ', HU: 'l:hu', HR: 'r:HR', SL: 'r:SI', AL: 'l:sq', EXYU: 'Ex-Yugoslavia', AT: 'r:AT', CH: 'r:CH', CY: 'r:CY', MT: 'r:MT',
+    IR: 'l:fa', KU: 'l:ku', AF: 'r:AF', PK: 'r:PK', IN: 'r:IN', PH: 'r:PH', ID: 'r:ID', CN: 'l:zh', JP: 'l:ja', AS: 'Asia',
+    AU: 'r:AU', NZ: 'r:NZ', SO: 'l:so', MU: 'Music', AFRICAN: 'Africa', CG: 'r:ME', LV: 'Latin America', LA: 'Latvia / Latino',
+    EU: 'Europe', GLOBAL: 'International', MULTI: 'Multi-language', SPT: 'Sports',
   };
-  const playlistLang = code => PLAYLIST_LANGS[code] || code;
+  const namers = {};
+  const playlistLang = code => {
+    const v = PLAYLIST_LANGS[code];
+    if (!v) return code;
+    const m = /^([lr]):(.+)$/.exec(v);
+    if (!m) return v;
+    try {
+      const type = m[1] === 'l' ? 'language' : 'region';
+      const n = namers[type] || (namers[type] = new Intl.DisplayNames([LOCALE, 'en'], { type }));
+      const name = n.of(m[2]) || code;
+      return name.charAt(0).toLocaleUpperCase(LOCALE) + name.slice(1);
+    } catch { return code; }
+  };
   // "server.tv:8080" / "http://server.tv:8080/player_api.php?…" → "http://server.tv:8080".
   const normServer = v => {
     v = String(v || '').trim();
@@ -169,7 +182,7 @@
 
     // Shows the language list; resolves once saved. `first`: right after sign-in, before anything
     // big is downloaded, with no way to close it other than choosing.
-    pickLangs(first) {
+    pickLangs(first, summary) {
       return new Promise(async resolve => {
         const m = this.openModal(`${first ? '' : this.closeBtn()}
           <h2 class="sheet-title">Choose your languages</h2>
@@ -184,15 +197,15 @@
           resolve(codes);
         };
         let list;
-        try { list = await this.api.langSummary(); }
+        try { list = summary || await this.api.langSummary(); }
         catch { $('#langGrid', m).innerHTML = '<p class="login-error">Can’t read the playlist. Check your connection.</p>'; }
         const prev = new Set(Store.get(this.langKey(this.api)) || []);
         if (list) {
           const total = e => e.live + e.movie + e.series;
           list.sort((a, b) => (a.code === '') - (b.code === '') || total(b) - total(a));
-          const parts = e => [e.live && `Live ${e.live}`, e.movie && `Movies ${e.movie}`, e.series && `Series ${e.series}`].filter(Boolean).join(' · ');
+          const parts = e => [e.live && `<i>Live</i> ${e.live}`, e.movie && `<i>Movies</i> ${e.movie}`, e.series && `<i>Series</i> ${e.series}`].filter(Boolean).join(' · ');
           $('#langGrid', m).innerHTML = list.map(e => `<button class="lang-chip${prev.has(e.code) ? ' on' : ''}" data-code="${esc(e.code)}" aria-pressed="${prev.has(e.code)}">
-              <b>${esc(e.code ? playlistLang(e.code) : 'Other')}</b><small>${esc(e.code ? e.code + ' · ' : '')}${esc(parts(e))}</small></button>`).join('');
+              <b>${esc(e.code ? playlistLang(e.code) : 'Other')}</b><small>${esc(e.code ? e.code + ' · ' : '')}${parts(e)}</small></button>`).join('');
           $('#langGrid', m).addEventListener('click', ev => {
             const b = ev.target.closest('.lang-chip');
             if (!b) return;
@@ -602,9 +615,12 @@
       $('#app').classList.remove('hidden');
       $('#avatar').textContent = (this.api.username[0] || '?').toUpperCase();
       // First sign-in with a multi-language playlist: choose the languages before downloading it.
+      // A playlist without language codes (or with only one) loads whole, as before.
       if (this.langPickerOn() && Store.get(this.langKey(this.api)) == null) {
-        $('#view').innerHTML = '';
-        await this.pickLangs(true);
+        $('#view').innerHTML = '<div class="loader"><span></span></div>';
+        const list = await this.api.langSummary().catch(() => null);
+        if (list && list.filter(e => e.code).length >= 2) await this.pickLangs(true, list);
+        else if (list) Store.set(this.langKey(this.api), []);
         this.api.setLangs(Store.get(this.langKey(this.api)));
       }
       this.route();

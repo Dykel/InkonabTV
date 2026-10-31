@@ -23,7 +23,7 @@ window.INKONAB_CONFIG = {
   playerMode: false,
 
   // Playlist languages: after sign-in, people choose the languages of a big multi-language playlist
-  // (category names starting with "FR:", "UK:"…) and only those are downloaded. Sideload/web for now.
+  // (category names starting with "FR:", "UK:"…) and only those are downloaded. On in every build.
   langPicker: true,
 
   // Remote setup: the sign-in screen shows a code that someone enters on setupUrl to fill in

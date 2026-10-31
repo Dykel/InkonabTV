@@ -969,6 +969,7 @@ img.broken { visibility: hidden; }
 .lang-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.06); border: 2px solid transparent; color: var(--text); text-align: left; }
 .lang-chip b { font-size: 1rem; }
 .lang-chip small { color: var(--muted); font-size: .78rem; }
+.lang-chip small i { font-style: normal; }
 .lang-chip.on { background: rgba(251,197,12,.16); border-color: var(--accent); }
 .lang-chip.on b::before { content: '✓ '; color: var(--accent); }
 .lang-chip:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
