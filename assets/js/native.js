@@ -102,6 +102,6 @@
   AppPlugin.addListener('backButton', () => {
     const target = document.activeElement || document.body;
     const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-    if (target.dispatchEvent(ev)) AppPlugin.exitApp();
+    if (target.dispatchEvent(ev) && (!window.App || App.confirmExit())) AppPlugin.exitApp();
   });
 })();

@@ -281,6 +281,8 @@
     'International': ['International', 'Internacional', 'International', 'Internazionale', 'Internacional'],
     'Multi-language': ['Multilingue', 'Multilingüe', 'Mehrsprachig', 'Multilingua', 'Multilíngue'],
     'Sports': ['Sports', 'Deportes', 'Sport', 'Sport', 'Desporto'],
+    'Press Back again to exit': ['Appuyez à nouveau sur Retour pour quitter', 'Pulsa Atrás otra vez para salir', 'Zum Beenden erneut Zurück drücken', 'Premi di nuovo Indietro per uscire', 'Prima Voltar novamente para sair'],
+    'Press Back again to leave the channel': ['Appuyez à nouveau sur Retour pour quitter la chaîne', 'Pulsa Atrás otra vez para salir del canal', 'Erneut Zurück drücken, um den Sender zu verlassen', 'Premi di nuovo Indietro per lasciare il canale', 'Prima Voltar novamente para sair do canal'],
     'Programmes': ['Programmes', 'Programas', 'Sendungen', 'Programmi', 'Programas'],
     'OK: watch / replay · ▲ ▼: move · ◀: close': ['OK : regarder / revoir · ▲ ▼ : se déplacer · ◀ : fermer', 'OK: ver / repetición · ▲ ▼: moverse · ◀: cerrar', 'OK: ansehen / Wiederholung · ▲ ▼: bewegen · ◀: schließen', 'OK: guarda / replay · ▲ ▼: spostati · ◀: chiudi', 'OK: ver / repetir · ▲ ▼: mover · ◀: fechar'],
     'OK: watch · ◀ ▶: browse · ▲: all groups · ▼: close': ['OK : regarder · ◀ ▶ : parcourir · ▲ : tous les groupes · ▼ : fermer', 'OK: ver · ◀ ▶: explorar · ▲: todos los grupos · ▼: cerrar', 'OK: ansehen · ◀ ▶: blättern · ▲: alle Gruppen · ▼: schließen', 'OK: guarda · ◀ ▶: sfoglia · ▲: tutti i gruppi · ▼: chiudi', 'OK: ver · ◀ ▶: navegar · ▲: todos os grupos · ▼: fechar'],

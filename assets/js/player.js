@@ -662,6 +662,16 @@
       }, 3500);
     },
 
+    clearScreen() {
+      clearTimeout(this.hideTimer);
+      clearTimeout(this.digitTimer);
+      this.digits = '';
+      this.el.querySelector('.p-num').classList.add('hidden');
+      this.el.classList.remove('ui');
+      $('#toast').classList.remove('show');
+      this.video.focus({ preventScroll: true });
+    },
+
     // ---------- top bar on a TV (live): OK brings it up on ☆, ◀ ▶ move along it ----------
     barFocused() { return this.el.querySelector('.p-top').contains(document.activeElement); },
 
@@ -693,8 +703,17 @@
 
     onKey(e) {
       if (!this.isOpen()) return;
-      this.poke();
       const v = this.video, live = this.item && this.item.kind === 'live';
+      // Live, nothing open: Back first clears the screen (only the video stays), then two
+      // presses in a row leave the channel. A channel that failed closes at once.
+      if (live && ['Escape', 'Backspace', 'BrowserBack', 'GoBack'].includes(e.key) && !this.sideOpen() && !this.panel()) {
+        e.preventDefault(); e.stopPropagation();
+        if (this.el.dataset.state === 'error') return this.close();
+        if (this.el.classList.contains('ui') || this.digits) return this.clearScreen();
+        if (App.confirmExit('Press Back again to leave the channel')) this.close();
+        return;
+      }
+      this.poke();
       if (live && this.sideOpen()) { if (this.sideKey(e)) e.stopPropagation(); return; }
       const panel = this.panel();
       if (panel) { if (this.panelKey(e, panel)) e.stopPropagation(); return; }

@@ -807,6 +807,15 @@
       $('#date').textContent = new Date().toLocaleDateString(LOCALE, { weekday: 'long', month: 'long', day: 'numeric' });
     },
 
+    // Back on the last screen: the first press only warns, a second one within 2.5 s goes ahead.
+    confirmExit(msg = 'Press Back again to exit') {
+      const now = Date.now();
+      if (now - (this.backAt || 0) < 2500) { this.backAt = 0; $('#toast').classList.remove('show'); return true; }
+      this.backAt = now;
+      this.toast(msg);
+      return false;
+    },
+
     toast(msg) {
       const t = $('#toast');
       t.textContent = msg;

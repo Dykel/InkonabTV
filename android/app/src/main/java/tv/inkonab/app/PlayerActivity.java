@@ -233,6 +233,7 @@ public class PlayerActivity extends AppCompatActivity {
                 else if (barActive) hideBar();
                 else if (replayUrl != null) load(0); // leaving a replay goes back to the live channel
                 else if (controlsShown && !live) view.hideController();
+                else if (live) backOnLive();
                 else finishWithResult();
             }
         });
@@ -661,6 +662,28 @@ public class PlayerActivity extends AppCompatActivity {
         main.removeCallbacks(barTimeout);
         topBar.setVisibility(View.GONE);
         view.requestFocus();
+    }
+
+    // Live: Back first clears the screen (only the video stays), then two presses within
+    // 2.5 s leave the channel. A channel showing an error closes at once.
+    private long backAt;
+
+    private void backOnLive() {
+        if (errorView.getVisibility() == View.VISIBLE) { finishWithResult(); return; }
+        if (topBar.getVisibility() == View.VISIBLE || controlsShown || numView.getVisibility() == View.VISIBLE) {
+            main.removeCallbacks(hideTopBar);
+            main.removeCallbacks(applyDigits);
+            digits.setLength(0);
+            numView.setVisibility(View.GONE);
+            topBar.setVisibility(View.GONE);
+            view.hideController();
+            view.requestFocus();
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - backAt < 2500) { finishWithResult(); return; }
+        backAt = now;
+        Toast.makeText(this, "Press Back again to leave the channel", Toast.LENGTH_SHORT).show();
     }
 
     private void flashTopBar() {

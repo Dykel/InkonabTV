@@ -217,7 +217,23 @@ await check('remote keys in the live player', async () => {
   await page.waitForFunction(() => document.querySelectorAll('.p-sched .p-s').length > 3, { timeout: 8000 });
   await press('ArrowLeft'); s = await state(); assert(!s.panel, '◀ should close the programmes');
   await press('ArrowDown'); await press('Escape'); s = await state(); assert(!s.panel && s.open, 'Back should close only the panel');
-  await press('Escape'); s = await state(); assert(!s.open, 'Back should leave the player');
+  await press('Escape');
+  assert(await page.evaluate(() => Player.isOpen() && !Player.el.classList.contains('ui')), 'Back should clear the screen, video only');
+  await press('Escape');
+  assert(await page.evaluate(() => Player.isOpen() && /Press Back again/.test(document.getElementById('toast').textContent)), 'Back on a clear screen should only warn');
+  await press('Escape'); s = await state(); assert(!s.open, 'a second Back should leave the channel');
+});
+
+await check('app: Back twice to exit (2.5 s apart is too slow)', async () => {
+  const r = await page.evaluate(async () => {
+    App.backAt = 0;
+    const first = App.confirmExit(), second = App.confirmExit();
+    App.backAt = Date.now() - 3000;
+    const late = App.confirmExit();
+    App.backAt = 0;
+    return { first, second, late };
+  });
+  assert(!r.first && r.second && !r.late, JSON.stringify(r));
 });
 
 await check('2018 Samsung fallbacks (no formatToParts, no inert)', async () => {

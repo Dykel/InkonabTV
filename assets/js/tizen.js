@@ -51,7 +51,7 @@
       e.preventDefault();
       e.stopImmediatePropagation();
       // Same as Escape in the app (close the channel list / player / dialog, go Home); exit from Home.
-      if (send(document.activeElement, 'Escape')) exitApp();
+      if (send(document.activeElement, 'Escape') && (!window.App || App.confirmExit())) exitApp();
       return;
     }
     const name = byCode[code];
