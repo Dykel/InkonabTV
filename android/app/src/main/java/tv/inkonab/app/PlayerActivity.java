@@ -10,7 +10,9 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Base64;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -220,6 +222,7 @@ public class PlayerActivity extends AppCompatActivity {
 
             @Override
             public void onPlayerError(@NonNull PlaybackException error) {
+                if (filmSwitching) return; // the film reopens at the same spot once the next server is up
                 if (reconnect(error)) return;
                 onFail(error.getErrorCodeName());
             }
@@ -462,6 +465,77 @@ public class PlayerActivity extends AppCompatActivity {
         vpn.markGood();
         if (vpnWatch) Toast.makeText(this, "Playing through VPN · " + vpn.serverLabel() + " — remembered for next time", Toast.LENGTH_LONG).show();
         vpnWatch = false;
+    }
+
+    // ---------- films through the VPN ----------
+    // Free VPN servers bring the provider's films at very different speeds (1.5 to 12 Mbit/s for
+    // the same film), and a film keeps loading forever on a slow one. Once a film plays, every
+    // 2 s while it loads compare how much film arrived with the time it took: when it arrives
+    // slower than it plays twice in a row and less than 30 s is ready, move to the next VPN
+    // server and carry on from the same spot (up to MAX_COUNTRIES servers). Opening a film
+    // (reading the file's index) takes a while, so before it plays only a film that hasn't
+    // started after 45 s moves.
+    // Live channels have their own rules (onFreeze).
+
+    private static final long FILM_WINDOW = 15000;     // loading time judged on each server
+    private static final long FILM_AHEAD_OK = 30000;   // this much film ready: no need to move
+    private static final long FILM_START_MAX = 45000;  // not playing after this: move
+    private long filmLoadedTo = -1, filmGot, filmSpent, filmTick, filmOpened;
+    private int filmSlow;                               // slow windows in a row
+    private boolean filmSwitching;
+    private final Runnable filmCheck = this::checkFilmSpeed;
+
+    private void watchFilmSpeed() {
+        filmSwitching = false;
+        filmLoadedTo = -1;
+        filmGot = filmSpent = 0;
+        filmSlow = 0;
+        filmTick = filmOpened = SystemClock.elapsedRealtime();
+        main.removeCallbacks(filmCheck);
+        if (!live) main.postDelayed(filmCheck, 2000);
+    }
+
+    private void checkFilmSpeed() {
+        if (live || replayUrl != null || player == null || isFinishing()) return;
+        main.postDelayed(filmCheck, 2000);
+        long now = SystemClock.elapsedRealtime(), dt = now - filmTick;
+        filmTick = now;
+        long to = player.getBufferedPosition();
+        VpnManager vpn = VpnManager.get();
+        // While the VPN is changing server nothing can load: the start limit counts from when it's back.
+        if (filmSwitching || !vpn.isUp() || isFree(current())) { filmLoadedTo = -1; filmOpened = now; return; }
+        if (!readyOnce) {
+            filmLoadedTo = -1;
+            if (now - filmOpened > FILM_START_MAX) nextFilmServer(String.format(Locale.US,
+                "The film doesn't start through %s\nTrying another VPN server…", vpn.serverLabel()));
+            return;
+        }
+        if (!player.isLoading()) { filmLoadedTo = -1; return; }
+        long got = filmLoadedTo < 0 ? -1 : to - filmLoadedTo;
+        filmLoadedTo = to;
+        if (got < 0 || got > dt * 20) return; // first look, or the viewer jumped
+        filmGot += got;
+        filmSpent += dt;
+        if (filmSpent < FILM_WINDOW) return;
+        double rate = (double) filmGot / filmSpent; // seconds of film per second
+        long ahead = to - player.getCurrentPosition();
+        filmGot = filmSpent = 0;
+        Log.i("InkonabPlayer", String.format(Locale.US, "Film via %s: %.2fx, %d s ready", vpn.serverLabel(), rate, ahead / 1000));
+        filmSlow = rate < 1 && ahead <= FILM_AHEAD_OK ? filmSlow + 1 : 0;
+        if (filmSlow < 2) return; // one slow patch can happen on any server
+        nextFilmServer(String.format(Locale.US,
+            "The film loads slower than it plays through %s (%.1f×)\nTrying a faster VPN server…", vpn.serverLabel(), rate));
+    }
+
+    private void nextFilmServer(String why) {
+        if (vpnAttempts >= MAX_COUNTRIES) return; // keep the last one rather than stop the film
+        filmSwitching = true;
+        vpnTried = true;
+        vpnAttempts++;
+        vpnWatch = true;
+        Log.i("InkonabPlayer", why.replace('\n', ' '));
+        showInfo(why);
+        VpnManager.get().switchServer(this::afterVpn);
     }
 
     // Live VPN status in the top bar; while connecting for this channel, also in the message.
@@ -1319,6 +1393,7 @@ public class PlayerActivity extends AppCompatActivity {
             player.setMediaItem(item.build(), startAtMs);
             player.prepare();
             player.play();
+            watchFilmSpeed();
             if (live && replayUrl == null) flashTopBar(); else view.showController();
         } catch (JSONException e) {
             showError("This item has no playable link.");
