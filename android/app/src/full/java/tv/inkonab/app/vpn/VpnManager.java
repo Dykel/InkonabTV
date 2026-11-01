@@ -33,7 +33,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * tries servers best-first (20 s each), skips ones that failed this session, and when a
  * working connection drops it moves on to the next server by itself.
  *
- * Mode (saved): "off", "auto" (connect when a channel won't play), "always".
+ * Mode (saved): "off", "auto" (connect only when sign-in, a channel or the playlist update
+ * fails), "always".
  *
  * The server a channel last played through is remembered (and tried first next time), and
  * the remaining servers are ordered one country at a time, so each retry tries a new country.
@@ -144,10 +145,11 @@ public final class VpnManager {
     /** Provider streams have needed the VPN on this device before. */
     public boolean needVpn() { return prefs().getBoolean("need", false); }
 
-    /** Use the VPN before playing a provider stream (not MBC PLAY). */
+    /** Use the VPN before playing a provider stream (not MBC PLAY). In "auto" mode only to bring
+     *  back a VPN that was dropped for a free channel: otherwise channels play directly first. */
     public boolean shouldUseForProvider() {
         String m = mode();
-        return !"off".equals(m) && ("always".equals(m) || needVpn() || resume);
+        return !"off".equals(m) && ("always".equals(m) || resume);
     }
 
     /** A stream just played through the current server: remember it for next time. */

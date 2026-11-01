@@ -363,9 +363,9 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     // ---------- free VPN ----------
-    // MBC PLAY (free channels) refuse VPN addresses and always play directly. Provider streams go
-    // through the VPN once it has been needed (the working server is remembered); a stream that
-    // won't play tries VPN servers country by country until one works.
+    // MBC PLAY (free channels) refuse VPN addresses and always play directly. Provider streams
+    // play directly; one that won't play tries VPN servers country by country until one works
+    // (the working server is remembered and tried first next time).
 
     private static final int MAX_COUNTRIES = 6;
 

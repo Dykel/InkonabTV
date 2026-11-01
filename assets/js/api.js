@@ -158,12 +158,6 @@
       this.refreshTimer = setTimeout(() => this.refreshAll(), delay);
     }
 
-    // Refresh when the saved playlists were last checked more than `age` ms ago.
-    refreshIfOlder(age) {
-      const t = this.savedAt();
-      if (t != null && Date.now() - t > age) this.refreshAll();
-    }
-
     // Download every saved playlist again, one after another, without blocking the UI, and keep
     // only the differences: new, removed and changed items. An unchanged list isn't saved again;
     // a list that fails or comes back empty (a provider glitch) keeps the saved copy.
@@ -172,6 +166,7 @@
       if (this.refreshing) return this.refreshing;
       this.refreshing = (async () => {
         const sections = {}, counts = { added: 0, removed: 0, changed: 0 };
+        let answered = 0, failed = 0;
         // Category lists first: the language downloads after them read the fresh lists.
         const entries = [...(this.saved || [])].sort((a, b) => (a[1].lang ? 1 : 0) - (b[1].lang ? 1 : 0));
         for (const [action, { url, key, lang }] of entries) {
@@ -181,6 +176,7 @@
             let d;
             if (lang) d = await this.fetchLangs(lang.action, lang.catAction, old);
             else d = await getJson(url, 180e3);
+            answered++;
             const fresh = asArray(d);
             if (!fresh.length && asArray(old).length) continue;
             const t = Date.now();
@@ -193,8 +189,9 @@
             }
             Store.set('checked.' + key, t);
             this.saved.set(action, { url, key, t, lang });
-          } catch {}
+          } catch { failed++; }
         }
+        this.refreshFailed = failed > 0 && !answered; // the server didn't answer at all
         this.refreshing = null;
         const changed = Object.keys(sections).length > 0;
         if (changed) window.dispatchEvent(new CustomEvent('inkonab:catalog', { detail: { sections, ...counts } }));
@@ -435,13 +432,14 @@
       clearTimeout(this.refreshTimer);
       this.refreshTimer = setTimeout(() => this.refreshAll(), delay);
     }
-    refreshIfOlder(age) { if (this.savedT && Date.now() - this.savedT > age) this.refreshAll(); }
     // Same rules as Xtream: only a playlist that really changed is saved and redrawn.
     async refreshAll() {
       if (this.refreshing) return this.refreshing;
       this.refreshing = (async () => {
         const key = 'm3u|' + this.url;
+        this.refreshFailed = true;
         const d = await M3U.load(this.url);
+        this.refreshFailed = false;
         if (!d.length) return false;
         const hit = await Disk.get(key);
         const diff = mergeList(hit && hit.d, d);

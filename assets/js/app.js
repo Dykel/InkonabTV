@@ -193,15 +193,16 @@
 
     // VPN version: the server can't be reached, so connect the free VPN (unless it's set to Off)
     // and say whether it worked. The app's own traffic goes through it, sign-in included.
-    // The "optimising your internet" screen stays up until loginThroughVpn has finished.
-    async vpnRescue() {
+    // The "optimising your internet" screen stays up until loginThroughVpn has finished
+    // (`quiet`: no screen, for the background playlist update).
+    async vpnRescue(quiet) {
       const P = window.Native && Native.player;
       if (!P || CFG.vpn === false) return false;
       const v = await P.vpnStatus().catch(() => null);
       if (!v || !v.available || v.mode === 'off' || v.state === 'connected') return false;
-      this.vpnWait(true);
+      if (!quiet) this.vpnWait(true);
       const r = await P.vpnConnect().catch(() => null);
-      if (!(r && r.ok)) { this.vpnWait(false); this.toast('No free server answered'); }
+      if (!(r && r.ok) && !quiet) { this.vpnWait(false); this.toast('No free server answered'); }
       return !!(r && r.ok);
     },
 
@@ -272,7 +273,18 @@
           }
         }
       }
-      if (this.api === api) setTimeout(() => this.api === api && api.refreshIfOlder(10 * 60e3), 3000);
+      if (this.api === api) setTimeout(() => this.api === api && this.refreshInBackground(api), 3000);
+    },
+
+    // Update the saved playlist when it was last checked more than 10 minutes ago. VPN version:
+    // if the server doesn't answer, connect the VPN quietly and try once more.
+    async refreshInBackground(api) {
+      const t = api.savedAt();
+      if (t == null || Date.now() - t <= 10 * 60e3) return;
+      await api.refreshAll();
+      if (this.api !== api || !api.refreshFailed || !(await this.vpnRescue(true))) return;
+      await new Promise(r => setTimeout(r, 3000));
+      if (this.api === api) await api.refreshAll();
     },
 
     // The server refused the saved account (password changed, subscription ended): back to sign-in.
