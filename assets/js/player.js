@@ -75,7 +75,8 @@
     // item: {kind, id, ext, title, subtitle, img, resumeAt, list, index, onProgress, onEnded}
     open(item) {
       if (window.Native) return this.openNative(item);
-      this.returnFocus = document.activeElement;
+      // The next episode opens in the player that is already up: keep where to go back to.
+      if (!this.isOpen()) this.returnFocus = document.activeElement;
       this.el.classList.remove('hidden');
       document.body.classList.add('playing');
       this.play(item);
@@ -137,10 +138,12 @@
           payload.shift = Number(Settings.catchupShift) || 0;
         }
       } else {
+        // A series sends the episodes after this one too: the player goes on to the next by itself.
+        const film = it => ({ title: it.title || '', subtitle: it.subtitle || '', img: it.img || '',
+          versions: [{ url: it.url || App.api.streamUrl(it.kind, it.id, it.ext || 'mp4'), label: it.kind === 'catchup' ? 'Replay' : '' }] });
         payload = {
           live: false, group: 0, index: 0, version: 0, startAt: item.resumeAt > 5 ? item.resumeAt : 0,
-          channels: [{ title: item.title || '', subtitle: item.subtitle || '', img: item.img || '',
-            versions: [{ url: item.url || App.api.streamUrl(item.kind, item.id, item.ext || 'mp4'), label: item.kind === 'catchup' ? 'Replay' : '' }] }],
+          channels: [item, ...(item.queue || [])].map(film),
         };
       }
       const back = document.activeElement;
@@ -150,8 +153,11 @@
         r = await Native.player.play({ staged: true });
       } catch (e) { App.toast('Can’t open the player'); console.warn('[native player]', e); }
       if (item.kind !== 'live') {
-        if (r.duration > 0 && item.onProgress) item.onProgress(r.position, r.duration);
-        if (r.ended && item.onEnded) return item.onEnded();
+        const at = r.index || 0; // the episode the viewer stopped on
+        for (const i of r.done || []) if (item.onFinished) item.onFinished(i);
+        if (r.duration > 0 && item.onProgress) item.onProgress(r.position, r.duration, at);
+        // With a queue the player already went through the following episodes.
+        if (r.ended && item.onEnded && !(item.queue && item.queue.length)) return item.onEnded();
       } else {
         for (const [k, on] of Object.entries(r.fav || {})) App.setFav('live', k, on);
         for (const k of r.history || []) App.pushRecent(k);
@@ -225,6 +231,7 @@
 
       if (item.kind !== 'live') {
         this.saveTimer = setInterval(() => this.saveProgress(), 5000);
+        if (item.onEnded && item.queue && item.queue.length) this.nextTimer = setInterval(() => this.upNext(), 500);
       } else if (!item.url) {
         this.loadEpg(item);
       }
@@ -588,6 +595,22 @@
       if (this.item && this.item.onEnded) this.item.onEnded();
     },
 
+    // Series: in the last 30 s a card counts down to the next episode. OK plays it at once,
+    // Back hides the card (the next episode still follows when this one ends).
+    nextShown() { return !this.el.querySelector('.p-next').classList.contains('hidden'); },
+
+    upNext() {
+      const v = this.video, it = this.item, box = this.el.querySelector('.p-next');
+      const left = v.duration - v.currentTime;
+      const show = !!it && !this.nextOff && isFinite(left) && v.duration > 0 && left > 0 && left <= 30;
+      if (show) {
+        const next = it.queue[0];
+        box.innerHTML = `<b>${T(`Next episode in ${Math.ceil(left)} s`)}</b><span></span><small>${T('OK: play now · Back: watch the credits')}</small>`;
+        box.querySelector('span').textContent = next.subtitle || '';
+      }
+      box.classList.toggle('hidden', !show);
+    },
+
     // A channel that fails (or never starts) tries its other quality copies, then the other
     // stream format, before giving up.
     retry() {
@@ -721,6 +744,12 @@
         if (App.confirmExit('Press Back again to leave the channel')) this.close();
         return;
       }
+      if (!live && this.nextShown() && ['Enter', 'Escape', 'Backspace', 'BrowserBack', 'GoBack'].includes(e.key)) {
+        e.preventDefault(); e.stopPropagation();
+        if (e.key === 'Enter') this.ended();
+        else { this.nextOff = true; this.upNext(); }
+        return;
+      }
       this.poke();
       if (live && this.sideOpen()) { if (this.sideKey(e)) e.stopPropagation(); return; }
       const panel = this.panel();
@@ -768,6 +797,9 @@
 
     destroy() {
       clearInterval(this.saveTimer);
+      clearInterval(this.nextTimer);
+      this.nextOff = false;
+      this.el.querySelector('.p-next').classList.add('hidden');
       clearTimeout(this.watchdog);
       if (this.hls) { this.hls.destroy(); this.hls = null; }
       if (this.ts) { try { this.ts.destroy(); } catch {} this.ts = null; }

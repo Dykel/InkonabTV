@@ -1111,11 +1111,15 @@
     },
     cwRemove(key) { Store.set('cw', this.cw().filter(e => e.key !== key)); },
 
-    playEntry(entry, resume = true) {
+    // queue: the episodes after this one. at: which of [entry, ...queue] the progress is for.
+    playEntry(entry, resume = true, queue = []) {
+      const all = [entry, ...queue];
       Player.open({
         kind: entry.kind, id: entry.id, ext: entry.ext, title: entry.title, subtitle: entry.subtitle,
         resumeAt: resume ? entry.pos : 0,
-        onProgress: (pos, dur) => this.cwSave(entry, pos, dur),
+        queue: queue.map(e => ({ kind: e.kind, id: e.id, ext: e.ext, title: e.title, subtitle: e.subtitle })),
+        onProgress: (pos, dur, at = 0) => all[at] && this.cwSave(all[at], pos, dur),
+        onFinished: at => all[at] && this.cwRemove(all[at].key),
         onEnded: entry.onEnded,
       });
     },
@@ -1975,7 +1979,11 @@
       const title = (t && t.title) || item.name;
       const actions = $('.detail-actions', m);
       if (!seasons.length) {
-        actions.innerHTML = '<p class="muted">No episodes available yet.</p>';
+        // No answer at all (connection lost) is not the same as a series without episodes.
+        actions.innerHTML = data ? '<p class="muted">No episodes available yet.</p>'
+          : `<p class="muted">Couldn’t load the episodes. Check your connection.</p><button class="btn primary" data-a="retry"><span>Try again</span></button>`;
+        const retry = $('[data-a="retry"]', actions);
+        if (retry) { retry.addEventListener('click', () => this.openSeries(item)); retry.focus(); }
         this.trailerBtn(m, extra.trailer);
         this.myListBtn(m, item);
         this.renderVersions(m, item, v => { if (v !== item) this.openSeries(v); });
@@ -2000,7 +2008,8 @@
         const next = flat[flat.indexOf(ep) + 1];
         entry.pos = saved ? saved.pos : 0;
         entry.onEnded = next ? () => { this.cwRemove(entry.key); playEp(next, false); } : null;
-        this.playEntry(entry, resume);
+        // The Android player plays the following episodes itself, one after another.
+        this.playEntry(entry, resume, flat.slice(flat.indexOf(ep) + 1).map(epEntry));
       };
 
       // Resume the most recently watched episode, otherwise start at the beginning. Drawn again

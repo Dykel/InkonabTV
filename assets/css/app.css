@@ -548,6 +548,9 @@ img.broken { visibility: hidden; }
 .p-epg-time { color: #c2ced1; font-variant-numeric: tabular-nums; }
 .player:not(.ui) .p-top, .player:not(.ui) .p-epg { opacity: 0; pointer-events: none; }
 .player:not(.ui) { cursor: none; }
+.p-next { position: absolute; right: var(--gutter); bottom: 120px; z-index: 3; max-width: min(460px, calc(100vw - 2 * var(--gutter))); padding: 16px 24px; border-radius: 18px; background: rgba(16, 20, 23, .92); display: grid; gap: 4px; }
+.p-next b { color: var(--accent); font-size: 1.1rem; }
+.p-next small { color: #c2ced1; }
 .p-spinner, .p-error { position: absolute; inset: 0; display: none; place-items: center; z-index: 1; }
 .player[data-state="loading"] .p-spinner { display: grid; pointer-events: none; }
 .player[data-state="error"] .p-error { display: grid; background: rgba(0,0,0,.75); align-content: center; justify-items: center; text-align: center; padding: 24px; gap: 4px; }

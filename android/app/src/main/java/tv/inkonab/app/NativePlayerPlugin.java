@@ -206,6 +206,8 @@ public class NativePlayerPlugin extends Plugin {
             out.put("group", d.getIntExtra("group", 0));
             out.put("index", d.getIntExtra("index", 0));
             out.put("version", d.getIntExtra("version", 0));
+            String done = d.getStringExtra("done"); // episodes that finished in the player
+            if (done != null) try { out.put("done", new JSArray(done)); } catch (Exception ignored) { }
             try {
                 out.put("history", new JSArray(d.getStringExtra("history")));
                 out.put("fav", new JSObject(d.getStringExtra("fav")));

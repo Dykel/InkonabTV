@@ -221,6 +221,12 @@ public class PlayerActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onMediaItemTransition(MediaItem item, int reason) {
+                if (live || player == null || player.getCurrentMediaItemIndex() == 0) return;
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) main.post(() -> nextEpisodeStarted());
+            }
+
+            @Override
             public void onPlayerError(@NonNull PlaybackException error) {
                 if (filmSwitching) return; // the film reopens at the same spot once the next server is up
                 if (reconnect(error)) return;
@@ -231,7 +237,8 @@ public class PlayerActivity extends AppCompatActivity {
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
-                if (sideShown()) hideSide();
+                if (upNextShown()) { upNextDismissed = true; upNext.setVisibility(View.GONE); }
+                else if (sideShown()) hideSide();
                 else if (panelShown()) hidePanels();
                 else if (barActive) hideBar();
                 else if (replayUrl != null) load(0); // leaving a replay goes back to the live channel
@@ -246,6 +253,7 @@ public class PlayerActivity extends AppCompatActivity {
         vpn.addListener(vpnListener);
         paintVpn(vpn.state(), vpn.detail());
         load(startAtMs);
+        if (!live) main.post(vodTick);
     }
 
     private static int clamp(int v, int n) { return Math.max(0, Math.min(v, Math.max(0, n - 1))); }
@@ -282,7 +290,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (!readyOnce || !(net || behind) || reconnects >= 8) return false;
         reconnects++;
         main.postDelayed(() -> {
-            if (isFinishing()) return;
+            if (isFinishing() || player == null) return;
             if (behind) player.seekToDefaultPosition();
             player.prepare();
             player.play();
@@ -320,7 +328,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     // A stream that never starts within 15 s counts as failed.
-    private final Runnable watchdog = () -> { if (!readyOnce && live) onFail("timeout"); };
+    private final Runnable watchdog = () -> { if (player != null && !readyOnce && live) onFail("timeout"); };
 
     private void onFail(String why) {
         main.removeCallbacks(watchdog);
@@ -467,6 +475,78 @@ public class PlayerActivity extends AppCompatActivity {
         vpnWatch = false;
     }
 
+    // ---------- series: the next episode ----------
+    // A series comes with the episodes after the one chosen. The next one sits behind the current
+    // one in the player's list, so it loads while the credits run and starts without a break. In
+    // the last 30 s a card counts down to it: OK plays it at once, Back hides the card.
+
+    private static final long UP_NEXT_AT = 30000;
+    private final JSONArray finishedEps = new JSONArray(); // episodes (queue positions) finished here
+    private TextView upNext;
+    private boolean upNextDismissed;
+    private long lastPos, lastDur;                         // last known place in the current episode
+    private final Runnable vodTick = this::vodTick;
+
+    private boolean hasNext() { return !live && index + 1 < groups.get(group).items.length; }
+
+    private boolean upNextShown() { return upNext != null && upNext.getVisibility() == View.VISIBLE; }
+
+    private MediaItem episodeItem(int at) {
+        String url = urlOf(channelAt(groups.get(group).items[at]).optJSONArray("versions").optJSONObject(0));
+        MediaItem.Builder b = new MediaItem.Builder().setUri(Uri.parse(url));
+        String path = Uri.parse(url).getPath();
+        if (path != null && path.toLowerCase().endsWith(".m3u8")) b.setMimeType(MimeTypes.APPLICATION_M3U8);
+        return b.build();
+    }
+
+    private void vodTick() {
+        if (live || player == null || isFinishing()) return;
+        main.postDelayed(vodTick, 500);
+        long dur = player.getDuration(), pos = player.getCurrentPosition();
+        if (dur > 0 && player.getCurrentMediaItemIndex() == 0) { lastDur = dur; lastPos = pos; }
+        long left = dur - pos;
+        boolean show = hasNext() && replayUrl == null && dur > 0 && left > 0 && left <= UP_NEXT_AT && !upNextDismissed;
+        if (show) {
+            String next = channelAt(groups.get(group).items[index + 1]).optString("subtitle");
+            String head = String.format(Locale.US, "Next episode in %d s", (left + 999) / 1000);
+            android.text.SpannableString t = new android.text.SpannableString(head + "\n" + next + "\nOK  Play now    ·    Back  Watch the credits");
+            t.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), 0, head.length(), 0);
+            t.setSpan(new android.text.style.ForegroundColorSpan(ACCENT), 0, head.length(), 0);
+            t.setSpan(new android.text.style.ForegroundColorSpan(0xFFC2CED1), head.length() + next.length() + 2, t.length(), 0);
+            upNext.setText(t);
+        }
+        if (show != upNextShown()) Log.i("InkonabPlayer", show ? "Up next card shown" : "Up next card hidden");
+        upNext.setVisibility(show ? View.VISIBLE : View.GONE);
+    }
+
+    private void playNextNow() {
+        Log.i("InkonabPlayer", "Next episode now (" + player.getMediaItemCount() + " in list, next " + player.hasNextMediaItem() + ")");
+        upNext.setVisibility(View.GONE);
+        swallowCenterUp = true;
+        player.seekToNextMediaItem();
+    }
+
+    /** The player moved on to the next episode (by itself, OK on the card, or the ⏭ button). */
+    private void nextEpisodeStarted() {
+        if (player == null || player.getCurrentMediaItemIndex() == 0) return;
+        finishedEps.put(index);
+        index++;
+        lastPos = lastDur = 0;
+        upNextDismissed = false;
+        upNext.setVisibility(View.GONE);
+        freshStart();
+        boolean switching = filmSwitching; // a server change under way still reopens this episode
+        watchFilmSpeed();
+        filmSwitching = switching;
+        JSONObject ch = current();
+        titleView.setText(ch.optString("title"));
+        subView.setText(ch.optString("subtitle"));
+        errorView.setVisibility(View.GONE);
+        player.removeMediaItem(0);
+        if (hasNext()) player.addMediaItem(episodeItem(index + 1));
+        view.showController(); // shows which episode is on
+    }
+
     // ---------- films through the VPN ----------
     // Free VPN servers bring the provider's films at very different speeds (1.5 to 12 Mbit/s for
     // the same film), and a film keeps loading forever on a slow one. Once a film plays, every
@@ -510,7 +590,9 @@ public class PlayerActivity extends AppCompatActivity {
                 "The film doesn't start through %s\nTrying another VPN server…", vpn.serverLabel()));
             return;
         }
-        if (!player.isLoading()) { filmLoadedTo = -1; return; }
+        // Fully loaded: what loads now is the next episode, which this count doesn't see.
+        long dur = player.getDuration();
+        if (!player.isLoading() || (dur > 0 && to >= dur - 1000)) { filmLoadedTo = -1; return; }
         long got = filmLoadedTo < 0 ? -1 : to - filmLoadedTo;
         filmLoadedTo = to;
         if (got < 0 || got > dt * 20) return; // first look, or the viewer jumped
@@ -645,6 +727,16 @@ public class PlayerActivity extends AppCompatActivity {
         errorView.setBackground(rounded(0xCC000000, 18));
         errorView.setVisibility(View.GONE);
         root.addView(errorView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+
+        upNext = text(17, Color.WHITE, false);
+        upNext.setSingleLine(false);
+        upNext.setLineSpacing(dp(4), 1f);
+        upNext.setPadding(dp(26), dp(18), dp(26), dp(18));
+        upNext.setBackground(rounded(0xE6101417, 18));
+        upNext.setVisibility(View.GONE);
+        FrameLayout.LayoutParams upLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.END);
+        upLp.setMargins(0, 0, dp(36), dp(130));
+        root.addView(upNext, upLp);
 
         numView = text(56, ACCENT, true);
         numView.setPadding(dp(24), dp(8), dp(24), dp(8));
@@ -1353,6 +1445,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void startPlayback(long startAtMs) {
+        if (player == null) return; // the player was closed while a retry or the VPN was on its way
         try {
             JSONObject ch = current();
             JSONArray versions = ch.getJSONArray("versions");
@@ -1390,7 +1483,15 @@ public class PlayerActivity extends AppCompatActivity {
             readyOnce = false;
             main.removeCallbacks(watchdog);
             main.postDelayed(watchdog, 15000);
-            player.setMediaItem(item.build(), startAtMs);
+            if (hasNext() && replayUrl == null) {
+                // The next episode follows in the same player, which loads it while the credits run.
+                List<MediaItem> list = new ArrayList<>();
+                list.add(item.build());
+                list.add(episodeItem(index + 1));
+                player.setMediaItems(list, 0, startAtMs);
+            } else {
+                player.setMediaItem(item.build(), startAtMs);
+            }
             player.prepare();
             player.play();
             watchFilmSpeed();
@@ -1478,6 +1579,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         // The OK press that opened the list must not also "click" the first channel.
         if (center && !down && swallowCenterUp) { swallowCenterUp = false; return true; }
+        if (center && down && upNextShown()) { playNextNow(); return true; }
         if (!live || replayUrl != null) return super.dispatchKeyEvent(e);
         if (down && panelShown()) { main.removeCallbacks(panelTimeout); main.postDelayed(panelTimeout, 10000); }
 
@@ -1560,10 +1662,12 @@ public class PlayerActivity extends AppCompatActivity {
     private void finishWithResult() {
         Intent data = new Intent();
         if (player != null) {
-            long dur = player.getDuration();
-            data.putExtra("position", player.getCurrentPosition() / 1000.0);
+            long dur = player.getDuration(), pos = player.getCurrentPosition();
+            if (dur <= 0 && lastDur > 0) { dur = lastDur; pos = lastPos; } // closed while it was reopening
+            data.putExtra("position", pos / 1000.0);
             data.putExtra("duration", dur > 0 ? dur / 1000.0 : 0);
         }
+        data.putExtra("done", finishedEps.toString());
         data.putExtra("ended", ended);
         data.putExtra("group", group);
         data.putExtra("index", index);
@@ -1590,5 +1694,6 @@ public class PlayerActivity extends AppCompatActivity {
             player.release();
             player = null;
         }
+        main.removeCallbacksAndMessages(null); // anything queued while the player shut down
     }
 }
