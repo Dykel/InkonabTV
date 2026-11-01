@@ -9,6 +9,7 @@
     "apk": "npm run sync && cd android && ./gradlew assembleFullDebug assemblePlayDebug",
     "apk:release": "npm run sync && cd android && ./gradlew assembleFullRelease assemblePlayRelease",
     "aab": "npm run sync && cd android && ./gradlew bundlePlayRelease",
+    "release:plus": "npm run sync && cd android && ./gradlew assembleFullRelease && cd .. && node scripts/release-plus.mjs",
     "tizen": "node scripts/build-tizen.mjs",
     "test": "node test/smoke.mjs"
   },

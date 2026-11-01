@@ -14,6 +14,29 @@
   if (col < 0) return;
 
   const D = {
+    // app updates (InkonabTV+)
+    'App updates': ['Mises à jour', 'Actualizaciones', 'App-Updates', 'Aggiornamenti', 'Atualizações'],
+    'This version': ['Cette version', 'Esta versión', 'Diese Version', 'Questa versione', 'Esta versão'],
+    'The app checks for a new version once a day.': ['L’application vérifie s’il existe une nouvelle version une fois par jour.', 'La app busca una versión nueva una vez al día.', 'Die App sucht einmal täglich nach einer neuen Version.', 'L’app controlla una volta al giorno se c’è una nuova versione.', 'A app procura uma nova versão uma vez por dia.'],
+    'Check for updates': ['Rechercher une mise à jour', 'Buscar actualizaciones', 'Nach Updates suchen', 'Cerca aggiornamenti', 'Procurar atualizações'],
+    'Later': ['Plus tard', 'Más tarde', 'Später', 'Più tardi', 'Mais tarde'],
+    'Update now': ['Mettre à jour', 'Actualizar ahora', 'Jetzt aktualisieren', 'Aggiorna ora', 'Atualizar agora'],
+    'Open settings': ['Ouvrir les paramètres', 'Abrir ajustes', 'Einstellungen öffnen', 'Apri impostazioni', 'Abrir definições'],
+    'Install': ['Installer', 'Instalar', 'Installieren', 'Installa', 'Instalar'],
+    'Downloading…': ['Téléchargement…', 'Descargando…', 'Wird geladen…', 'Download in corso…', 'A transferir…'],
+    'First allow InkonabTV+ to install updates: on the next screen turn on the switch for InkonabTV+, then press Back.': [
+      'Autorisez d’abord InkonabTV+ à installer des mises à jour : sur l’écran suivant, activez l’interrupteur d’InkonabTV+, puis appuyez sur Retour.',
+      'Primero permite que InkonabTV+ instale actualizaciones: en la siguiente pantalla activa el interruptor de InkonabTV+ y pulsa Atrás.',
+      'Erlaube InkonabTV+ zuerst, Updates zu installieren: Schalte im nächsten Bildschirm den Schalter für InkonabTV+ ein und drücke Zurück.',
+      'Prima consenti a InkonabTV+ di installare aggiornamenti: nella schermata seguente attiva l’interruttore di InkonabTV+, poi premi Indietro.',
+      'Primeiro permita que a InkonabTV+ instale atualizações: no ecrã seguinte ative o interruptor da InkonabTV+ e prima Voltar.'],
+    'Downloaded. Choose Install on the next screen — your sign-in and playlist are kept.': [
+      'Téléchargé. Choisissez Installer sur l’écran suivant — votre connexion et votre playlist sont conservées.',
+      'Descargado. Elige Instalar en la siguiente pantalla: tu sesión y tu lista se conservan.',
+      'Geladen. Wähle im nächsten Bildschirm „Installieren“ – Anmeldung und Playlist bleiben erhalten.',
+      'Scaricato. Scegli Installa nella schermata seguente: accesso e playlist restano salvati.',
+      'Transferido. Escolha Instalar no ecrã seguinte — a sessão e a lista ficam guardadas.'],
+    'Can’t reach the update site. Try again later.': ['Impossible de joindre le site de mise à jour. Réessayez plus tard.', 'No se puede acceder al sitio de actualizaciones. Inténtalo más tarde.', 'Update-Seite nicht erreichbar. Versuche es später erneut.', 'Impossibile raggiungere il sito degli aggiornamenti. Riprova più tardi.', 'Não é possível aceder ao site de atualizações. Tente mais tarde.'],
     // sign in
     'Sign in with your InkonabTV subscription': ['Connectez-vous avec votre abonnement', 'Inicia sesión con tu suscripción', 'Melde dich mit deinem Abo an', 'Accedi con il tuo abbonamento', 'Inicie sessão com a sua subscrição'],
     'Add your playlist': ['Ajoutez votre playlist', 'Añade tu lista', 'Füge deine Playlist hinzu', 'Aggiungi la tua playlist', 'Adicione a sua lista'],
@@ -290,6 +313,11 @@
     '☰ Channels': ['☰ Chaînes', '☰ Canales', '☰ Sender', '☰ Canali', '☰ Canais'],
   };
   const P = [
+    [/^InkonabTV\+ (.+) is available$/, ['InkonabTV+ $1 est disponible', 'InkonabTV+ $1 está disponible', 'InkonabTV+ $1 ist verfügbar', 'InkonabTV+ $1 è disponibile', 'InkonabTV+ $1 está disponível']],
+    [/^InkonabTV\+ (.+) is the latest version$/, ['InkonabTV+ $1 est la dernière version', 'InkonabTV+ $1 es la última versión', 'InkonabTV+ $1 ist die neueste Version', 'InkonabTV+ $1 è l’ultima versione', 'InkonabTV+ $1 é a versão mais recente']],
+    [/^You have (.+)\.$/, ['Vous avez la $1.', 'Tienes la $1.', 'Du hast $1.', 'Hai la $1.', 'Tem a $1.']],
+    [/^Downloading… (\d+)% \((.+) MB\)$/, ['Téléchargement… $1 % ($2 Mo)', 'Descargando… $1 % ($2 MB)', 'Wird geladen… $1 % ($2 MB)', 'Download in corso… $1% ($2 MB)', 'A transferir… $1% ($2 MB)']],
+    [/^The update couldn’t be installed: (.+)$/, ['La mise à jour n’a pas pu être installée : $1', 'No se pudo instalar la actualización: $1', 'Das Update konnte nicht installiert werden: $1', 'Impossibile installare l’aggiornamento: $1', 'Não foi possível instalar a atualização: $1']],
     [/^Season (\d+)$/, ['Saison $1', 'Temporada $1', 'Staffel $1', 'Stagione $1', 'Temporada $1']],
     [/^Episode (\d+)$/, ['Épisode $1', 'Episodio $1', 'Folge $1', 'Episodio $1', 'Episódio $1']],
     [/^Resume · (.+) left$/, ['Reprendre · $1 restant', 'Reanudar · quedan $1', 'Fortsetzen · noch $1', 'Riprendi · mancano $1', 'Retomar · faltam $1']],

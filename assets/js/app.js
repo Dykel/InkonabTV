@@ -283,6 +283,7 @@
       }
       if (this.api === api) setTimeout(() => this.api === api && this.refreshInBackground(api), 3000);
       if (this.api === api && api.primeGuide) setTimeout(() => this.api === api && api.primeGuide(), 20000);
+      setTimeout(() => this.checkUpdate(false), 30000);
     },
 
     // Update the saved playlist when it was last checked more than 10 minutes ago. VPN version:
@@ -2096,6 +2097,91 @@
       return h < 48 ? `${h} hour${h > 1 ? 's' : ''} ago` : new Date(t).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
     },
 
+    // ---------- app updates (InkonabTV+ sideload: CFG.updateUrl) ----------
+    // The download site has inkonabtv.apk and version.json ({ versionCode, versionName, sha256,
+    // notes }, written by scripts/release-plus.mjs). Checked once a day, or from Settings.
+    async checkUpdate(manual) {
+      const P = window.Native && Native.player;
+      if (!CFG.updateUrl || !P || !P.appVersion || this.updating) return;
+      const me = await P.appVersion().catch(() => null);
+      if (!me || !me.updater) return;
+      if (!manual && Date.now() - (Store.get('updChecked') || 0) < 864e5) return;
+      const base = CFG.updateUrl.replace(/\/?$/, '/');
+      let v;
+      try {
+        const r = await P.updateInfo({ url: base + 'version.json?t=' + Date.now() });
+        if (!r.ok) throw new Error(r.text);
+        v = JSON.parse(r.text);
+      } catch {
+        if (manual) this.toast('Can’t reach the update site. Try again later.');
+        return;
+      }
+      Store.set('updChecked', Date.now());
+      if (!(Number(v.versionCode) > Number(me.code))) { if (manual) this.toast(`InkonabTV+ ${me.name} is the latest version`); return; }
+      if (!manual && Store.get('updLater') === v.versionCode) return;
+      if (!manual && (Player.isOpen() || !$('#modal').classList.contains('hidden'))) { Store.set('updChecked', 0); return; } // ask when nothing is open
+      this.updateDialog(v, me, base);
+    },
+
+    updateDialog(v, me, base) {
+      const P = Native.player;
+      const m = this.openModal(`${this.closeBtn()}
+        <h2 class="sheet-title">InkonabTV+ ${esc(v.versionName || '')} is available</h2>
+        <p class="muted">You have ${esc(me.name)}.</p>
+        ${v.notes ? `<ul class="upd-notes">${String(v.notes).split(/\n|·/).map(n => n.trim()).filter(Boolean).map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+        <p class="upd-status muted" id="updStatus"></p>
+        <div class="set-actions" id="updActions"><button class="btn ghost" id="updLater">Later</button><button class="btn primary" id="updNow">Update now</button></div>`, 'settings upd');
+      const status = $('#updStatus', m), actions = $('#updActions', m);
+      $('#updLater', m).addEventListener('click', () => { Store.set('updLater', v.versionCode); this.closeModal(); });
+      const start = async () => {
+        const now = await P.appVersion().catch(() => me);
+        if (!now.canInstall) {
+          status.textContent = 'First allow InkonabTV+ to install updates: on the next screen turn on the switch for InkonabTV+, then press Back.';
+          actions.innerHTML = '<button class="btn primary" id="updAllow">Open settings</button>';
+          $('#updAllow', m).addEventListener('click', () => {
+            P.updateSettings();
+            // The switch turned on (Android TV shows it as a side panel, so watch for it rather
+            // than for the app coming back): carry on with the download.
+            clearInterval(this.updWatch);
+            const until = Date.now() + 5 * 60e3;
+            this.updWatch = setInterval(async () => {
+              const open = m.isConnected && !m.classList.contains('hidden') && $('#updAllow', m);
+              if (!open || Date.now() > until) return clearInterval(this.updWatch);
+              const v2 = await P.appVersion().catch(() => null);
+              if (v2 && v2.canInstall) { clearInterval(this.updWatch); start(); }
+            }, 1500);
+          });
+          $('#updAllow', m).focus();
+          return;
+        }
+        this.updating = true;
+        actions.innerHTML = '<div class="upd-bar"><i id="updFill"></i></div>';
+        status.textContent = 'Downloading…';
+        const h = await P.addListener('update', e => {
+          const pct = e.total > 0 ? Math.round(e.done / e.total * 100) : 0;
+          $('#updFill', m) && ($('#updFill', m).style.width = pct + '%');
+          status.textContent = `Downloading… ${pct}% (${(e.done / 1048576).toFixed(1)} MB)`;
+        });
+        const r = await P.updateDownload({ url: base + 'inkonabtv.apk', sha256: v.sha256 || '' }).catch(e => ({ ok: false, detail: e.message }));
+        h && h.remove && h.remove();
+        this.updating = false;
+        if (r.ok) {
+          status.textContent = 'Downloaded. Choose Install on the next screen — your sign-in and playlist are kept.';
+          actions.innerHTML = '<button class="btn primary" id="updInstall">Install</button>';
+          $('#updInstall', m).addEventListener('click', () => P.updateInstall());
+          $('#updInstall', m).focus();
+        } else {
+          status.textContent = 'The update couldn’t be installed: ' + (r.detail || 'download failed') + '.';
+          actions.innerHTML = '<button class="btn ghost" id="updClose">Close</button><button class="btn primary" id="updRetry">Try again</button>';
+          $('#updClose', m).addEventListener('click', () => this.closeModal());
+          $('#updRetry', m).addEventListener('click', start);
+          $('#updRetry', m).focus();
+        }
+      };
+      $('#updNow', m).addEventListener('click', start);
+      $('#updNow', m).focus();
+    },
+
     // ---------- free VPN (Android app) ----------
     bindVpnSettings(m) {
       const P = Native.player;
@@ -2179,6 +2265,12 @@
           <p class="muted small-note">Movies, series and channels are saved on this device so the app opens instantly. They refresh by themselves in the background every 6 hours.</p>
           <div class="set-row vpn-actions"><button class="btn ghost" id="plRefresh">Refresh now</button></div>
         </section>
+        ${window.Native && CFG.updateUrl ? `<section class="set-group" id="updGroup" hidden>
+          <h3>App updates</h3>
+          <div class="kv"><span>This version</span><b id="updVersion">…</b></div>
+          <p class="muted small-note">The app checks for a new version once a day.</p>
+          <div class="set-row vpn-actions"><button class="btn ghost" id="updCheck">Check for updates</button></div>
+        </section>` : ''}
         <section class="set-group" id="xpGroup">
           <h3>Extra playlists</h3>
           <p class="muted small-note">Add M3U playlists of your own, for example free TV channels. Each one shows as a group on top of Live TV and as a row on Home.</p>
@@ -2258,6 +2350,12 @@
       });
       this.bindExtraPlaylists(m);
       if (window.Native && $('#vpnGroup', m)) this.bindVpnSettings(m);
+      if ($('#updGroup', m)) Native.player.appVersion().then(v => {
+        if (!v.updater) return;
+        $('#updGroup', m).hidden = false;
+        $('#updVersion', m).textContent = `InkonabTV+ ${v.name}`;
+        $('#updCheck', m).addEventListener('click', () => this.checkUpdate(true));
+      }).catch(() => {});
       $('[data-close]', m).focus();
     },
   };

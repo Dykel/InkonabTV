@@ -32,6 +32,10 @@ window.INKONAB_CONFIG = {
   pairApi: 'https://inkonab-pair.inkonab.workers.dev',
   setupUrl: 'https://dykel.github.io/InkonabTV/setup.html',
 
+  // InkonabTV+ (sideload Android app) updates itself from here: inkonabtv.apk + version.json.
+  // Empty in the Google Play and Samsung builds, which update through their stores.
+  updateUrl: 'https://inkonabtv.alwaysdata.net/',
+
   privacyUrl: 'https://dykel.github.io/InkonabTV/privacy.html',
 
   // TMDB v3 API key — used for backdrops, title logos, summaries, cast and trailers.

@@ -17,6 +17,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import tv.inkonab.app.update.Updater;
 import tv.inkonab.app.vpn.VpnManager;
 
 /** JS: Capacitor.Plugins.NativePlayer.play(payload) → resolves when the player closes. */
@@ -71,6 +72,59 @@ public class NativePlayerPlugin extends Plugin {
         JSObject out = new JSObject();
         out.put("tv", ui != null && ui.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION);
         call.resolve(out);
+    }
+
+    // ---------- self-update (sideload version; the Play version answers updater: false) ----------
+
+    @SuppressWarnings("deprecation")
+    @PluginMethod
+    public void appVersion(PluginCall call) {
+        JSObject out = new JSObject();
+        try {
+            android.content.pm.PackageInfo p = getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0);
+            out.put("code", android.os.Build.VERSION.SDK_INT >= 28 ? p.getLongVersionCode() : p.versionCode);
+            out.put("name", p.versionName);
+        } catch (Exception ignored) { }
+        out.put("updater", Updater.AVAILABLE);
+        out.put("canInstall", Updater.canInstall(getContext()));
+        call.resolve(out);
+    }
+
+    /** { url } → { ok, text }: reads version.json natively (the update site sends no CORS headers). */
+    @PluginMethod
+    public void updateInfo(PluginCall call) {
+        Updater.fetchText(call.getString("url"), (ok, text) -> {
+            JSObject out = new JSObject();
+            out.put("ok", ok);
+            out.put("text", text);
+            call.resolve(out);
+        });
+    }
+
+    /** Download { url, sha256 }, check it, then open Android's installer. Progress: "update" events. */
+    @PluginMethod
+    public void updateDownload(PluginCall call) {
+        Updater.download(getContext(), call.getString("url"), call.getString("sha256", ""),
+            (done, total) -> { JSObject e = new JSObject(); e.put("done", done); e.put("total", total); notifyListeners("update", e); },
+            (ok, detail) -> getActivity().runOnUiThread(() -> {
+                JSObject out = new JSObject();
+                out.put("ok", ok);
+                out.put("detail", detail);
+                if (ok) Updater.install(getActivity());
+                call.resolve(out);
+            }));
+    }
+
+    /** Open the installer again for the APK already downloaded (after allowing installs). */
+    @PluginMethod
+    public void updateInstall(PluginCall call) {
+        getActivity().runOnUiThread(() -> { JSObject o = new JSObject(); o.put("ok", Updater.install(getActivity())); call.resolve(o); });
+    }
+
+    /** The "Install unknown apps" switch for InkonabTV+. */
+    @PluginMethod
+    public void updateSettings(PluginCall call) {
+        getActivity().runOnUiThread(() -> { Updater.openInstallSettings(getActivity()); call.resolve(); });
     }
 
     // ---------- free VPN (VPN Gate) ----------

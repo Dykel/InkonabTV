@@ -35,7 +35,7 @@ const playerConfig = readFileSync(join(root, 'config.js'), 'utf8')
   .replace(/^(\s*server:\s*)'[^']*'/m, "$1''")
   .replace(/^(\s*freePlaylists:\s*)\[[\s\S]*?\n\s*\]/m, '$1[]');
 writeFileSync(join(out, 'config.js'), lower(playerConfig +
-  "\nObject.assign(window.INKONAB_CONFIG, { playerMode: true, server: '', freePlaylists: [] });\n", 'config.js'));
+  "\nObject.assign(window.INKONAB_CONFIG, { playerMode: true, server: '', freePlaylists: [], updateUrl: '' });\n", 'config.js'));
 writeFileSync(join(out, 'assets/js/vendor/qrcode.js'), lower(readFileSync(join(root, 'assets/js/vendor/qrcode.js'), 'utf8'), 'qrcode.js'));
 writeFileSync(join(out, 'assets/js/polyfills.js'), lower(readFileSync(join(root, 'tizen/polyfills.js'), 'utf8'), 'polyfills.js'));
 for (const f of readdirSync(join(root, 'assets/js'))) {

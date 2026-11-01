@@ -1043,3 +1043,10 @@ img.broken { visibility: hidden; }
 .p-s:focus-visible, .p-s:focus { outline: 2px solid #fff; outline-offset: -2px; background: rgba(90,169,200,.3); }
 .p-sched .p-side-hint { margin-top: 12px; }
 @media (max-width: 860px) { .p-sched { width: 100vw; } .p-info { bottom: 24px; } .p-card { width: 130px; } }
+
+/* App update window (InkonabTV+) */
+.modal.upd .sheet { width: min(620px, 100%); }
+.upd-notes { margin: 14px 0 6px; padding-left: 1.2em; display: grid; gap: 6px; }
+.upd-status { min-height: 1.4em; margin: 12px 0 0; }
+.upd-bar { flex: 1; height: 10px; border-radius: 6px; background: rgba(255,255,255,.1); overflow: hidden; align-self: center; }
+.upd-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
