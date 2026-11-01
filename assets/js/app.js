@@ -55,6 +55,13 @@
   const hm = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const fold = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+  // Length in seconds. Some panels put minutes in duration_secs ("122" for a 2-hour film), so
+  // the "02:02:00" form wins when they disagree.
+  const durSecs = info => {
+    const m = String((info && info.duration) || '').match(/^(\d+):(\d\d):(\d\d)$/);
+    const hms = m ? +m[1] * 3600 + +m[2] * 60 + +m[3] : 0;
+    return hms || Number(info && info.duration_secs) || 0;
+  };
   const fmtDur = secs => { secs = Math.round(secs); const h = Math.floor(secs / 3600), m = Math.round((secs % 3600) / 60); return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m} min`; };
 
   // Tags the provider puts in names, e.g. "FR - Title (2026) (VOSTFR) [4K-Q]".
@@ -101,8 +108,9 @@
   }
   // Categories are split by quality ("FR: FRANCE [4K-Q]", "FR: FRANCE [720p]"); merge them.
   const liveCatKey = name => String(name || '').replace(/\[\s*(?:\d{3,4}p|4K(?:-Q)?|UHD|FHD|HD|SD|H\.?265|HEVC)\s*\]/gi, '').replace(/\s{2,}/g, ' ').trim();
-  // Which copy of a channel plays first: 1080p, then 4K, 720p…; H265 and low quality last.
-  const liveRank = c => ({ '1080p': 0, '4K': 1, '720p': 2, '480p': 3 }[c.quality] ?? 4) + (c.tags.includes('H265') ? 3 : 0) + (c.tags.includes('Low quality') ? 6 : 0);
+  // Which copy of a channel plays first, and the order of the fallbacks when one fails:
+  // 1080p, 720p, 480p, then 4K (heavy on a slow connection); H265 and low quality last.
+  const liveRank = c => ({ '1080p': 0, '720p': 1, '480p': 2, '4K': 3 }[c.quality] ?? 4) + (c.tags.includes('H265') ? 3 : 0) + (c.tags.includes('Low quality') ? 6 : 0);
 
   const LANG_NAMES = { QFR: 'French (Canada)', EX: 'Ex-Yugoslav', IN: 'Indian', SOM: 'Somali', PK: 'Pakistani', MA: 'Moroccan', AL: 'Albanian' };
   let langNamer;
@@ -274,6 +282,7 @@
         }
       }
       if (this.api === api) setTimeout(() => this.api === api && this.refreshInBackground(api), 3000);
+      if (this.api === api && api.primeGuide) setTimeout(() => this.api === api && api.primeGuide(), 20000);
     },
 
     // Update the saved playlist when it was last checked more than 10 minutes ago. VPN version:
@@ -863,6 +872,7 @@
     },
 
     onPlayerClosed() {
+      if (this.detailRefresh && !$('#modal').classList.contains('hidden')) this.detailRefresh();
       if (this.redrawLater && $('#modal').classList.contains('hidden')) this.redraw();
       else if (this.view === 'home') this.renderContinue();
     },
@@ -1626,7 +1636,9 @@
       this.setBackdrop('');
       const groups = (await this.liveGroups()).filter(g => !g.free);
       if (!groups.length) { main.innerHTML = '<div class="empty"><h3>No channels</h3></div>'; return; }
-      let group = groups.find(g => g.key === (this.guideCat || this.liveCat)) || groups.find(g => !g.special) || groups[0];
+      // The last group watched, else the first one whose channels have a guide.
+      const hasGuide = g => g.channels.some(c => c.versions && c.versions.some(v => v.epg_channel_id));
+      let group = groups.find(g => g.key === (this.guideCat || this.liveCat)) || groups.find(g => !g.special && hasGuide(g)) || groups.find(g => !g.special) || groups[0];
       const PX = 6;                      // pixels per minute
       const CELL = 260;                  // channel column width
       const maxBack = Math.max(1, ...group.channels.flatMap(c => c.versions.map(v => Number(v.tv_archive_duration) || 0)));
@@ -1776,6 +1788,7 @@
       const m = $('#modal');
       // Switching from one details page to another keeps the original focus target.
       if (!m.contains(document.activeElement)) this.modalReturn = document.activeElement;
+      this.detailRefresh = null;
       m.className = 'modal ' + cls;
       m.innerHTML = `<div class="sheet">${html}</div>`;
       m.scrollTop = 0;
@@ -1816,7 +1829,7 @@
       const genres = (t && t.genres.length ? t.genres : String(info.genre || item.genre || '').split(/[,/]/).map(s => s.trim()).filter(Boolean)).slice(0, 3);
       const year = (t && t.year) || item.year || String(info.releasedate || info.releaseDate || '').slice(0, 4);
       const rating = (t && t.rating) || (item.rating ? item.rating.toFixed(1) : '');
-      const secs = Number(info.duration_secs) || (t && t.runtime * 60) || 0;
+      const secs = durSecs(info) || (t && t.runtime * 60) || 0;
       $('.detail-meta', m).innerHTML = [year && `<span>${esc(year)}</span>`, secs && `<span>${fmtDur(secs)}</span>`, rating && `<span class="rate">${ICONS.star}${esc(rating)}</span>`, genres.length && `<span>${esc(genres.join(' · '))}</span>`].filter(Boolean).join('');
       if (t && t.logo) $('.detail-title', m).innerHTML = `<img class="detail-logo" src="${esc(t.logo)}" alt="${esc(t.title)}">`;
       const plot = (t && t.overview) || info.plot || info.description || item.plot;
@@ -1912,17 +1925,23 @@
         title: (t2 && t2.title) || item.name, subtitle: [item.year, item.lang].filter(Boolean).join(' · ') || 'Movie',
         img: (t2 && t2.poster) || item.img, backdrop: extra.backdrop,
       };
-      const saved = this.cwGet(entry.key);
       const actions = $('.detail-actions', m);
-      actions.innerHTML = saved
-        ? `<button class="btn primary" data-a="resume">${ICONS.play}<span>Resume · ${fmtDur(saved.dur - saved.pos)} left</span></button>
-           <button class="btn ghost" data-a="start">${ICONS.restart}<span>From start</span></button>`
-        : `<button class="btn primary" data-a="start">${ICONS.play}<span>Play</span></button>`;
-      this.trailerBtn(m, extra.trailer);
-      this.myListBtn(m, item);
+      // Drawn again when the player closes, so it offers Resume at the new position.
+      const paint = () => {
+        const saved = this.cwGet(entry.key);
+        actions.innerHTML = saved
+          ? `<button class="btn primary" data-a="resume">${ICONS.play}<span>Resume · ${fmtDur(saved.dur - saved.pos)} left</span></button>
+             <button class="btn ghost" data-a="start">${ICONS.restart}<span>From start</span></button>`
+          : `<button class="btn primary" data-a="start">${ICONS.play}<span>Play</span></button>`;
+        this.trailerBtn(m, extra.trailer);
+        this.myListBtn(m, item);
+      };
+      paint();
+      this.detailRefresh = () => { paint(); $('.btn.primary', actions).focus(); };
       actions.addEventListener('click', e => {
         const a = e.target.closest('[data-a]');
         if (!a) return;
+        const saved = this.cwGet(entry.key);
         this.playEntry({ ...entry, pos: saved ? saved.pos : 0 }, a.dataset.a === 'resume');
       });
       this.renderVersions(m, item, v => {
@@ -1983,14 +2002,19 @@
         this.playEntry(entry, resume);
       };
 
-      // Resume the most recently watched episode, otherwise start at the beginning.
-      const last = this.cw().find(e => e.seriesId == item.id);
-      const resumeEp = last && flat.find(e => String(e.id) === String(last.id));
-      const startEp = resumeEp || flat[0];
-      actions.innerHTML = `<button class="btn primary" data-a="play">${ICONS.play}<span>${resumeEp ? 'Resume ' + epEntry(resumeEp).subtitle.split(' — ')[0] : 'Play S' + startEp.season + ' · E' + startEp.episode_num}</span></button>`;
-      $('[data-a="play"]', actions).addEventListener('click', () => playEp(startEp, !!resumeEp));
-      this.trailerBtn(m, extra.trailer);
-      this.myListBtn(m, item);
+      // Resume the most recently watched episode, otherwise start at the beginning. Drawn again
+      // when the player closes.
+      const paint = () => {
+        const last = this.cw().find(e => e.seriesId == item.id);
+        const resumeEp = last && flat.find(e => String(e.id) === String(last.id));
+        const startEp = resumeEp || flat[0];
+        actions.innerHTML = `<button class="btn primary" data-a="play">${ICONS.play}<span>${resumeEp ? 'Resume ' + epEntry(resumeEp).subtitle.split(' — ')[0] : 'Play S' + startEp.season + ' · E' + startEp.episode_num}</span></button>`;
+        $('[data-a="play"]', actions).addEventListener('click', () => playEp(startEp, !!resumeEp));
+        this.trailerBtn(m, extra.trailer);
+        this.myListBtn(m, item);
+      };
+      paint();
+      this.detailRefresh = () => { paint(); if (!m.querySelector('.episodes').contains(document.activeElement)) $('.btn.primary', actions).focus(); };
 
       const ex = $('.detail-extra', m);
       ex.insertAdjacentHTML('afterbegin', `
@@ -2002,7 +2026,7 @@
         list.innerHTML = items.map(ep => {
           const saved = this.cwGet('episode:' + ep.id);
           const img = ep.info && ep.info.movie_image;
-          const secs = ep.info && (Number(ep.info.duration_secs) || 0);
+          const secs = ep.info && durSecs(ep.info);
           return `<button class="ep" data-id="${esc(ep.id)}">
             <span class="ep-img">${img ? `<img loading="lazy" src="${esc(img)}" alt="">` : ''}<span class="play">${ICONS.play}</span>
               ${saved ? `<span class="bar"><i style="width:${((saved.pos / saved.dur) * 100).toFixed(1)}%"></i></span>` : ''}</span>

@@ -718,6 +718,18 @@ public class PlayerActivity extends AppCompatActivity {
     /** The channel's guide (a week back, a few days ahead), cached 20 minutes. */
     @SuppressWarnings("unchecked")
     private void programmes(JSONObject ch, Got got) {
+        // Guide handed over by the app (read from the provider's XMLTV file): [title, start, end].
+        JSONArray given = ch.optJSONArray("progs");
+        if (given != null) {
+            List<Prog> out = new ArrayList<>();
+            long now = System.currentTimeMillis();
+            for (int i = 0; i < given.length(); i++) {
+                JSONArray e = given.optJSONArray(i);
+                if (e != null && e.optLong(2) > e.optLong(1)) out.add(new Prog(e.optString(0), e.optLong(1), e.optLong(2), e.optLong(2) <= now));
+            }
+            got.on(out);
+            return;
+        }
         String id = ch.optString("epgId", "");
         if (id.isEmpty() || epgTpl.isEmpty()) { got.on(new ArrayList<>()); return; }
         Object[] hit = epgCache.get(id);

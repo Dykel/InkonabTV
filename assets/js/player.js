@@ -95,6 +95,13 @@
         if (gi < 0) gi = groups.findIndex(g => g.channels.includes(cur));
         if (gi < 0) { groups.unshift({ key: item.groupKey || '@now', name: item.subtitle || 'Channels', channels: item.list || [cur] }); gi = 0; }
         const flat = [], at = new Map();
+        // Guide read from the provider's XMLTV file (its guide calls answer nothing): handed to the
+        // native player, a day back to a day ahead, as [title, start, end].
+        const x = App.api && App.api.guideApiOff && App.api.xmltvReady, now = Date.now();
+        const xmltvProgs = ch => {
+          const v = x && ch.versions && App.epgStream(ch), id = v && x.byStream.get(String(v.stream_id));
+          return id && x.progs[id] ? x.progs[id].filter(p => p[1] > now - 864e5 && p[0] < now + 864e5).map(p => [p[2], p[0], p[1]]) : undefined;
+        };
         const add = ch => {
           if (!at.has(ch)) {
             at.set(ch, flat.length);
@@ -104,6 +111,7 @@
               // Guide (▼ / ◀ in the player): the stream whose guide we read, and the catch-up copy.
               epgId: String(((ch.versions && App.epgStream(ch)) || {}).stream_id || ''),
               cu: String(((ch.versions || []).find(v => Number(v.tv_archive)) || {}).stream_id || ''),
+              progs: xmltvProgs(ch),
               // An M3U playlist has no URL template: each channel brings its own link.
               versions: (ch.versions || [ch]).map(v => (v.url ? { url: v.url, label: label(v) }
                 : App.api && App.api.isM3U ? { url: App.api.streamUrl('live', v.stream_id), label: label(v) }
@@ -744,8 +752,8 @@
           if (live) { e.preventDefault(); e.stopPropagation(); this.openSched(); }
           else if (this.mediaFocused()) { e.preventDefault(); v.currentTime += 10; } break;
         case ' ': case 'MediaPlayPause':
-          if (this.mediaFocused() || e.key === 'MediaPlayPause') { e.preventDefault(); v.paused ? v.play() : v.pause(); } break;
-        case 'MediaPlay': e.preventDefault(); v.play(); break;
+          if (this.mediaFocused() || e.key === 'MediaPlayPause') { e.preventDefault(); v.paused ? this.resume() : v.pause(); } break;
+        case 'MediaPlay': e.preventDefault(); this.resume(); break;
         case 'MediaPause': e.preventDefault(); v.pause(); break;
         case 'MediaFastForward': if (!live) { e.preventDefault(); v.currentTime += 30; } break;
         case 'MediaRewind': if (!live) { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 30); } break;
@@ -754,6 +762,9 @@
           if (document.fullscreenElement) document.exitFullscreen(); else this.el.requestFullscreen && this.el.requestFullscreen().catch(() => {}); break;
       }
     },
+
+    // play() is refused when a pause comes before it starts: that isn't an error.
+    resume() { const p = this.video.play(); if (p && p.catch) p.catch(() => {}); },
 
     destroy() {
       clearInterval(this.saveTimer);

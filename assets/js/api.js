@@ -81,7 +81,9 @@
   // (`num`) is left out of the comparison: one new channel would otherwise change all the others.
   function mergeList(old, fresh) {
     const id = x => String(x.stream_id ?? x.series_id ?? x.category_id ?? x.url ?? '');
-    const sig = x => JSON.stringify(x, (k, v) => (k === 'num' ? undefined : v));
+    // Some panels give image links a fresh token on every download (logo.php?k=…): only the
+    // address before "?" counts, or every refresh would rewrite the whole list.
+    const sig = x => JSON.stringify(x, (k, v) => (k === 'num' ? undefined : typeof v === 'string' && /^https?:\/\//.test(v) ? v.split('?')[0] : v));
     const before = new Map((Array.isArray(old) ? old : []).map(x => [id(x), x]));
     let added = 0, changed = 0, moved = false;
     const list = fresh.map((x, i) => {
@@ -95,6 +97,59 @@
     });
     const removed = before.size;
     return { list, added, removed, changed, same: !added && !removed && !changed && !moved };
+  }
+
+  // Reads an XMLTV guide as it downloads: { channelId: [[start, end, title, description], …] },
+  // only for the channels in `want` and from a week back to two days ahead.
+  async function readXmltv(url, want) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Guide ' + res.status);
+    const from = Date.now() - 8 * 864e5, to = Date.now() + 2 * 864e5;
+    const out = {};
+    const time = s => {
+      const m = /^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)\s*([+-])?(\d\d)?(\d\d)?/.exec(s || '');
+      if (!m) return 0;
+      const off = m[7] ? (m[7] === '-' ? -1 : 1) * (Number(m[8]) * 60 + Number(m[9])) * 60000 : 0;
+      return Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) - off;
+    };
+    const text = s => (s || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+      .replace(/&(#x?[0-9a-f]+|amp|lt|gt|quot|apos);/gi, (_, e) => e[0] === '#' ? String.fromCharCode(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : +e.slice(1)) : { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[e.toLowerCase()]).trim();
+    const take = block => {
+      const head = /<programme\b([^>]*)>/.exec(block);
+      if (!head) return;
+      const attr = n => { const m = new RegExp(n + '="([^"]*)"').exec(head[1]); return m ? m[1] : ''; };
+      const ch = text(attr('channel'));
+      if (!want.has(ch)) return;
+      const start = time(attr('start')), end = time(attr('stop'));
+      if (!(end > start) || end < from || start > to) return;
+      const title = /<title[^>]*>([\s\S]*?)<\/title>/.exec(block), desc = /<desc[^>]*>([\s\S]*?)<\/desc>/.exec(block);
+      (out[ch] || (out[ch] = [])).push([start, end, text(title && title[1]), text(desc && desc[1]).slice(0, 400)]);
+    };
+    let buf = '';
+    const eat = last => {
+      let i = 0;
+      for (;;) {
+        const a = buf.indexOf('<programme', i);
+        if (a < 0) { buf = last ? '' : buf.slice(Math.max(i, buf.length - 20)); return; }
+        const b = buf.indexOf('</programme>', a);
+        if (b < 0) { buf = buf.slice(a); return; }
+        take(buf.slice(a, b));
+        i = b + 12;
+      }
+    };
+    if (res.body && res.body.getReader && window.TextDecoder) {
+      const reader = res.body.getReader(), dec = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        eat(false);
+      }
+      buf += dec.decode();
+    } else buf = await res.text();
+    eat(true);
+    for (const k in out) out[k].sort((a, b) => a[0] - b[0]);
+    return out;
   }
 
   class Xtream {
@@ -309,26 +364,77 @@
     }
     vodInfo(id) { return this.call('get_vod_info', { vod_id: id }); }
     seriesInfo(id) { return this.call('get_series_info', { series_id: id }); }
-    shortEpg(streamId, limit = 8) {
-      return this.call('get_short_epg', { stream_id: streamId, limit }, { cache: false }).then(d =>
+    async shortEpg(streamId, limit = 8) {
+      const list = await this.guideCall(() => this.call('get_short_epg', { stream_id: streamId, limit }, { cache: false }).then(d =>
         asArray(d && d.epg_listings).map(e => ({
           title: b64(e.title), description: b64(e.description),
           start: Number(e.start_timestamp) * 1000, end: Number(e.stop_timestamp) * 1000,
         }))
-      );
+      ));
+      if (list.length) return list;
+      const now = Date.now();
+      return (await this.xmltvGuide(streamId)).filter(e => e.end > now).slice(0, limit);
     }
 
     // A channel's whole guide (about a week back and a few days ahead) in one call.
     // `archive`: the programme can be replayed (catch-up); `startStr` is the server-local start
     // ("2026-10-26 19:00:00") that catch-up links expect.
-    epgTable(streamId) {
-      return this.call('get_simple_data_table', { stream_id: streamId }, { cache: false }).then(d =>
+    async epgTable(streamId) {
+      const list = await this.guideCall(() => this.call('get_simple_data_table', { stream_id: streamId }, { cache: false }).then(d =>
         asArray(d && d.epg_listings).map(e => ({
           title: b64(e.title), description: b64(e.description),
           start: Number(e.start_timestamp) * 1000, end: Number(e.stop_timestamp) * 1000,
           startStr: e.start || '', archive: Number(e.has_archive) === 1,
         })).filter(e => e.end > e.start).sort((a, b) => a.start - b.start)
-      );
+      ));
+      return list.length ? list : this.xmltvGuide(streamId);
+    }
+
+    // Some panels answer every guide call with nothing (or "not found") but publish the whole
+    // guide as XMLTV. After 4 empty answers and none with programmes, stop asking.
+    async guideCall(job) {
+      if (this.guideApiOff) return [];
+      const list = await job().catch(() => []);
+      if (list.length) this.guideHits = (this.guideHits || 0) + 1;
+      else if (!this.guideHits && (this.guideMisses = (this.guideMisses || 0) + 1) >= 4) this.guideApiOff = true;
+      return list;
+    }
+
+    // Shortly after opening: find out whether the guide calls answer, and if not read the XMLTV
+    // guide in the background so it's ready (the native player gets it with the channel list).
+    async primeGuide() {
+      if (this.guideHits || this.guidePrimed) return;
+      this.guidePrimed = true;
+      const ids = (await this.liveStreams().catch(() => [])).filter(c => c.epg_channel_id).slice(0, 4).map(c => c.stream_id);
+      for (const id of ids) { if (this.guideHits || this.guideApiOff) break; await this.shortEpg(id, 1); }
+    }
+
+    // A channel's guide from the provider's XMLTV file (xmltv.php, tens of MB). It's read once,
+    // streamed, keeping only the playlist's channels (the chosen languages), and saved for 12 h.
+    async xmltvGuide(streamId) {
+      const x = await this.xmltv().catch(() => null);
+      const id = x && x.byStream.get(String(streamId));
+      const now = Date.now();
+      return ((id && x.progs[id]) || []).map(([start, end, title, description]) => ({ title, description, start, end, startStr: '', archive: end <= now }));
+    }
+    xmltv() {
+      if (this.xmltvP) return this.xmltvP;
+      this.xmltvP = (async () => {
+        const live = await this.liveStreams();
+        const byStream = new Map(), want = new Set();
+        for (const c of live) if (c.epg_channel_id) { byStream.set(String(c.stream_id), c.epg_channel_id); want.add(c.epg_channel_id); }
+        const key = 'xmltv|' + this.server + '|' + this.username + '|' + [...(this.langs || [])].sort().join(',');
+        const hit = await Disk.get(key).catch(() => null);
+        let progs = hit && Date.now() - hit.t < 12 * 3600e3 && hit.d;
+        if (!progs) {
+          progs = await readXmltv(this.epgUrl(), want);
+          Disk.set(key, { t: Date.now(), d: progs }).catch(() => {});
+        }
+        this.xmltvReady = { byStream, progs };
+        return this.xmltvReady;
+      })();
+      this.xmltvP.catch(() => { setTimeout(() => { this.xmltvP = null; }, 5 * 60e3); });
+      return this.xmltvP;
     }
 
     // Catch-up (timeshift) link; only the MPEG-TS form is served by this provider. The start
