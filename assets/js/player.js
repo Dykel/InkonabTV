@@ -69,7 +69,7 @@
       this.video.addEventListener('error', () => this.fail());
       this.video.addEventListener('ended', () => this.ended());
       document.addEventListener('keydown', e => this.onKey(e), true);
-      try { this.setupCasting(); } catch (e) { console.warn('[cast]', e); } // never stops playback
+      this.setupCasting();
       // Website: fetch hls.js in the background once the app is up, so the first channel starts at once.
       setTimeout(() => { if (!window.Native && !this.video.isAV) lib('Hls').catch(() => {}); }, 4000);
     },
@@ -80,8 +80,6 @@
     setupCasting() {
       if (window.Native || window.TizenTV) return;
       const v = this.video, air = this.el.querySelector('[data-act="airplay"]'), castBtn = this.el.querySelector('[data-act="cast"]');
-      // A page cached from before the buttons existed must still play.
-      if (!air || !castBtn) return;
       // AirPlay: Apple TV and AirPlay 2 TVs (most Samsung, LG, Sony and Vizio from 2018 on).
       if (window.WebKitPlaybackTargetAvailabilityEvent) {
         v.setAttribute('x-webkit-airplay', 'allow');
