@@ -235,7 +235,14 @@
       clearTimeout(this.watchdog);
       this.watchdog = setTimeout(() => { if (this.item === item && this.el.dataset.state === 'loading') this.fail('timeout'); }, 15000);
       const p = v.play();
-      if (p && p.catch) p.catch(() => {});
+      if (p && p.catch) p.catch(e => {
+        // iPhone/iPad refuse to start sound without a fresh tap: wait for one instead of failing.
+        if (e && e.name === 'NotAllowedError' && this.item === item) {
+          clearTimeout(this.watchdog);
+          this.setState('paused');
+          App.toast('Tap ▶ to start');
+        }
+      });
 
       if (item.kind !== 'live') {
         this.saveTimer = setInterval(() => this.saveProgress(), 5000);
@@ -679,7 +686,11 @@
       const msg = mixed
         ? 'This channel is sent over plain HTTP, which browsers block on an HTTPS site. Add a relay in Settings (see README) to play it here.'
         : 'The stream could not be played. It may be offline, or use a format your browser can’t decode (try the other live format in Settings, or open it in VLC).';
-      this.el.querySelector('.p-error-msg').textContent = msg;
+      // What the browser reported, so a failure on a phone can be told apart from a dead channel.
+      const me = this.video.error;
+      const why = me ? `media error ${me.code}${me.message ? ': ' + me.message : ''}`
+        : typeof detail === 'string' ? detail : detail && (detail.type || detail.details) || '';
+      this.el.querySelector('.p-error-msg').textContent = msg + (why ? ` [${why}]` : '');
       this.el.querySelector('[data-act="settings"]').classList.toggle('hidden', !mixed);
       this.setState('error');
       if (detail) console.warn('[player]', detail);
