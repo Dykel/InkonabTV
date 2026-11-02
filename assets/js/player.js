@@ -69,71 +69,11 @@
       this.video.addEventListener('error', () => this.fail());
       this.video.addEventListener('ended', () => this.ended());
       document.addEventListener('keydown', e => this.onKey(e), true);
-      this.setupCasting();
       // Website: fetch hls.js in the background once the app is up, so the first channel starts at once.
       setTimeout(() => { if (!window.Native && !this.video.isAV) lib('Hls').catch(() => {}); }, 4000);
     },
 
     isOpen() { return !this.el.classList.contains('hidden'); },
-
-    // ---------- casting from the website: AirPlay (Safari) and Google Cast (Chrome) ----------
-    setupCasting() {
-      if (window.Native || window.TizenTV) return;
-      const v = this.video, air = this.el.querySelector('[data-act="airplay"]'), castBtn = this.el.querySelector('[data-act="cast"]');
-      // AirPlay: Apple TV and AirPlay 2 TVs (most Samsung, LG, Sony and Vizio from 2018 on).
-      if (window.WebKitPlaybackTargetAvailabilityEvent) {
-        v.setAttribute('x-webkit-airplay', 'allow');
-        v.addEventListener('webkitplaybacktargetavailabilitychanged', e => air.classList.toggle('hidden', e.availability !== 'available'));
-        air.addEventListener('click', () => v.webkitShowPlaybackTargetPicker());
-      }
-      // Google Cast: Chromecast, Google TV and Android TVs with Chromecast built-in.
-      if (!window.chrome || appleTouch) return;
-      window.__onGCastApiAvailable = ok => {
-        if (!ok || !window.cast || !cast.framework) return;
-        const ctx = cast.framework.CastContext.getInstance();
-        ctx.setOptions({ receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID, autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED });
-        const show = s => castBtn.classList.toggle('hidden', s === cast.framework.CastState.NO_DEVICES_AVAILABLE);
-        show(ctx.getCastState());
-        ctx.addEventListener(cast.framework.CastContextEventType.CAST_STATE_CHANGED, e => show(e.castState));
-      };
-      castBtn.addEventListener('click', () => this.castNow());
-      setTimeout(() => {
-        const s = document.createElement('script');
-        s.src = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1';
-        document.head.appendChild(s);
-      }, 3000);
-    },
-
-    async castNow() {
-      const it = this.item;
-      if (!it || !window.cast || !cast.framework) return;
-      const ctx = cast.framework.CastContext.getInstance();
-      try { if (!ctx.getCurrentSession()) await ctx.requestSession(); } catch { return; } // picker closed
-      const session = ctx.getCurrentSession();
-      if (!session) return;
-      // TVs play HLS, not raw MPEG-TS; provider links go through the relay like on the website.
-      const live = it.kind === 'live';
-      const raw = it.url || (live ? App.api.streamUrl('live', it.id, 'm3u8') : it.rawUrl);
-      const url = it.url && !it.relay ? it.url : relay(raw);
-      const ext = ((raw.match(/\.(m3u8|mp4|mkv|mp3|aac|ts)(?:\?|$)/i) || [])[1] || 'm3u8').toLowerCase();
-      const types = { m3u8: 'application/x-mpegurl', mp4: 'video/mp4', mkv: 'video/x-matroska', mp3: 'audio/mpeg', aac: 'audio/aac', ts: 'video/mp2t' };
-      const info = new chrome.cast.media.MediaInfo(url, types[ext] || 'application/x-mpegurl');
-      info.streamType = live ? chrome.cast.media.StreamType.LIVE : chrome.cast.media.StreamType.BUFFERED;
-      info.metadata = new chrome.cast.media.GenericMediaMetadata();
-      info.metadata.title = it.title || 'InkonabTV';
-      info.metadata.subtitle = it.subtitle || '';
-      if (it.img) info.metadata.images = [new chrome.cast.Image(it.img)];
-      const req = new chrome.cast.media.LoadRequest(info);
-      if (!live && this.video.currentTime > 5) req.currentTime = this.video.currentTime;
-      try {
-        await session.loadMedia(req);
-        this.video.pause();
-        App.toast(`Playing on ${session.getCastDevice().friendlyName}`);
-      } catch (e) {
-        App.toast('The TV could not play this');
-        console.warn('[cast]', e);
-      }
-    },
 
     // item: {kind, id, ext, title, subtitle, img, resumeAt, list, index, onProgress, onEnded}
     open(item) {
