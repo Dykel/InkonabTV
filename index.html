@@ -7,7 +7,11 @@
   <meta name="referrer" content="no-referrer">
   <title>InkonabTV</title>
   <link rel="icon" type="image/svg+xml" href="icon.svg">
-  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="InkonabTV">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="assets/fonts/fonts.css">
   <link rel="stylesheet" href="assets/css/app.css">
@@ -142,5 +146,11 @@
   <script src="assets/js/nav.js"></script>
   <script src="assets/js/app.js"></script>
   <script src="assets/js/native.js"></script>
+  <script>
+    // Installable website (Add to Home Screen / Install app); not in the Android or Samsung apps.
+    if ('serviceWorker' in navigator && location.protocol === 'https:' && location.hostname !== 'localhost' && !window.Native && !window.TizenTV) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  </script>
 </body>
 </html>
