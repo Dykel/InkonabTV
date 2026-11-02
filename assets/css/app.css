@@ -540,7 +540,7 @@ img.broken { visibility: hidden; }
 .p-head { flex: 1; min-width: 0; }
 .p-title { font: 600 clamp(1.2rem, 2vw, 1.8rem) var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .p-sub { color: #c2ced1; }
-.p-zap { display: flex; gap: 10px; }
+.p-zap, .p-cast { display: flex; gap: 10px; }
 .p-epg { bottom: 70px; padding: 0 var(--gutter); display: grid; gap: 6px; pointer-events: none; }
 .p-epg-row { display: flex; gap: 12px; align-items: center; text-shadow: 0 1px 8px #000; }
 .p-epg-tag { font-size: .75rem; font-weight: 700; text-transform: uppercase; padding: 2px 8px; border-radius: 6px; background: var(--accent); color: var(--accent-ink); }
