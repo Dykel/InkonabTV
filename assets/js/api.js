@@ -25,7 +25,8 @@
     Store.get('settings', {})
   );
   // An empty relay saved before one was configured must not hide the configured one.
-  if (!Settings.relay) Settings.relay = CFG.relay || '';
+  // The first relay (2 Nov 2026) was removed; settings saved while it ran still name it.
+  if (!Settings.relay || Settings.relay.includes('inkonab-relay.inkonab.workers.dev')) Settings.relay = CFG.relay || '';
   // Adult categories are hidden again at every start (parental PIN); only the PIN is kept.
   Settings.showAdult = false;
   Settings.save = function () {
