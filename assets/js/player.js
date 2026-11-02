@@ -666,7 +666,9 @@
     // more than 3 times within 15 s does it move to another copy of the channel.
     onFreeze() {
       const it = this.item, now = Date.now();
-      if (!it || it.kind !== 'live') return;
+      // Safari's own HLS player (iPhone/iPad) pauses to buffer several times as it starts: that is
+      // not a frozen channel, and switching copies drops a stream the provider allows only once.
+      if (!it || it.kind !== 'live' || appleTouch) return;
       this.freezes = (this.freezes || []).filter(t => now - t < 15000).concat(now);
       if (this.freezes.length <= 3) return;
       this.freezes = [];
