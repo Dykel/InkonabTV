@@ -45,7 +45,22 @@ export default {
     const range = request.headers.get('Range');
     if (range) headers.set('Range', range);
 
-    const upstream = await fetch(t.toString(), { method: request.method, headers, redirect: 'follow' });
+    // Follow redirects by hand so each hop can be logged (host and status only: the
+    // path holds the viewer's login) and a failure comes back with CORS headers.
+    let upstream, hop = t.toString();
+    try {
+      for (let i = 0; i < 5; i++) {
+        upstream = await fetch(hop, { method: request.method, headers, redirect: 'manual' });
+        console.log('upstream', new URL(hop).host, upstream.status);
+        const loc = upstream.status >= 300 && upstream.status < 400 && upstream.headers.get('Location');
+        if (!loc) break;
+        hop = new URL(loc, hop).toString();
+      }
+    } catch (e) {
+      console.log('upstream error', new URL(hop).host, String(e));
+      return new Response('Relay could not reach the stream: ' + e, { status: 502, headers: cors });
+    }
+    Object.defineProperty(upstream, 'url', { value: hop });
     const type = upstream.headers.get('Content-Type') || '';
     const isPlaylist = /mpegurl/i.test(type) || /\.m3u8?($|\?)/i.test(t.pathname) || /\.m3u8?($|\?)/i.test(new URL(upstream.url).pathname);
 

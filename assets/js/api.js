@@ -25,8 +25,8 @@
     Store.get('settings', {})
   );
   // An empty relay saved before one was configured must not hide the configured one.
-  // The first relay (2 Nov 2026) was removed; settings saved while it ran still name it.
-  if (!Settings.relay || Settings.relay.includes('inkonab-relay.inkonab.workers.dev')) Settings.relay = CFG.relay || '';
+  // Earlier relays on Cloudflare (2 Nov 2026) were replaced; settings saved meanwhile still name them.
+  if (!Settings.relay || Settings.relay.includes('workers.dev')) Settings.relay = CFG.relay || '';
   // Adult categories are hidden again at every start (parental PIN); only the PIN is kept.
   Settings.showAdult = false;
   Settings.save = function () {
