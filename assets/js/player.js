@@ -12,11 +12,21 @@
   // Checked when used: native.js (Android app) loads after this file.
   const webPage = () => location.protocol === 'https:' && location.hostname !== 'localhost' && !window.Native && !window.TizenTV;
   let helperOn = false;
-  const probeHelper = async () => {
+  // Chrome asks once before a website may reach programs on the computer. A quick check would
+  // cancel that question, so when it hasn't been answered yet the check waits for a tap
+  // (interactive: Try again) and then gives the viewer time to choose Allow.
+  const helperPermission = async () => {
+    for (const name of ['loopback-network', 'local-network-access', 'local-network']) {
+      try { return (await navigator.permissions.query({ name })).state; } catch {}
+    }
+    return 'granted'; // browsers without the question
+  };
+  const probeHelper = async (interactive = false) => {
     if (!webPage()) return false;
+    if (!interactive && await helperPermission() === 'prompt') return helperOn = false;
     try {
       const c = new AbortController();
-      setTimeout(() => c.abort(), 1500);
+      setTimeout(() => c.abort(), interactive ? 60000 : 1500);
       const r = await fetch(HELPER + '/ping', { signal: c.signal });
       helperOn = r.ok && (await r.json()).app === 'inkonabtv-helper';
     } catch { helperOn = false; }
@@ -72,7 +82,7 @@
         const g = e.target.closest('[data-g]');
         if (g) { clearTimeout(this.sidePreview); this.sidePreview = setTimeout(() => this.renderSideChannels(Number(g.dataset.g)), 120); }
       });
-      this.el.querySelector('[data-act="retry"]').addEventListener('click', () => probeHelper().then(() => this.play(this.item)));
+      this.el.querySelector('[data-act="retry"]').addEventListener('click', () => probeHelper(true).then(() => this.play(this.item)));
       probeHelper();
       this.el.querySelector('[data-act="copy"]').addEventListener('click', () => {
         navigator.clipboard && navigator.clipboard.writeText(this.item.rawUrl);
@@ -710,7 +720,7 @@
         ? 'The stream could not be played. It may be offline, or use a format your browser can’t decode (try the other live format in Settings, or open it in VLC).'
         : appleTouch
           ? 'On iPhone and iPad, your provider’s channels can’t play on the website yet. Watch them with the InkonabTV app on Android, Android TV, Fire TV or Samsung TV, or on a computer.'
-          : 'To watch your provider’s channels on a computer, install the free InkonabTV Helper and keep it running, then press Try again. Download it at inkonabtv.alwaysdata.net.';
+          : 'To watch your provider’s channels on a computer, install the free InkonabTV Helper (inkonabtv.alwaysdata.net) and keep it running. Then press Try again, and choose Allow if your browser asks to access apps on this device.';
       // What the browser reported, so a failure on a phone can be told apart from a dead channel.
       const me = this.video.error;
       const why = mixed ? '' : me ? `media error ${me.code}${me.message ? ': ' + me.message : ''}`
