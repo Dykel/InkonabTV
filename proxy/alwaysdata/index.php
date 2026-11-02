@@ -14,7 +14,6 @@
  */
 
 const ALLOWED_HOSTS = ['inkonabtv.ottb.xyz'];
-const MAX_REDIRECTS = 5;
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
@@ -57,40 +56,46 @@ function absolute(string $u, string $base): string {
   return $root . $dir . $u;
 }
 
-// Follow redirects by hand so the final address is known (playlists are rewritten against it).
-$range = $_SERVER['HTTP_RANGE'] ?? '';
-$url = $target;
-for ($i = 0; $i <= MAX_REDIRECTS; $i++) {
-  $ch = curl_init($url);
-  $respHeaders = [];
-  curl_setopt_array($ch, [
-    CURLOPT_NOBODY => true,
-    CURLOPT_FOLLOWLOCATION => false,
-    CURLOPT_TIMEOUT => 15,
-    CURLOPT_USERAGENT => 'Mozilla/5.0 (InkonabTV Web)',
-    CURLOPT_HEADERFUNCTION => function ($c, $h) use (&$respHeaders) {
-      if (strpos($h, ':') !== false) { [$k, $v] = explode(':', $h, 2); $respHeaders[strtolower(trim($k))] = trim($v); }
-      return strlen($h);
-    },
-  ]);
-  curl_exec($ch);
-  $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-  curl_close($ch);
-  if ($code >= 300 && $code < 400 && !empty($respHeaders['location'])) { $url = absolute($respHeaders['location'], $url); continue; }
-  break;
+// Short log (host and status only: paths hold the viewer's login), kept under 200 KB.
+function relay_log(string $msg): void {
+  $f = getenv('HOME') . '/relay.log';
+  if (@filesize($f) > 200000) @rename($f, $f . '.old');
+  @file_put_contents($f, date('H:i:s') . ' ' . $msg . "\n", FILE_APPEND);
 }
+function host_of(string $u): string { return (string) parse_url($u, PHP_URL_HOST); }
 
-$path = parse_url($url, PHP_URL_PATH) ?? '';
-$isPlaylist = preg_match('#\.m3u8?$#i', $path) || preg_match('#\.m3u8?$#i', $parts['path'] ?? '');
-
-if ($isPlaylist && $method === 'GET') {
-  $ch = curl_init($url);
-  curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 15,
+function fetch_text(string $u, bool $follow): array {
+  $ch = curl_init($u);
+  curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => $follow, CURLOPT_TIMEOUT => 15,
     CURLOPT_USERAGENT => 'Mozilla/5.0 (InkonabTV Web)']);
   $text = (string) curl_exec($ch);
   $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-  $final = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL) ?: $url;
+  $final = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL) ?: $u;
   curl_close($ch);
+  return [$code, $text, $final];
+}
+
+$range = $_SERVER['HTTP_RANGE'] ?? '';
+$isPlaylist = (bool) preg_match('#\.m3u8?$#i', $parts['path'] ?? '');
+
+if ($isPlaylist && $method === 'GET') {
+  // Players reload a live playlist every few seconds. Asking the provider's login address each
+  // time opens a new session (and one-connection accounts drop the stream), so the stream
+  // address it redirects to is remembered and reused for 10 minutes.
+  $dir = getenv('HOME') . '/relay-cache';
+  @mkdir($dir, 0700);
+  $key = $dir . '/' . sha1($target);
+  $cached = @file_get_contents($key);
+  $code = 0; $text = ''; $final = '';
+  if ($cached && time() - filemtime($key) < 600) {
+    [$code, $text, $final] = fetch_text($cached, false);
+    relay_log("playlist reuse " . host_of($cached) . " $code");
+  }
+  if ($code !== 200 || !str_starts_with(ltrim($text), '#EXTM3U')) {
+    [$code, $text, $final] = fetch_text($target, true);
+    relay_log("playlist fresh " . host_of($target) . " -> " . host_of($final) . " $code");
+    if ($code === 200) @file_put_contents($key, $final);
+  }
   if ($code === 200 && str_starts_with(ltrim($text), '#EXTM3U')) {
     $wrap = function ($u) use ($final, $secret) {
       $abs = absolute($u, $final);
@@ -110,6 +115,7 @@ if ($isPlaylist && $method === 'GET') {
     header('Cache-Control: no-cache');
     exit(implode("\n", $out));
   }
+  @unlink($key);
   http_response_code($code ?: 502);
   exit($text);
 }
@@ -117,8 +123,8 @@ if ($isPlaylist && $method === 'GET') {
 // Video data: stream it through as it arrives, passing Range and the useful headers.
 @set_time_limit(0);
 while (ob_get_level()) ob_end_clean();
+$url = $target;
 $ch = curl_init($url);
-$sent = false;
 curl_setopt_array($ch, [
   CURLOPT_FOLLOWLOCATION => true,
   CURLOPT_CONNECTTIMEOUT => 15,
@@ -135,5 +141,7 @@ curl_setopt_array($ch, [
     return connection_aborted() ? 0 : strlen($data);
   },
 ]);
-if (!curl_exec($ch) && !headers_sent()) { http_response_code(502); echo 'Relay could not reach the stream.'; }
+$ok = curl_exec($ch);
+relay_log('data ' . host_of(curl_getinfo($ch, CURLINFO_EFFECTIVE_URL) ?: $url) . ' ' . curl_getinfo($ch, CURLINFO_RESPONSE_CODE) . ' ' . (int) curl_getinfo($ch, CURLINFO_SIZE_DOWNLOAD) . 'B' . ($range ? " range $range" : '') . ($ok ? '' : ' ERR ' . curl_error($ch)));
+if (!$ok && !headers_sent()) { http_response_code(502); echo 'Relay could not reach the stream.'; }
 curl_close($ch);
