@@ -25,8 +25,9 @@
     Store.get('settings', {})
   );
   // An empty relay saved before one was configured must not hide the configured one.
-  // Earlier relays on Cloudflare (2 Nov 2026) were replaced; settings saved meanwhile still name them.
-  if (!Settings.relay || Settings.relay.includes('workers.dev')) Settings.relay = CFG.relay || '';
+  // Earlier server relays (Cloudflare, then alwaysdata, Nov 2026) were retired for the local
+  // helper; settings saved while they ran still name them.
+  if (!Settings.relay || /workers\.dev|alwaysdata\.net\/relay/.test(Settings.relay)) Settings.relay = CFG.relay || '';
   // Adult categories are hidden again at every start (parental PIN); only the PIN is kept.
   Settings.showAdult = false;
   Settings.save = function () {

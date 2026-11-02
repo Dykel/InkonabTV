@@ -6,6 +6,22 @@
   // needs them (the Android app plays with ExoPlayer, Samsung TVs with AVPlay).
   const LIBS = { Hls: 'assets/js/vendor/hls.min.js', mpegts: 'assets/js/vendor/mpegts.js' };
   const loading = {}, missing = {};
+  // InkonabTV Helper (helper/): a small program on the viewer's computer that relays the
+  // provider's plain-HTTP video for the HTTPS website, over the viewer's own connection.
+  const HELPER = 'http://127.0.0.1:17788';
+  // Checked when used: native.js (Android app) loads after this file.
+  const webPage = () => location.protocol === 'https:' && location.hostname !== 'localhost' && !window.Native && !window.TizenTV;
+  let helperOn = false;
+  const probeHelper = async () => {
+    if (!webPage()) return false;
+    try {
+      const c = new AbortController();
+      setTimeout(() => c.abort(), 1500);
+      const r = await fetch(HELPER + '/ping', { signal: c.signal });
+      helperOn = r.ok && (await r.json()).app === 'inkonabtv-helper';
+    } catch { helperOn = false; }
+    return helperOn;
+  };
   // iPhone, iPod and iPad (iPadOS reports itself as a Mac with a touch screen).
   const appleTouch = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -56,7 +72,8 @@
         const g = e.target.closest('[data-g]');
         if (g) { clearTimeout(this.sidePreview); this.sidePreview = setTimeout(() => this.renderSideChannels(Number(g.dataset.g)), 120); }
       });
-      this.el.querySelector('[data-act="retry"]').addEventListener('click', () => this.play(this.item));
+      this.el.querySelector('[data-act="retry"]').addEventListener('click', () => probeHelper().then(() => this.play(this.item)));
+      probeHelper();
       this.el.querySelector('[data-act="copy"]').addEventListener('click', () => {
         navigator.clipboard && navigator.clipboard.writeText(this.item.rawUrl);
         App.toast('Stream link copied — paste it into VLC');
@@ -187,6 +204,11 @@
       if (appleTouch && !item.url && item.kind === 'live' && ext === 'ts') ext = 'm3u8';
       item.fmt = ext;
       item.rawUrl = item.url || App.api.streamUrl(item.kind, item.id, ext);
+      if (webPage() && !helperOn && !item.helperChecked && (!item.url || item.relay)) {
+        item.helperChecked = true; // the helper may have been started after the page opened
+        probeHelper().then(() => { if (this.item === item) this.play(item); });
+        return;
+      }
       const url = item.url && !item.relay ? item.url : relay(item.rawUrl);
       this.el.classList.toggle('radio', !!item.radio);
       const art = this.el.querySelector('.p-radio img');
@@ -682,18 +704,19 @@
 
     fail(detail) {
       if (!this.item) return;
-      const blocked = (!this.item.url || this.item.relay) && location.protocol === 'https:' && !Settings.relay;
-      if (!blocked && this.retry()) { if (detail) console.warn('[player] retrying after', detail); return; }
-      const mixed = (!this.item.url || this.item.relay) && location.protocol === 'https:' && !Settings.relay;
-      const msg = mixed
-        ? 'This channel is sent over plain HTTP, which browsers block on an HTTPS site. Add a relay in Settings (see README) to play it here.'
-        : 'The stream could not be played. It may be offline, or use a format your browser can’t decode (try the other live format in Settings, or open it in VLC).';
+      const mixed = (!this.item.url || this.item.relay) && webPage() && !helperOn && !Settings.relay;
+      if (!mixed && this.retry()) { if (detail) console.warn('[player] retrying after', detail); return; }
+      const msg = !mixed
+        ? 'The stream could not be played. It may be offline, or use a format your browser can’t decode (try the other live format in Settings, or open it in VLC).'
+        : appleTouch
+          ? 'On iPhone and iPad, your provider’s channels can’t play on the website yet. Watch them with the InkonabTV app on Android, Android TV, Fire TV or Samsung TV, or on a computer.'
+          : 'To watch your provider’s channels on a computer, install the free InkonabTV Helper and keep it running, then press Try again. Download it at inkonabtv.alwaysdata.net.';
       // What the browser reported, so a failure on a phone can be told apart from a dead channel.
       const me = this.video.error;
-      const why = me ? `media error ${me.code}${me.message ? ': ' + me.message : ''}`
+      const why = mixed ? '' : me ? `media error ${me.code}${me.message ? ': ' + me.message : ''}`
         : typeof detail === 'string' ? detail : detail && (detail.type || detail.details) || '';
       this.el.querySelector('.p-error-msg').textContent = msg + (why ? ` [${why}]` : '');
-      this.el.querySelector('[data-act="settings"]').classList.toggle('hidden', !mixed);
+      this.el.querySelector('[data-act="settings"]').classList.add('hidden');
       this.setState('error');
       if (detail) console.warn('[player]', detail);
     },
@@ -849,8 +872,12 @@
 
   // Only the website needs the relay (HTTPS page, plain-HTTP video). The Samsung and Android
   // apps play HTTP directly, and the relay only accepts the built-in provider.
+  // Only the website needs this (HTTPS page, plain-HTTP video): the helper on this computer,
+  // or a server relay if one is configured. The Samsung and Android apps play HTTP directly.
   function relay(url) {
-    if (!Settings.relay || location.protocol !== 'https:' || window.Native || window.TizenTV) return url;
+    if (!webPage()) return url;
+    if (helperOn) return HELPER + '/?url=' + encodeURIComponent(url);
+    if (!Settings.relay) return url;
     return Settings.relay.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(url);
   }
 
