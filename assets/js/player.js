@@ -6,6 +6,9 @@
   // needs them (the Android app plays with ExoPlayer, Samsung TVs with AVPlay).
   const LIBS = { Hls: 'assets/js/vendor/hls.min.js', mpegts: 'assets/js/vendor/mpegts.js' };
   const loading = {}, missing = {};
+  // iPhone, iPod and iPad (iPadOS reports itself as a Mac with a touch screen).
+  const appleTouch = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const lib = name => window[name] ? Promise.resolve() : (loading[name] = loading[name] || new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = LIBS[name];
@@ -177,9 +180,11 @@
       this.recovers = 0;
       // item.url: a direct link — a free playlist (MBC PLAY), or a catch-up replay (relay: true,
       // it comes from the provider's plain-HTTP host like live TV). Otherwise an Xtream stream.
-      const ext = item.url
+      let ext = item.url
         ? ((item.url.match(/\.(m3u8|ts|mp4|mkv|mp3|aac)(?:\?|$)/i) || [])[1] || 'm3u8').toLowerCase()
         : item.kind === 'live' ? item.fmtOverride || Settings.liveFormat : item.ext || 'mp4';
+      // iPhone and iPad play HLS themselves but not raw MPEG-TS.
+      if (appleTouch && !item.url && item.kind === 'live' && ext === 'ts') ext = 'm3u8';
       item.fmt = ext;
       item.rawUrl = item.url || App.api.streamUrl(item.kind, item.id, ext);
       const url = item.url && !item.relay ? item.url : relay(item.rawUrl);
@@ -199,14 +204,17 @@
 
       const v = this.video;
       v.removeAttribute('src');
-      const need = !v.isAV && (ext === 'm3u8' ? 'Hls' : ext === 'ts' ? 'mpegts' : '');
+      // iPhone/iPad: Safari's own HLS player. hls.js there runs on ManagedMediaSource, which
+      // stalls without extra AirPlay handling.
+      const nativeHls = ext === 'm3u8' && appleTouch && v.canPlayType('application/vnd.apple.mpegurl');
+      const need = !v.isAV && !nativeHls && (ext === 'm3u8' ? 'Hls' : ext === 'ts' ? 'mpegts' : '');
       if (need && !window[need] && !missing[need]) {
         // Starts again once the library is here; without it, the browser tries the link itself.
         lib(need).catch(() => { missing[need] = true; }).then(() => { if (this.item === item) this.play(item); });
         return;
       }
-      if (v.isAV) {
-        v.src = url; // AVPlay handles HLS, MPEG-TS and files itself
+      if (v.isAV || nativeHls) {
+        v.src = url; // AVPlay / Safari handle HLS themselves
       } else if (ext === 'm3u8' && window.Hls && Hls.isSupported()) {
         const hls = this.hls = new Hls(hlsConfig(item.kind === 'live'));
         hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal && !this.recover(d)) this.fail(d.details); });
@@ -628,7 +636,7 @@
       }
       const alt = it.fmt === 'm3u8' ? 'ts' : 'm3u8';
       const first = versions[0] || it.version;
-      if (first && !it.tried.has(`${first.stream_id}:${alt}`)) {
+      if (first && !appleTouch && !it.tried.has(`${first.stream_id}:${alt}`)) {
         App.toast(`Trying the ${alt === 'ts' ? 'MPEG-TS' : 'HLS'} format…`);
         this.play({ ...it, id: first.stream_id, version: first, fmtOverride: alt, tried: it.tried });
         return true;
