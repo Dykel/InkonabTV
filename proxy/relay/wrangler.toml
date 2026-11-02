@@ -1,5 +1,5 @@
 # HTTPS relay for the website's video (see ../worker.js and README).
-# Deployed on a separate Cloudflare account from inkonab-pair, with its own wrangler login:
+# Deployed on its own Cloudflare account (not the one running inkonab-pair), with its own wrangler login:
 #   XDG_CONFIG_HOME=~/.wrangler-relay npx wrangler login
 name = "inkonab-relay"
 main = "../worker.js"

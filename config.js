@@ -11,7 +11,7 @@ window.INKONAB_CONFIG = {
   // which browsers block on an HTTPS site. Deploy proxy/worker.js to Cloudflare
   // (see README) and paste its URL here, e.g. 'https://inkonab-relay.you.workers.dev'.
   // Users can also set it from Settings inside the app.
-  relay: 'https://inkonab-relay.inkonab.workers.dev',
+  relay: 'https://inkonab-relay.konnweidiag.workers.dev',
 
   // Free playlists that are always available, signed in or not (TV and radio).
   freePlaylists: [
