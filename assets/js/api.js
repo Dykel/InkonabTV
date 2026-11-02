@@ -24,6 +24,8 @@
     { server: CFG.server, relay: CFG.relay || '', liveFormat: 'm3u8', showAdult: false, tmdbLang: defaultLang, catchupShift: 0 },
     Store.get('settings', {})
   );
+  // An empty relay saved before one was configured must not hide the configured one.
+  if (!Settings.relay) Settings.relay = CFG.relay || '';
   // Adult categories are hidden again at every start (parental PIN); only the PIN is kept.
   Settings.showAdult = false;
   Settings.save = function () {

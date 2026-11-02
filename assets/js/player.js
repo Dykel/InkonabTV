@@ -826,8 +826,10 @@
     },
   };
 
+  // Only the website needs the relay (HTTPS page, plain-HTTP video). The Samsung and Android
+  // apps play HTTP directly, and the relay only accepts the built-in provider.
   function relay(url) {
-    if (!Settings.relay) return url;
+    if (!Settings.relay || location.protocol !== 'https:' || window.Native || window.TizenTV) return url;
     return Settings.relay.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(url);
   }
 
