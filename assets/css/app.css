@@ -605,7 +605,7 @@ img.broken { visibility: hidden; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
-/* ---------- free playlists (MBC PLAY) ---------- */
+/* ---------- free / extra M3U playlists ---------- */
 .free-note { font: 500 .8rem var(--font); color: var(--accent); margin-left: 10px; letter-spacing: .02em; }
 .tile { flex: none; width: clamp(150px, 13vw, 230px); text-align: left; }
 .tile-logo {
@@ -939,7 +939,7 @@ img.broken { visibility: hidden; }
   .prog b { font-size: .8rem; }
   .prog small { font-size: .68rem; }
 
-  /* sign-in: MBC row runs edge to edge */
+  /* sign-in: free-channel row runs edge to edge */
   .login { padding: calc(20px + env(safe-area-inset-top)) 0 24px; }
   .login-card { width: calc(100% - 2 * var(--gutter)); padding: 28px 20px 24px; border-radius: 22px; }
   .login-free .row-scroll { padding-left: var(--gutter); padding-right: var(--gutter); }

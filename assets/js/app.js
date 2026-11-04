@@ -954,7 +954,7 @@
     },
 
     // ---------- free playlists — available signed in or not ----------
-    // Built-in ones (config.js freePlaylists, e.g. MBC PLAY) and the viewer's own extra M3U
+    // Built-in ones (config.js freePlaylists, none at the moment) and the viewer's own extra M3U
     // playlists (Settings → Extra playlists). Each is a group pinned on top of Live TV.
     loadFree() {
       if (!this.free) {
@@ -2257,7 +2257,7 @@
           <div class="kv"><span>Parental PIN</span><b id="pinState">${Settings.adultPin ? 'Set' : 'Not set'}</b></div>
           ${Settings.adultPin ? '<div class="set-row vpn-actions"><button class="btn ghost" id="pinChange">Change PIN</button></div>' : ''}
         </section>
-        ${(window.Native || window.Desktop && Desktop.platform === 'win32') && CFG.vpn !== false ? `<section class="set-group" id="vpnGroup">
+        ${(window.Native || window.Desktop && /^(win32|darwin)$/.test(Desktop.platform)) && CFG.vpn !== false ? `<section class="set-group" id="vpnGroup">
           <h3>Free VPN</h3>
           <label class="set"><span>When to use it<small>Only InkonabTV's traffic goes through it — the rest of the device is untouched.</small></span>
             <select class="field" id="vpnMode"><option value="auto">Automatic — when a channel won’t play</option><option value="always">Always on</option><option value="off">Off</option></select></label>
@@ -2378,8 +2378,8 @@
   window.App = App;
   document.addEventListener('DOMContentLoaded', () => App.boot());
 
-  // Windows app: the VPN badge in the top bar, as on Android (native.js).
-  if (window.Desktop && Desktop.platform === 'win32' && CFG.vpn !== false) document.addEventListener('DOMContentLoaded', () => {
+  // Windows and Mac apps: the VPN badge in the top bar, as on Android (native.js).
+  if (window.Desktop && /^(win32|darwin)$/.test(Desktop.platform) && CFG.vpn !== false) document.addEventListener('DOMContentLoaded', () => {
     const pill = $('#vpnPill');
     if (!pill) return;
     const paint = v => {

@@ -1,8 +1,8 @@
 {
   "name": "inkonabtv-desktop",
   "productName": "InkonabTV",
-  "version": "1.0.10",
-  "description": "InkonabTV for Windows and Mac: the InkonabTV player as a desktop app (with a built-in free VPN on Windows)",
+  "version": "1.0.11",
+  "description": "InkonabTV for Windows and Mac: the InkonabTV player as a desktop app, with a built-in free VPN",
   "license": "GPL-3.0-or-later",
   "main": "main.js",
   "private": true,
@@ -76,6 +76,13 @@
       "hardenedRuntime": false,
       "extraResources": [
         {
+          "from": "vendor/openvpn/mac",
+          "to": "openvpn",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
           "from": "vendor/ffmpeg/mac",
           "to": "ffmpeg",
           "filter": [
@@ -83,7 +90,7 @@
           ]
         }
       ],
-      "x64ArchFiles": "Contents/Resources/ffmpeg/ffmpeg"
+      "x64ArchFiles": "Contents/Resources/{ffmpeg/ffmpeg,openvpn/openvpn}"
     },
     "dmg": {
       "artifactName": "inkonabtv.dmg",

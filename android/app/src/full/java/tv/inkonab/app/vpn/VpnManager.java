@@ -38,7 +38,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * The server a channel last played through is remembered (and tried first next time), and
  * the remaining servers are ordered one country at a time, so each retry tries a new country.
- * Free channels (MBC PLAY) refuse VPN addresses: pauseForDirect() drops the VPN for them and
+ * Free channels (extra M3U playlists) often refuse VPN addresses: pauseForDirect() drops the VPN for them and
  * provider channels bring it back (shouldUseForProvider()).
  *
  * Speed: each new connection downloads a short test file through the tunnel. A server slower
@@ -145,7 +145,7 @@ public final class VpnManager {
     /** Provider streams have needed the VPN on this device before. */
     public boolean needVpn() { return prefs().getBoolean("need", false); }
 
-    /** Use the VPN before playing a provider stream (not MBC PLAY). In "auto" mode only to bring
+    /** Use the VPN before playing a provider stream (not a free channel). In "auto" mode only to bring
      *  back a VPN that was dropped for a free channel: otherwise channels play directly first. */
     public boolean shouldUseForProvider() {
         String m = mode();

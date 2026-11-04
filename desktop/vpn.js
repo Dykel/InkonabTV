@@ -1,8 +1,10 @@
-// Free VPN for InkonabTV on Windows: the volunteer OpenVPN servers of the VPN Gate academic
-// project (https://www.vpngate.net), like the Android app.
+// Free VPN for InkonabTV on Windows and Mac: the volunteer OpenVPN servers of the VPN Gate
+// academic project (https://www.vpngate.net), like the Android app.
 //
-// The bundled OpenVPN client (resources/openvpn: openvpn.exe + its DLLs; the TAP-Windows driver is installed by the setup) needs
-// administrator rights to create the network adapter, so Windows asks once per connection.
+// The bundled OpenVPN client needs administrator rights to create the network adapter, so the
+// computer asks once per connection (Windows: Allow; Mac: your password).
+// Windows: resources/openvpn = openvpn.exe + its DLLs (the TAP-Windows driver is installed by the
+// setup). Mac: resources/openvpn/openvpn, Tunnelblick's signed OpenVPN 2.6 build.
 // One OpenVPN process tries the best servers in turn (one prompt, not one per server). While
 // connected it carries the computer's internet traffic; it stops when the app closes.
 const { app } = require('electron');
@@ -41,13 +43,14 @@ function changed(d) {
 }
 
 const dir = () => path.join(app.getPath('userData'), 'vpn');
+const mac = process.platform === 'darwin';
 const binDir = () => app.isPackaged
   ? path.join(process.resourcesPath, 'openvpn')
-  : path.join(__dirname, 'vendor', 'openvpn', 'win');
-const exe = () => path.join(binDir(), 'openvpn.exe');
+  : path.join(__dirname, 'vendor', 'openvpn', mac ? 'mac' : 'win');
+const exe = () => path.join(binDir(), mac ? 'openvpn' : 'openvpn.exe');
 
 function available() {
-  return process.platform === 'win32' && fs.existsSync(exe());
+  return (process.platform === 'win32' || mac) && fs.existsSync(exe());
 }
 
 const label = s => s ? [s.country, s.ip].filter(Boolean).join(' · ') : '';
@@ -114,7 +117,7 @@ function buildConfig(list) {
   const conns = list.map(s => `<connection>\nremote ${s.remote} ${s.port}\nproto ${s.proto}\nconnect-timeout 10\nserver-poll-timeout 10\n</connection>`).join('\n');
   return `${base}
 nobind
-windows-driver tap-windows6
+${mac ? '' : 'windows-driver tap-windows6'}
 redirect-gateway def1
 data-ciphers AES-128-CBC:AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
 data-ciphers-fallback AES-128-CBC
@@ -165,12 +168,21 @@ async function connect(skip = []) {
     fs.writeFileSync(conf, buildConfig(list));
     try { fs.unlinkSync(log); } catch {}
 
-    // Start OpenVPN as administrator (Windows shows its "Allow" prompt).
-    const q = s => `'${s.replace(/'/g, "''")}'`;
-    const ps = `Start-Process -FilePath ${q(exe())} -ArgumentList ${q(`--config "${conf}" --log "${log}"`)} -WorkingDirectory ${q(binDir())} -Verb RunAs -WindowStyle Hidden`;
+    // Start OpenVPN as administrator: Windows shows its "Allow" prompt, the Mac asks for the
+    // password (OpenVPN then runs in the background until the app tells it to stop).
     await new Promise((resolve, reject) => {
-      const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true });
-      p.on('exit', code => code === 0 ? resolve() : reject(new Error('Windows did not allow the VPN')));
+      let p;
+      if (mac) {
+        const sh = s => `'${s.replace(/'/g, `'\\''`)}'`;
+        const cmd = `${sh(exe())} --config ${sh(conf)} --log ${sh(log)} --cd ${sh(binDir())} --daemon`;
+        const as = s => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+        p = spawn('osascript', ['-e', `do shell script ${as(cmd)} with prompt "InkonabTV needs your permission to start the free VPN." with administrator privileges`]);
+      } else {
+        const q = s => `'${s.replace(/'/g, "''")}'`;
+        const ps = `Start-Process -FilePath ${q(exe())} -ArgumentList ${q(`--config "${conf}" --log "${log}"`)} -WorkingDirectory ${q(binDir())} -Verb RunAs -WindowStyle Hidden`;
+        p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true });
+      }
+      p.on('exit', code => code === 0 ? resolve() : reject(new Error(mac ? 'The Mac did not allow the VPN' : 'Windows did not allow the VPN')));
       p.on('error', reject);
     });
 
@@ -196,7 +208,7 @@ async function connect(skip = []) {
   } catch (e) {
     console.warn('[vpn]', e.message);
     state = 'failed';
-    changed(/allow/.test(e.message) ? 'Windows did not allow the VPN' : 'No free server answered');
+    changed(/allow/.test(e.message) ? e.message : 'No free server answered');
   }
   return status();
 }

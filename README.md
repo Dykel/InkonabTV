@@ -9,7 +9,7 @@ A web player for InkonabTV (Xtream Codes) that runs entirely in the browser and 
 - **Automatic recovery**: if a channel fails or doesn't start within 15 seconds, the player tries its other quality copies and the other stream format before showing an error.
 - **My List**: add any movie or series (☆ My List on its page) or channel (☆ in the guide, or hold OK in the player's channel list); they appear on Home and as their own category.
 - **Movies / Series**: every category with filtering and sorting, a details page (backdrop, cast, trailer from TMDB), seasons and episodes, resume where you stopped, and the next episode plays automatically.
-- **MBC PLAY** live TV and radio, free and always available — on the sign-in screen, on Home and pinned first in Live TV (add more playlists in `freePlaylists` in `config.js`).
+- **Extra M3U playlists** (Settings → Extra playlists), for example free TV channels: a group on top of Live TV and a row on Home. Built-in ones can be set in `freePlaylists` in `config.js` (none at the moment).
 - **Search** across movies, series and channels.
 - **Instant start:** the playlists (movies, series, channels, categories) are saved on the device and shown immediately at launch; they refresh themselves in the background when older than 6 hours (Settings → *Refresh now* to force it). Works offline with the last saved copy.
 - Works with a mouse, a touch screen, or a keyboard/TV remote (arrow keys, Enter, Back).
@@ -43,7 +43,7 @@ The relay only accepts your provider's host (`ALLOWED_HOSTS` in the worker), so 
 | --- | --- |
 | `server` | Xtream server, `https://inkonabtv.ottb.xyz:443` |
 | `relay` | HTTPS relay URL (see above); leave empty to disable |
-| `freePlaylists` | M3U playlists anyone can watch without signing in (MBC PLAY) |
+| `freePlaylists` | M3U playlists anyone can watch without signing in (empty: none built in) |
 | `tmdbKey` | TMDB v3 API key, used for artwork, summaries, cast and trailers |
 | `logo`, `icon` | Brand images |
 
@@ -56,7 +56,7 @@ The `android/` folder wraps the same web app in a native Android app (Capacitor)
 Differences from the website, all improvements:
 
 - Video plays in Android's native player (ExoPlayer) with FFmpeg audio. That means MKV, HEVC/H265 and Dolby AC3/EAC3/DTS audio work, and **no relay is needed** (plain-HTTP streams are allowed in the app).
-- **Free VPN (built in):** when a channel won't play even after trying its other copies and formats, the app connects an app-only VPN through free [VPN Gate](https://www.vpngate.net) servers and retries — no separate VPN app. MBC PLAY always plays directly (it refuses VPN addresses): the VPN drops for it and comes back for provider channels. A channel that won't play tries VPN servers one country at a time (up to 6) with a message showing which; the server it plays through is remembered and used first next time (Settings → Free VPN shows it, *Forget server* resets it). A green/amber badge in the top bar and in the player shows the VPN status. Settings → Free VPN: *Automatic* (default), *Always on* or *Off*, and a preferred server country. Android asks once for permission to create the VPN. Free servers are run by volunteers — use them to unblock channels, not for privacy. See `THIRD_PARTY_NOTICES.md` (OpenVPN is GPL).
+- **Free VPN (built in):** when a channel won't play even after trying its other copies and formats, the app connects an app-only VPN through free [VPN Gate](https://www.vpngate.net) servers and retries — no separate VPN app. Channels from extra M3U playlists always play directly (free channels often refuse VPN addresses): the VPN drops for them and comes back for provider channels. A channel that won't play tries VPN servers one country at a time (up to 6) with a message showing which; the server it plays through is remembered and used first next time (Settings → Free VPN shows it, *Forget server* resets it). A green/amber badge in the top bar and in the player shows the VPN status. Settings → Free VPN: *Automatic* (default), *Always on* or *Off*, and a preferred server country. Android asks once for permission to create the VPN. Free servers are run by volunteers — use them to unblock channels, not for privacy. See `THIRD_PARTY_NOTICES.md` (OpenVPN is GPL).
 - The remote works everywhere: the D-pad moves around the app, **Back** closes dialogs or goes Home, and in live TV **▲/▼** (or CH+/CH−) change channel and **◀/▶** change quality.
 
 **Two versions** are built from the same code:
@@ -64,7 +64,7 @@ Differences from the website, all improvements:
 | Version | App ID / name | What's inside | Where it goes |
 | --- | --- | --- | --- |
 | `play` | `tv.inkonab.app` · InkonabTV | Pure player like the Samsung app: sign in with your own Xtream account or M3U link (or from a phone), extra playlists, no built-in server, no VPN | Google Play (`store/google-play/Play_Listing.md`) |
-| `full` | `tv.inkonab.app.full` · InkonabTV+ | Built-in InkonabTV server, MBC PLAY and the free VPN | Installed by hand (sideload) |
+| `full` | `tv.inkonab.app.full` · InkonabTV+ | Built-in InkonabTV server and the free VPN | Installed by hand (sideload) |
 
 Both can be installed side by side. In the full version the VPN session follows the app: it ends
 when you quit (Back on Home), swipe the app away, or leave it in the background for 30 seconds
@@ -112,7 +112,7 @@ Build: `npm run tizen` → `build/tizen/` (code converted for older TV engines, 
 The free VPN is Android-only (Samsung TVs don't let apps create VPNs).
 
 **Store version (player mode).** The Samsung build is a pure player, so it can be published in
-the Samsung store: there is no built-in server and no MBC PLAY. People add their own playlist
+the Samsung store: there is no built-in server. People add their own playlist
 with an Xtream Codes account (server, username, password), an M3U link, or **Set up from phone**
 (see below). The interface follows the TV's menu language (English, French, Spanish, German,
 Italian, Portuguese). Other Samsung store requirements are also covered: the screensaver turns

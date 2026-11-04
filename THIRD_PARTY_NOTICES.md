@@ -33,3 +33,10 @@ https://www.vpngate.net) and run by volunteers.
 | --- | --- | --- |
 | OpenVPN 2 + TAP-Windows6 (official OpenVPN Inc. build) | GPL-2.0 | `resources/openvpn` |
 | FFmpeg (BtbN LGPL shared build, unmodified) | LGPL-2.1-or-later | `resources/ffmpeg` — turns Dolby sound into AAC (`desktop/media.js`); source: https://github.com/BtbN/FFmpeg-Builds |
+
+## Shipped inside the Mac app
+
+| Component | License | Where |
+| --- | --- | --- |
+| OpenVPN 2.6.23 (Tunnelblick 10.0.2 build, statically linked OpenSSL 3.5.9, unmodified) | GPL-2.0 | `Contents/Resources/openvpn` — source: https://github.com/Tunnelblick/Tunnelblick |
+| FFmpeg 8.0 (LGPL build from `scripts/build-ffmpeg-mac.sh`, unmodified source) | LGPL-2.1-or-later | `Contents/Resources/ffmpeg` — source: https://ffmpeg.org/releases/ffmpeg-8.0.tar.xz |

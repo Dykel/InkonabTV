@@ -12,10 +12,9 @@ window.INKONAB_CONFIG = {
   // (proxy/alwaysdata/index.php or proxy/worker.js) can still be set here or in Settings.
   relay: '',
 
-  // Free playlists that are always available, signed in or not (TV and radio).
-  freePlaylists: [
-    { name: 'MBC PLAY', url: 'https://raw.githubusercontent.com/Dykel/MBCPLAY/refs/heads/main/mbc.m3u' },
-  ],
+  // Free playlists that are always available, signed in or not (TV and radio), as
+  // { name, url } M3U links. None built in: people add theirs in Settings → Extra playlists.
+  freePlaylists: [],
 
   // Player mode: no built-in server or free playlists; people add their own Xtream account
   // (server, username, password) or M3U link. The Samsung TV build turns this on.

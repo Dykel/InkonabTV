@@ -374,7 +374,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     // ---------- free VPN ----------
-    // MBC PLAY (free channels) refuse VPN addresses and always play directly. Provider streams
+    // Channels from extra M3U playlists (free channels) often refuse VPN addresses and always play directly. Provider streams
     // play directly; one that won't play tries VPN servers country by country until one works
     // (the working server is remembered and tried first next time).
 
@@ -382,7 +382,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private boolean isFree(JSONObject ch) { return ch.optBoolean("free", false); }
 
-    /** Before playing: drop the VPN for MBC PLAY, or bring it up for provider streams that need it. */
+    /** Before playing: drop the VPN for a free channel, or bring it up for provider streams that need it. */
     private boolean gateVpn(long startAtMs) {
         VpnManager vpn = VpnManager.get();
         vpn.init(this);
@@ -393,7 +393,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (qualityView.getText().length() == 0) qualityView.setVisibility(View.GONE);
         if (isFree(ch)) {
             if (!vpn.busy()) return false;
-            showInfo("MBC PLAY plays without the VPN — disconnecting…");
+            showInfo("Free channels play without the VPN — disconnecting…");
             vpn.pauseForDirect();
             main.postDelayed(() -> startPlayback(startAtMs), 1200);
             return true;
@@ -454,7 +454,7 @@ public class PlayerActivity extends AppCompatActivity {
             if (isFinishing() || player == null) return;
             if (!ok) {
                 vpnWatch = false;
-                if ("Disconnected".equals(detail)) return; // we dropped it ourselves (e.g. switched to MBC PLAY)
+                if ("Disconnected".equals(detail)) return; // we dropped it ourselves (e.g. switched to a free channel)
                 VpnManager vpn = VpnManager.get();
                 if (vpn.autoStarted() && !vpn.needVpn()) vpn.disconnect();
                 showError("Can't play this " + (live ? "channel" : "file") + ", even through the free VPN (" + detail + ").");

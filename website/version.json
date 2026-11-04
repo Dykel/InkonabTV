@@ -1,7 +1,7 @@
 {
-  "versionCode": 11,
-  "versionName": "1.0.10",
-  "sha256": "5dbdd589c179edd5015432e6208ca5642f5add3b86fd3e5cd72a65eb9749834f",
-  "size": 17962884,
-  "notes": "Series: the next episode starts right after the one you watch, with a \"Next episode\" card in the last 30 s (OK plays it now)\nContinue watching keeps the right episode, even if you close while a film reopens\nFixed a crash when leaving a channel that was still connecting\n\"Try again\" when a show's episodes can't be loaded"
+  "versionCode": 12,
+  "versionName": "1.0.11",
+  "sha256": "3a1dd334bb7b521fdd98a10d117485e32cd5121b89c6832e070f45684168838d",
+  "size": 17968188,
+  "notes": "MBC PLAY is no longer built in: add it, or any free channels, in Settings → Extra playlists\nSmall fixes"
 }

@@ -138,7 +138,7 @@
             at.set(ch, flat.length);
             flat.push({
               title: ch.label || ch.name || '', img: ch.stream_icon || '', num: String(ch.num || ''), radio: !!ch.radio,
-              gkey: ch.gkey || '', fav: App.isFav('live', ch.gkey), free: !!ch.source, // free playlist (MBC PLAY): never via the VPN
+              gkey: ch.gkey || '', fav: App.isFav('live', ch.gkey), free: !!ch.source, // free / extra M3U playlist: never via the VPN
               // Guide (▼ / ◀ in the player): the stream whose guide we read, and the catch-up copy.
               epgId: String(((ch.versions && App.epgStream(ch)) || {}).stream_id || ''),
               cu: String(((ch.versions || []).find(v => Number(v.tv_archive)) || {}).stream_id || ''),
@@ -205,7 +205,7 @@
       this.item = item;
       this.freezes = [];
       this.recovers = 0;
-      // item.url: a direct link — a free playlist (MBC PLAY), or a catch-up replay (relay: true,
+      // item.url: a direct link — a free or extra M3U playlist, or a catch-up replay (relay: true,
       // it comes from the provider's plain-HTTP host like live TV). Otherwise an Xtream stream.
       let ext = item.url
         ? ((item.url.match(/\.(m3u8|ts|mp4|mkv|mp3|aac)(?:\?|$)/i) || [])[1] || 'm3u8').toLowerCase()
@@ -761,7 +761,7 @@
       const st = await Desktop.vpn.vpnStatus().catch(() => null);
       if (!st || !st.available || st.mode === 'off' || st.state === 'connected') { if (this.item === item) this.fail(detail); return; }
       this.setState('loading');
-      App.toast('Connecting the free VPN… (Windows asks for permission)');
+      App.toast(`Connecting the free VPN… (${Desktop.platform === 'darwin' ? 'your Mac asks for your password' : 'Windows asks for permission'})`);
       const r = await Desktop.vpn.vpnConnect().catch(() => null);
       if (this.item !== item) return;
       if (r && r.ok) {

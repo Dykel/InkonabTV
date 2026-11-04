@@ -18,7 +18,7 @@ TOPICS = {
                "🔀 Two versions of InkonabTV\n\n"
                "⭐ InkonabTV+ (from our site, installed by hand)\n"
                "• Android phones, Android TV, Google TV, Fire TV, Android boxes\n"
-               "• Sign in with your InkonabTV subscription, free MBC PLAY channels, "
+               "• Sign in with your InkonabTV subscription, extra M3U playlists, "
                "built-in free VPN, auto updates\n"
                "• 📱 Phone: link {apk}\n"
                "• 📺 TV: Downloader app, code {code}\n\n"
@@ -31,8 +31,8 @@ TOPICS = {
                "🔀 Deux versions d'InkonabTV\n\n"
                "⭐ InkonabTV+ (depuis notre site, installée à la main)\n"
                "• Téléphones Android, Android TV, Google TV, Fire TV, box Android\n"
-               "• Connexion avec votre abonnement InkonabTV, chaînes MBC PLAY "
-               "gratuites, VPN gratuit intégré, mises à jour auto\n"
+               "• Connexion avec votre abonnement InkonabTV, playlists M3U en plus, "
+               "VPN gratuit intégré, mises à jour auto\n"
                "• 📱 Téléphone : lien {apk}\n"
                "• 📺 Télé : appli Downloader, code {code}\n\n"
                "▶️ InkonabTV (boutiques)\n"
@@ -148,7 +148,7 @@ TOPICS = {
     },
     "plus_setup": {
         "kw": ["first setup", "configure", "configuration", "how to use", "sign in plus",
-               "subscription login", "premier réglage", "configurer", "mbc", "mbc play",
+               "subscription login", "premier réglage", "configurer",
                "after install", "apres installation", "après installation",
                "set up inkonabtv+", "configurer inkonabtv+"],
         "en": ("⚙️ First setup of InkonabTV+",
@@ -164,8 +164,7 @@ TOPICS = {
                "4️⃣ Wait a few seconds while the channels, films and series load. "
                "Next time the app opens instantly.\n"
                "5️⃣ Enjoy: Home, Live TV with the TV guide, Movies, Series, Search.\n\n"
-               "🎁 No subscription? MBC PLAY live TV and radio are free on the "
-               "sign-in screen and at the top of Live TV.\n"
+               "➕ Free channels of your own: Settings → Extra playlists → add an M3U link.\n"
                "🛡 If a channel won't play, the built-in free VPN connects by itself "
                "and retries. Nothing to set up.\n"
                "➕ Your own M3U links: Settings → Extra playlists."),
@@ -184,8 +183,7 @@ TOPICS = {
                "l'appli s'ouvre tout de suite.\n"
                "5️⃣ Profitez : Accueil, Direct avec le guide TV, Films, Séries, "
                "Recherche.\n\n"
-               "🎁 Pas d'abonnement ? Les chaînes et radios MBC PLAY sont gratuites "
-               "sur l'écran de connexion et en haut du Direct.\n"
+               "➕ Vos propres chaînes gratuites : Réglages → Playlists supplémentaires → ajoutez un lien M3U.\n"
                "🛡 Si une chaîne ne se lance pas, le VPN gratuit intégré se connecte "
                "tout seul et réessaie. Rien à régler.\n"
                "➕ Vos propres liens M3U : Réglages → Playlists supplémentaires."),
@@ -586,8 +584,8 @@ TOPICS = {
         "en": ("📡 Channels & subscriptions",
                "📡 Channels and subscriptions\n\n"
                "InkonabTV is a player: you watch the playlist you already have.\n"
-               "• InkonabTV+: sign in with your InkonabTV subscription, or watch the "
-               "free MBC PLAY channels with no account.\n"
+               "• InkonabTV+: sign in with your InkonabTV subscription, and add extra "
+               "M3U playlists in Settings.\n"
                "• Store versions (Google Play, Samsung): add your own Xtream Codes or "
                "M3U playlist from your provider.\n\n"
                "Want to try the app first? Ask us for a demo playlist (free open "
@@ -595,8 +593,8 @@ TOPICS = {
         "fr": ("📡 Chaînes & abonnements",
                "📡 Chaînes et abonnements\n\n"
                "InkonabTV est un lecteur : vous regardez la playlist que vous avez déjà.\n"
-               "• InkonabTV+ : connectez-vous avec votre abonnement InkonabTV, ou "
-               "regardez les chaînes MBC PLAY gratuites sans compte.\n"
+               "• InkonabTV+ : connectez-vous avec votre abonnement InkonabTV, et ajoutez "
+               "des playlists M3U en plus dans les Réglages.\n"
                "• Versions boutique (Google Play, Samsung) : ajoutez votre propre "
                "playlist Xtream Codes ou M3U de votre fournisseur.\n\n"
                "Envie d'essayer d'abord ? Demandez-nous une playlist de démo (films "
