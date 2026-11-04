@@ -758,14 +758,14 @@
     },
 
     async tryVpn(item, detail) {
-      const st = await Desktop.vpn.status().catch(() => null);
-      if (!st || !st.available || st.state === 'connected') { if (this.item === item) this.fail(detail); return; }
+      const st = await Desktop.vpn.vpnStatus().catch(() => null);
+      if (!st || !st.available || st.mode === 'off' || st.state === 'connected') { if (this.item === item) this.fail(detail); return; }
       this.setState('loading');
       App.toast('Connecting the free VPN… (Windows asks for permission)');
-      const r = await Desktop.vpn.connect().catch(() => null);
+      const r = await Desktop.vpn.vpnConnect().catch(() => null);
       if (this.item !== item) return;
-      if (r && r.state === 'connected') {
-        App.toast(`VPN on${r.server && r.server.country ? ' · ' + r.server.country : ''}`);
+      if (r && r.ok) {
+        App.toast(`VPN on${r.server ? ' · ' + r.server : ''}`);
         this.play({ ...item, tried: null });
       } else {
         App.toast('The VPN could not connect');

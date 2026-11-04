@@ -3,10 +3,18 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('Desktop', {
   platform: process.platform,
+  // Same calls as the Android app's VPN (Native.player), so app.js uses one flow for both.
   vpn: {
-    status: () => ipcRenderer.invoke('vpn:status'),
-    connect: hosts => ipcRenderer.invoke('vpn:connect', hosts),
-    disconnect: () => ipcRenderer.invoke('vpn:disconnect'),
+    vpnStatus: () => ipcRenderer.invoke('vpn:status'),
+    vpnConnect: () => ipcRenderer.invoke('vpn:connect'),
+    vpnDisconnect: () => ipcRenderer.invoke('vpn:disconnect'),
+    vpnSwitch: () => ipcRenderer.invoke('vpn:switch'),
+    vpnSettings: o => ipcRenderer.invoke('vpn:settings', o),
+    addListener: (name, fn) => {
+      const h = (_e, v) => fn(v);
+      if (name === 'vpn') ipcRenderer.on('vpn:event', h);
+      return Promise.resolve({ remove: () => ipcRenderer.removeListener('vpn:event', h) });
+    },
   },
   media: {
     base: () => ipcRenderer.invoke('media:base'),

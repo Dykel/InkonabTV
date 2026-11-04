@@ -16,7 +16,29 @@ const MAX_SERVERS = 8;
 
 let state = 'off'; // off | connecting | connected | failed
 let current = null; // { country, ip }
+let detail = '';
 let mgmtPort = 0;
+let onChange = () => {};
+
+// Settings → Free VPN (as on Android): mode auto | always | off, preferred country, and the
+// last server that worked (tried first next time).
+let prefs = null;
+const prefsFile = () => path.join(dir(), 'settings.json');
+function settings() {
+  if (!prefs) {
+    try { prefs = JSON.parse(fs.readFileSync(prefsFile(), 'utf8')); } catch { prefs = {}; }
+    prefs = { mode: 'auto', country: '', remembered: null, ...prefs };
+  }
+  return prefs;
+}
+function save() {
+  fs.mkdirSync(dir(), { recursive: true });
+  fs.writeFileSync(prefsFile(), JSON.stringify(prefs));
+}
+function changed(d) {
+  if (d !== undefined) detail = d;
+  onChange(status());
+}
 
 const dir = () => path.join(app.getPath('userData'), 'vpn');
 const binDir = () => app.isPackaged
@@ -28,8 +50,26 @@ function available() {
   return process.platform === 'win32' && fs.existsSync(exe());
 }
 
+const label = s => s ? [s.country, s.ip].filter(Boolean).join(' · ') : '';
+
+// Same shape as the Android app's VPN status, so app.js shows it the same way.
 function status() {
-  return { available: available(), state, server: current };
+  const p = settings();
+  return {
+    available: available(), state: state === 'off' ? 'disconnected' : state, ok: state === 'connected',
+    server: label(current), country: p.country, mode: p.mode, remembered: label(p.remembered),
+    detail: state === 'connecting' || state === 'failed' ? detail : '',
+  };
+}
+
+function setSettings(o = {}) {
+  const p = settings();
+  if (o.mode && /^(auto|always|off)$/.test(o.mode)) p.mode = o.mode;
+  if (typeof o.country === 'string') p.country = o.country.toUpperCase().slice(0, 2);
+  if (o.forget) p.remembered = null;
+  save();
+  changed();
+  return status();
 }
 
 // VPN Gate's list: CSV after a "*vpn_servers" line, last column = base64 OpenVPN config.
@@ -104,12 +144,19 @@ function freePort() {
   });
 }
 
-async function connect() {
+// skip: server addresses not to use (vpnSwitch: the one that didn't reach the provider).
+async function connect(skip = []) {
   if (!available()) return status();
   if (state === 'connected' || state === 'connecting') return status();
   state = 'connecting';
+  changed('Looking for the fastest route…');
   try {
-    const list = (await servers()).slice(0, MAX_SERVERS);
+    const p = settings();
+    let all = (await servers()).filter(s => !skip.includes(s.remote));
+    const inCountry = p.country ? all.filter(s => s.code === p.country) : [];
+    if (inCountry.length) all = inCountry;
+    const known = p.remembered && all.find(s => s.ip === p.remembered.ip);
+    const list = (known ? [known, ...all.filter(s => s !== known)] : all).slice(0, MAX_SERVERS);
     if (!list.length) throw new Error('no servers');
     mgmtPort = await freePort();
     fs.mkdirSync(dir(), { recursive: true });
@@ -135,27 +182,44 @@ async function connect() {
       if (/Initialization Sequence Completed/.test(text)) {
         const peer = [...text.matchAll(/(?:TCP|UDP)[^\n]*\[AF_INET\]([\d.]+):\d+/g)].pop();
         const s = peer && list.find(x => x.remote === peer[1]);
-        current = s ? { country: s.country, ip: s.ip } : { country: '', ip: peer ? peer[1] : '' };
+        current = s ? { country: s.country, ip: s.ip, remote: s.remote } : { country: '', ip: peer ? peer[1] : '', remote: peer ? peer[1] : '' };
         state = 'connected';
+        if (s) { p.remembered = { country: s.country, ip: s.ip }; save(); }
+        changed('');
         return status();
       }
       if (/Exiting due to fatal error|SIGTERM\[soft,connection-retry\]|All connections have been connect-retry-max/.test(text)) break;
     }
-    await disconnect();
+    await stop();
     state = 'failed';
+    changed('No free server answered');
   } catch (e) {
     console.warn('[vpn]', e.message);
     state = 'failed';
+    changed(/allow/.test(e.message) ? 'Windows did not allow the VPN' : 'No free server answered');
   }
   return status();
 }
 
-async function disconnect() {
+async function stop() {
   if (mgmtPort) await mgmt('signal SIGTERM');
   mgmtPort = 0;
   current = null;
-  if (state !== 'failed') state = 'off';
+}
+
+async function disconnect() {
+  await stop();
+  state = 'off';
+  changed('');
   return status();
 }
 
-module.exports = { status, connect, disconnect };
+// The connected server doesn't reach the provider: move to another one.
+async function switchServer() {
+  const skip = current && current.remote ? [current.remote] : [];
+  await disconnect();
+  await new Promise(r => setTimeout(r, 1000));
+  return connect(skip);
+}
+
+module.exports = { status, connect, disconnect, switchServer, settings: setSettings, onChange: fn => { onChange = fn; } };

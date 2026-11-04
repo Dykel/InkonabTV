@@ -203,8 +203,11 @@
     // and say whether it worked. The app's own traffic goes through it, sign-in included.
     // The "optimising your internet" screen stays up until loginThroughVpn has finished
     // (`quiet`: no screen, for the background playlist update).
+    // The free VPN: Android app (Native.player) or Windows app (desktop/vpn.js), same calls.
+    vpnApi() { return window.Native ? Native.player : window.Desktop && Desktop.vpn; },
+
     async vpnRescue(quiet) {
-      const P = window.Native && Native.player;
+      const P = this.vpnApi();
       if (!P || CFG.vpn === false) return false;
       const v = await P.vpnStatus().catch(() => null);
       if (!v || !v.available || v.mode === 'off' || v.state === 'connected') return false;
@@ -218,7 +221,7 @@
     // server answers, so each server gets 3 tries; a server that never reaches the provider is
     // swapped for the next one (3 servers at most).
     async loginThroughVpn(api) {
-      const P = Native.player;
+      const P = this.vpnApi();
       const wait = ms => new Promise(r => setTimeout(r, ms));
       this.vpnWait(true);
       try {
@@ -257,7 +260,7 @@
         const s = $('#vpnWaitStep');
         if (s && s.textContent !== t) s.textContent = t;
       };
-      const h = Native.player.addListener('vpn', step);
+      const h = this.vpnApi().addListener('vpn', step);
       this.vpnWaitOff = () => Promise.resolve(h).then(x => x && x.remove && x.remove());
     },
 
@@ -2196,9 +2199,9 @@
       $('#updNow', m).focus();
     },
 
-    // ---------- free VPN (Android app) ----------
+    // ---------- free VPN (Android and Windows apps) ----------
     bindVpnSettings(m) {
-      const P = Native.player;
+      const P = this.vpnApi();
       const paint = v => {
         const el = $('#vpnState', m);
         if (!el) return;
@@ -2256,7 +2259,7 @@
           <div class="kv"><span>Parental PIN</span><b id="pinState">${Settings.adultPin ? 'Set' : 'Not set'}</b></div>
           ${Settings.adultPin ? '<div class="set-row vpn-actions"><button class="btn ghost" id="pinChange">Change PIN</button></div>' : ''}
         </section>
-        ${window.Native && CFG.vpn !== false ? `<section class="set-group" id="vpnGroup">
+        ${(window.Native || window.Desktop && Desktop.platform === 'win32') && CFG.vpn !== false ? `<section class="set-group" id="vpnGroup">
           <h3>Free VPN</h3>
           <label class="set"><span>When to use it<small>Only InkonabTV's traffic goes through it — the rest of the device is untouched.</small></span>
             <select class="field" id="vpnMode"><option value="auto">Automatic — when a channel won’t play</option><option value="always">Always on</option><option value="off">Off</option></select></label>
@@ -2363,7 +2366,7 @@
         if (JSON.stringify(codes) !== before) await this.applyLangs(codes);
       });
       this.bindExtraPlaylists(m);
-      if (window.Native && $('#vpnGroup', m)) this.bindVpnSettings(m);
+      if ($('#vpnGroup', m)) this.bindVpnSettings(m);
       if ($('#updGroup', m)) this.updater().appVersion().then(v => {
         if (!v.updater) return;
         $('#updGroup', m).hidden = false;
@@ -2376,4 +2379,21 @@
 
   window.App = App;
   document.addEventListener('DOMContentLoaded', () => App.boot());
+
+  // Windows app: the VPN badge in the top bar, as on Android (native.js).
+  if (window.Desktop && Desktop.platform === 'win32' && CFG.vpn !== false) document.addEventListener('DOMContentLoaded', () => {
+    const pill = $('#vpnPill');
+    if (!pill) return;
+    const paint = v => {
+      if (!v || !v.available) return pill.classList.add('hidden');
+      const country = (v.server || '').split(' · ')[0];
+      pill.className = 'vpn-pill ' + v.state;
+      pill.innerHTML = v.state === 'connected' ? `<i></i>VPN · ${esc(country)}` : v.state === 'connecting' ? '<i></i>VPN connecting…' : '<i></i>VPN off';
+      pill.title = v.state === 'connected' ? 'Connected to ' + v.server : v.detail || '';
+      if (v.mode === 'off' && v.state !== 'connected') pill.classList.add('hidden');
+    };
+    Desktop.vpn.vpnStatus().then(paint).catch(() => {});
+    Desktop.vpn.addListener('vpn', paint);
+    pill.addEventListener('click', () => App.openSettings());
+  });
 })();

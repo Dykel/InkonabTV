@@ -50,13 +50,21 @@ function createWindow() {
 }
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
-app.whenReady().then(() => { media.startServer(); createWindow(); });
+app.whenReady().then(() => {
+  media.startServer();
+  createWindow();
+  // Free VPN set to "Always on": connect as the app opens (Windows asks to allow it).
+  if (vpn.status().available && vpn.status().mode === 'always') vpn.connect();
+});
 app.on('window-all-closed', async () => { await vpn.disconnect().catch(() => {}); app.quit(); });
 
 // VPN, asked for by the page (preload.js).
 ipcMain.handle('vpn:status', () => vpn.status());
-ipcMain.handle('vpn:connect', (_e, hosts) => vpn.connect(hosts));
+ipcMain.handle('vpn:connect', () => vpn.connect());
 ipcMain.handle('vpn:disconnect', () => vpn.disconnect());
+ipcMain.handle('vpn:switch', () => vpn.switchServer());
+ipcMain.handle('vpn:settings', (_e, o) => vpn.settings(o));
+vpn.onChange(s => { if (win && !win.isDestroyed()) win.webContents.send('vpn:event', s); });
 
 // Sound converter for Dolby films (media.js).
 ipcMain.handle('media:base', () => media.base());
