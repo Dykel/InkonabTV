@@ -160,3 +160,12 @@ Then open <http://localhost:8080>.
 - Movies saved as `.mkv` play in Chrome/Edge when they use common formats (H.264/H.265 with AAC). If a file won't play, use **Copy link for VLC** in the player.
 - Your watch progress is stored only in this browser.
 - The TMDB key is visible to anyone who opens the site. That's normal for TMDB read-only keys, and you can create a new one at any time at themoviedb.org.
+
+## License
+
+InkonabTV is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of
+the License, or (at your option) any later version. See [LICENSE](LICENSE).
+
+Copyright (C) 2026 InkonabTV. Third-party components keep their own licences (see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)); the Windows app bundles OpenVPN (GPL-2.0).

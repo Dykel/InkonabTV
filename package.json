@@ -2,7 +2,8 @@
   "name": "inkonabtv",
   "version": "1.0.10",
   "private": true,
-  "description": "InkonabTV player — web (GitHub Pages) and Android phone/TV app from one codebase",
+  "description": "InkonabTV player \u2014 web (GitHub Pages) and Android phone/TV app from one codebase",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "build:web": "node scripts/build-web.mjs",
     "sync": "npm run build:web && npx cap sync android",

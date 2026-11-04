@@ -3,6 +3,7 @@
   "productName": "InkonabTV",
   "version": "1.0.10",
   "description": "InkonabTV for Windows: the InkonabTV player as a desktop app, with a built-in free VPN",
+  "license": "GPL-3.0-or-later",
   "main": "main.js",
   "private": true,
   "scripts": {
