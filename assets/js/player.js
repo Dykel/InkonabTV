@@ -716,6 +716,12 @@
       if (!this.item) return;
       const mixed = (!this.item.url || this.item.relay) && webPage() && !helperOn && !Settings.relay;
       if (!mixed && this.retry()) { if (detail) console.warn('[player] retrying after', detail); return; }
+      // Windows app: connect the free VPN once and try again, like the Android app.
+      if (window.Desktop && !this.item.vpnTried && (!this.item.url || this.item.relay)) {
+        this.item.vpnTried = true;
+        this.tryVpn(this.item, detail);
+        return;
+      }
       const msg = !mixed
         ? 'The stream could not be played. It may be offline, or use a format your browser can’t decode (try the other live format in Settings, or open it in VLC).'
         : appleTouch
@@ -729,6 +735,22 @@
       this.el.querySelector('[data-act="settings"]').classList.add('hidden');
       this.setState('error');
       if (detail) console.warn('[player]', detail);
+    },
+
+    async tryVpn(item, detail) {
+      const st = await Desktop.vpn.status().catch(() => null);
+      if (!st || !st.available || st.state === 'connected') { if (this.item === item) this.fail(detail); return; }
+      this.setState('loading');
+      App.toast('Connecting the free VPN… (Windows asks for permission)');
+      const r = await Desktop.vpn.connect().catch(() => null);
+      if (this.item !== item) return;
+      if (r && r.state === 'connected') {
+        App.toast(`VPN on${r.server && r.server.country ? ' · ' + r.server.country : ''}`);
+        this.play({ ...item, tried: null });
+      } else {
+        App.toast('The VPN could not connect');
+        this.fail(detail);
+      }
     },
 
     setState(s) {

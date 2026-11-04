@@ -1,0 +1,54 @@
+{
+  "name": "inkonabtv-desktop",
+  "productName": "InkonabTV",
+  "version": "1.0.10",
+  "description": "InkonabTV for Windows: the InkonabTV player as a desktop app, with a built-in free VPN",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "copy-web": "node copy-web.mjs",
+    "start": "npm run copy-web && electron .",
+    "dist:win": "npm run copy-web && electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "tv.inkonab.desktop",
+    "productName": "InkonabTV",
+    "files": [
+      "main.js",
+      "preload.js",
+      "vpn.js",
+      "www/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/openvpn/win",
+        "to": "openvpn",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "../release/windows"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "InkonabTV",
+      "include": "build/installer.nsh"
+    }
+  },
+  "devDependencies": {
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0"
+  }
+}
