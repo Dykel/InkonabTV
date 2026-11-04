@@ -45,10 +45,13 @@
       "createDesktopShortcut": true,
       "shortcutName": "InkonabTV",
       "include": "build/installer.nsh"
-    }
+    },
+    "afterPack": "build/afterPack.js"
   },
   "devDependencies": {
     "electron": "45.2.1",
-    "electron-builder": "26.18.0"
+    "electron-builder": "26.18.0",
+    "png-to-ico": "^3.0.2",
+    "resedit": "^3.1.0"
   }
 }
