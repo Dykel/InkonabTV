@@ -2181,10 +2181,8 @@
         h && h.remove && h.remove();
         this.updating = false;
         if (r.ok) {
-          status.textContent = window.Desktop
-            ? 'Downloaded. InkonabTV closes, installs the update and opens again (Windows asks you to allow it) — your sign-in and playlist are kept.'
-            : 'Downloaded. Choose Install on the next screen — your sign-in and playlist are kept.';
-          actions.innerHTML = `<button class="btn primary" id="updInstall">${window.Desktop ? 'Install and restart' : 'Install'}</button>`;
+          status.textContent = me.installNote || 'Downloaded. Choose Install on the next screen — your sign-in and playlist are kept.';
+          actions.innerHTML = `<button class="btn primary" id="updInstall">${esc(me.installLabel || 'Install')}</button>`;
           $('#updInstall', m).addEventListener('click', () => P.updateInstall());
           $('#updInstall', m).focus();
         } else {

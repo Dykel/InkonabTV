@@ -12,13 +12,14 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 
+// Bundled with the app (resources/ffmpeg); from vendor/ffmpeg/<win|mac> when run from source.
 const ffmpegPath = () => {
-  if (process.platform === 'win32') {
-    return app.isPackaged
-      ? path.join(process.resourcesPath, 'ffmpeg', 'ffmpeg.exe')
-      : path.join(__dirname, 'vendor', 'ffmpeg', 'win', 'ffmpeg.exe');
-  }
-  return ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg'].find(p => fs.existsSync(p)) || 'ffmpeg';
+  const name = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+  const own = app.isPackaged
+    ? path.join(process.resourcesPath, 'ffmpeg', name)
+    : path.join(__dirname, 'vendor', 'ffmpeg', process.platform === 'win32' ? 'win' : 'mac', name);
+  if (fs.existsSync(own)) return own;
+  return ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find(p => fs.existsSync(p)) || name;
 };
 
 let port = 0;

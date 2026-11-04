@@ -124,6 +124,9 @@ section{padding:76px 0}
 .card ol li:before{content:counter(s);flex:none;width:26px;height:26px;border-radius:50%;background:rgba(252,195,11,.14);color:var(--y);font:700 14px Saira;display:grid;place-items:center;margin-top:1px}
 .card .bigcode{font:800 46px Saira;letter-spacing:.08em;color:var(--y);text-align:center;padding:14px;border-radius:16px;background:rgba(0,0,0,.25);border:1px dashed rgba(252,195,11,.4);margin:2px 0 18px}
 .card .btn{margin-top:auto;justify-content:center}
+.card .two{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:auto}
+.card .two .btn{margin-top:0;padding:14px 12px}
+.card .small-link{margin-top:12px;text-align:center;color:var(--mut);font-size:14px;text-decoration:underline}
 .ver{display:flex;flex-wrap:wrap;gap:8px 18px;justify-content:center;margin-top:28px;color:var(--mut);font-size:14px}
 .ver b{color:var(--fg)}
 .stores{display:grid;gap:16px;margin-top:16px}
@@ -223,9 +226,10 @@ footer a:hover{color:var(--fg)}
     <span class="chip ok">Fire TV · Fire Stick</span>
     <span class="chip ok"><span lang="en">Android TV boxes</span><span lang="fr">Box Android TV</span></span>
     <span class="chip ok"><span lang="en">Windows PC</span><span lang="fr">PC Windows</span></span>
+    <span class="chip ok">Mac</span>
     <span class="chip soon">Samsung TV <em><span lang="en">Soon</span><span lang="fr">Bientôt</span></em></span>
     <span class="chip soon">Google Play <em><span lang="en">Soon</span><span lang="fr">Bientôt</span></em></span>
-    <span class="chip soon">iPhone · iPad · Mac <em><span lang="en">Soon</span><span lang="fr">Bientôt</span></em></span>
+    <span class="chip soon">iPhone · iPad <em><span lang="en">Soon</span><span lang="fr">Bientôt</span></em></span>
   </div>
 </div>
 
@@ -310,20 +314,24 @@ footer a:hover{color:var(--fg)}
         <a class="btn btn-g" href="#g-fire"><span lang="en">Full guide</span><span lang="fr">Guide complet</span></a>
       </div>
       <div class="card reveal">
-        <div class="top"><span>💻</span><div><h3><span lang="en">Windows PC</span><span lang="fr">PC Windows</span></h3><small><span lang="en">Windows 10 and 11 · 64-bit</span><span lang="fr">Windows 10 et 11 · 64 bits</span></small></div></div>
+        <div class="top"><span>💻</span><div><h3><span lang="en">Computer</span><span lang="fr">Ordinateur</span></h3><small><span lang="en">Windows 10/11 · Mac (macOS 12 or newer)</span><span lang="fr">Windows 10/11 · Mac (macOS 12 ou plus récent)</span></small></div></div>
         <ol>
-          <li><span lang="en">Download <b>inkonabtv.exe</b> (about 170 MB).</span><span lang="fr">Téléchargez <b>inkonabtv.exe</b> (environ 170 Mo).</span></li>
-          <li><span lang="en">Open it. If Windows warns you: <b>More info → Run anyway</b>.</span><span lang="fr">Ouvrez-le. Si Windows avertit : <b>Informations complémentaires → Exécuter quand même</b>.</span></li>
-          <li><span lang="en">Install, then open InkonabTV from the desktop.</span><span lang="fr">Installez, puis ouvrez InkonabTV depuis le bureau.</span></li>
+          <li><span lang="en">Download the app for your computer.</span><span lang="fr">Téléchargez l'appli pour votre ordinateur.</span></li>
+          <li><span lang="en">Windows: open <b>inkonabtv.exe</b> and install. Mac: open <b>inkonabtv.dmg</b> and drag InkonabTV to Applications.</span><span lang="fr">Windows : ouvrez <b>inkonabtv.exe</b> et installez. Mac : ouvrez <b>inkonabtv.dmg</b> et glissez InkonabTV dans Applications.</span></li>
+          <li><span lang="en">Warning on first open? See the full guide.</span><span lang="fr">Un avertissement à la première ouverture ? Voir le guide complet.</span></li>
         </ol>
-        <a class="btn btn-y" href="https://github.com/Dykel/InkonabTV/releases/download/windows-v1.0.10/inkonabtv.exe"><span lang="en">Download for Windows</span><span lang="fr">Télécharger pour Windows</span></a>
+        <div class="two">
+          <a class="btn btn-y" href="https://github.com/Dykel/InkonabTV/releases/download/windows-v1.0.10/inkonabtv.exe"><span lang="en">Windows</span><span lang="fr">Windows</span></a>
+          <a class="btn btn-y" href="https://github.com/Dykel/InkonabTV/releases/download/mac-v1.0.10/inkonabtv.dmg">Mac</a>
+        </div>
+        <a class="small-link" href="#g-windows"><span lang="en">Full guide</span><span lang="fr">Guide complet</span></a>
       </div>
     </div>
-    <div class="ver"><span><span lang="en">Latest version</span><span lang="fr">Dernière version</span>: <b class="vname">1.0.10</b></span><span class="vsize"></span><span><span lang="en">Android 7 or newer · Windows 10/11</span><span lang="fr">Android 7 ou plus récent · Windows 10/11</span></span><span><span lang="en">Already installed? It updates itself.</span><span lang="fr">Déjà installée ? Elle se met à jour toute seule.</span></span></div>
+    <div class="ver"><span><span lang="en">Latest version</span><span lang="fr">Dernière version</span>: <b class="vname">1.0.10</b></span><span class="vsize"></span><span><span lang="en">Android 7 or newer · Windows 10/11 · macOS 12+</span><span lang="fr">Android 7 ou plus récent · Windows 10/11 · macOS 12+</span></span><span><span lang="en">Already installed? It updates itself.</span><span lang="fr">Déjà installée ? Elle se met à jour toute seule.</span></span></div>
     <div class="stores">
       <div class="store reveal"><span>▶️</span><div><b>Google Play</b><small><span lang="en">Coming soon · player for your own playlist</span><span lang="fr">Bientôt · lecteur pour votre propre playlist</span></small></div></div>
       <div class="store reveal"><span>📺</span><div><b>Samsung TV</b><small><span lang="en">Coming soon · 2018 and newer</span><span lang="fr">Bientôt · modèles 2018 et plus</span></small></div></div>
-      <div class="store reveal"><span>🍏</span><div><b>iPhone · iPad · Mac</b><small><span lang="en">Coming soon to the App Store</span><span lang="fr">Bientôt sur l'App Store</span></small></div></div>
+      <div class="store reveal"><span>🍏</span><div><b>iPhone · iPad</b><small><span lang="en">Coming soon to the App Store</span><span lang="fr">Bientôt sur l'App Store</span></small></div></div>
     </div>
   </div>
 </section>
@@ -351,6 +359,10 @@ footer a:hover{color:var(--fg)}
         <details id="g-windows"><summary><span class="e">💻</span><span lang="en">Windows PC</span><span lang="fr">PC Windows</span></summary><div class="body">
           <ol lang="en"><li>On your computer, go to <b>inkonabtv.alwaysdata.net</b> and click <b>Download for Windows</b>.</li><li>Open <code>inkonabtv.exe</code> from your Downloads.</li><li>If Windows says “Windows protected your PC”, click <b>More info</b>, then <b>Run anyway</b>.</li><li>Choose where to install, click <b>Install</b>, then <b>Finish</b>.</li><li>Open <b>InkonabTV</b> from the desktop or the Start menu and sign in. F11 switches to full screen.</li><li>The app updates itself when a new version is out.</li></ol>
           <ol lang="fr"><li>Sur votre ordinateur, allez sur <b>inkonabtv.alwaysdata.net</b> et cliquez sur <b>Télécharger pour Windows</b>.</li><li>Ouvrez <code>inkonabtv.exe</code> dans vos Téléchargements.</li><li>Si Windows affiche « Windows a protégé votre ordinateur », cliquez sur <b>Informations complémentaires</b>, puis <b>Exécuter quand même</b>.</li><li>Choisissez l'emplacement, cliquez sur <b>Installer</b>, puis <b>Terminer</b>.</li><li>Ouvrez <b>InkonabTV</b> depuis le bureau ou le menu Démarrer et connectez-vous. F11 passe en plein écran.</li><li>L'appli se met à jour toute seule quand une nouvelle version sort.</li></ol>
+        </div></details>
+        <details id="g-mac"><summary><span class="e">🍏</span>Mac</summary><div class="body">
+          <ol lang="en"><li>On your Mac, go to <b>inkonabtv.alwaysdata.net</b> and click <b>Download → Mac</b>.</li><li>Open <code>inkonabtv.dmg</code> from your Downloads and drag <b>InkonabTV</b> into <b>Applications</b>.</li><li>Open InkonabTV from Applications. If macOS says it can't check the app: click <b>Done</b>, open <b>System Settings → Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b> next to InkonabTV (on macOS 14 and older: right-click the app → <b>Open</b>).</li><li>Sign in. Ctrl+Cmd+F switches to full screen.</li><li>When a new version is out, the app tells you and opens the new installer.</li></ol>
+          <ol lang="fr"><li>Sur votre Mac, allez sur <b>inkonabtv.alwaysdata.net</b> et cliquez sur <b>Télécharger → Mac</b>.</li><li>Ouvrez <code>inkonabtv.dmg</code> dans vos Téléchargements et glissez <b>InkonabTV</b> dans <b>Applications</b>.</li><li>Ouvrez InkonabTV depuis Applications. Si macOS dit qu'il ne peut pas vérifier l'appli : cliquez sur <b>OK</b>, ouvrez <b>Réglages Système → Confidentialité et sécurité</b>, descendez et cliquez sur <b>Ouvrir quand même</b> à côté d'InkonabTV (macOS 14 et avant : clic droit sur l'appli → <b>Ouvrir</b>).</li><li>Connectez-vous. Ctrl+Cmd+F passe en plein écran.</li><li>Quand une nouvelle version sort, l'appli vous prévient et ouvre le nouvel installateur.</li></ol>
         </div></details>
         <details id="g-setup"><summary><span class="e">⚙️</span><span lang="en">First setup: sign in</span><span lang="fr">Premier réglage : connexion</span></summary><div class="body">
           <ol lang="en"><li>Open InkonabTV+. The sign-in screen appears.</li><li><b>Xtream Codes</b> tab: type your username and password, then <b>Sign in</b>.</li><li>Or <b>Set up from phone</b> (easiest on a TV): scan the QR code, type your details on the phone, press <b>Send to TV</b>.</li><li>Choose your playlist languages if asked. Wait a few seconds for the first load.</li><li>Enjoy Home, Live TV, Movies, Series and Search. Next time it opens instantly.</li></ol>

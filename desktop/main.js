@@ -1,4 +1,4 @@
-// InkonabTV for Windows: the web player in a desktop window.
+// InkonabTV for Windows and Mac: the web player in a desktop window.
 //
 // A desktop app may play the provider's plain-HTTP video directly (no relay, no helper):
 // web security is off for this window only, and it only ever loads the bundled player.
@@ -32,7 +32,12 @@ function createWindow() {
       sandbox: false,
     },
   });
-  Menu.setApplicationMenu(null);
+  // Windows: no menu bar. Mac: the usual app menu (copy and paste in the sign-in fields, Cmd+Q).
+  Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([
+    { role: 'appMenu' }, { role: 'editMenu' },
+    { label: 'View', submenu: [{ role: 'togglefullscreen' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
+    { role: 'windowMenu' },
+  ]) : null);
   win.loadFile(path.join(__dirname, 'www', 'index.html'));
 
   // Links to other sites open in the normal browser, never inside the app.

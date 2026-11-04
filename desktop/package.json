@@ -2,7 +2,7 @@
   "name": "inkonabtv-desktop",
   "productName": "InkonabTV",
   "version": "1.0.10",
-  "description": "InkonabTV for Windows: the InkonabTV player as a desktop app, with a built-in free VPN",
+  "description": "InkonabTV for Windows and Mac: the InkonabTV player as a desktop app (with a built-in free VPN on Windows)",
   "license": "GPL-3.0-or-later",
   "main": "main.js",
   "private": true,
@@ -10,7 +10,9 @@
     "copy-web": "node copy-web.mjs",
     "start": "npm run copy-web && electron .",
     "dist:win": "npm run copy-web && electron-builder --win --x64",
-    "release:windows": "npm run dist:win && node ../scripts/release-windows.mjs"
+    "release:windows": "npm run dist:win && node ../scripts/release-desktop.mjs win",
+    "dist:mac": "npm run copy-web && electron-builder --mac --universal --config.directories.output=../release/mac",
+    "release:mac": "npm run dist:mac && node ../scripts/release-desktop.mjs mac"
   },
   "build": {
     "appId": "tv.inkonab.desktop",
@@ -23,22 +25,6 @@
       "updater.js",
       "www/**/*"
     ],
-    "extraResources": [
-      {
-        "from": "vendor/openvpn/win",
-        "to": "openvpn",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "vendor/ffmpeg/win",
-        "to": "ffmpeg",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
     "directories": {
       "output": "../release/windows"
     },
@@ -47,7 +33,23 @@
         "nsis"
       ],
       "icon": "build/icon.png",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "extraResources": [
+        {
+          "from": "vendor/openvpn/win",
+          "to": "openvpn",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "vendor/ffmpeg/win",
+          "to": "ffmpeg",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -58,7 +60,35 @@
       "include": "build/installer.nsh",
       "artifactName": "inkonabtv.exe"
     },
-    "afterPack": "build/afterPack.js"
+    "afterPack": "build/afterPack.js",
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.entertainment",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extraResources": [
+        {
+          "from": "vendor/ffmpeg/mac",
+          "to": "ffmpeg",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ],
+      "x64ArchFiles": "Contents/Resources/ffmpeg/ffmpeg"
+    },
+    "dmg": {
+      "artifactName": "inkonabtv.dmg",
+      "title": "InkonabTV"
+    }
   },
   "devDependencies": {
     "electron": "45.2.1",
