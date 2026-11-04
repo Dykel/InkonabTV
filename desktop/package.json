@@ -55,7 +55,8 @@
       "perMachine": true,
       "createDesktopShortcut": true,
       "shortcutName": "InkonabTV",
-      "include": "build/installer.nsh"
+      "include": "build/installer.nsh",
+      "artifactName": "inkonabtv.exe"
     },
     "afterPack": "build/afterPack.js"
   },
