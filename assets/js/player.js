@@ -239,13 +239,16 @@
       // iPhone/iPad: Safari's own HLS player. hls.js there runs on ManagedMediaSource, which
       // stalls without extra AirPlay handling.
       const nativeHls = ext === 'm3u8' && appleTouch && v.canPlayType('application/vnd.apple.mpegurl');
-      const need = !v.isAV && !nativeHls && (ext === 'm3u8' ? 'Hls' : ext === 'ts' ? 'mpegts' : '');
+      const need = !v.isAV && !nativeHls && !item.convert && (ext === 'm3u8' ? 'Hls' : ext === 'ts' ? 'mpegts' : '');
       if (need && !window[need] && !missing[need]) {
         // Starts again once the library is here; without it, the browser tries the link itself.
         lib(need).catch(() => { missing[need] = true; }).then(() => { if (this.item === item) this.play(item); });
         return;
       }
-      if (v.isAV || nativeHls) {
+      if (item.convert) {
+        this.stopConv = ConvertedPlayback(v, item.convert, item.rawUrl, item.resumeAt || 0,
+          r => { if (this.item === item) this.fail('sound: ' + r); });
+      } else if (v.isAV || nativeHls) {
         v.src = url; // AVPlay / Safari handle HLS themselves
       } else if (ext === 'm3u8' && window.Hls && Hls.isSupported()) {
         const hls = this.hls = new Hls(hlsConfig(item.kind === 'live'));
@@ -263,7 +266,7 @@
       } else {
         v.src = url;
       }
-      if (item.resumeAt > 5) v.addEventListener('loadedmetadata', () => { v.currentTime = item.resumeAt; }, { once: true });
+      if (item.resumeAt > 5 && !item.convert) v.addEventListener('loadedmetadata', () => { v.currentTime = item.resumeAt; }, { once: true });
       clearTimeout(this.watchdog);
       this.watchdog = setTimeout(() => { if (this.item === item && this.el.dataset.state === 'loading') this.fail('timeout'); }, 15000);
       const p = v.play();
@@ -275,6 +278,23 @@
           App.toast('Tap ▶ to start');
         }
       });
+
+      // Windows app: a film playing without sound (Dolby audio the video engine can't decode)
+      // starts again at the same point through the app's converter (convert.js).
+      if (window.Desktop && Desktop.media && item.kind !== 'live' && !item.convert && !item.radio) {
+        const check = this.soundCheck = () => {
+          if (this.item !== item || v.currentTime < 1.5) return;
+          v.removeEventListener('timeupdate', check);
+          if (v.webkitAudioDecodedByteCount > 0 || !(v.webkitVideoDecodedByteCount > 0)) return;
+          Desktop.media.base().then(base => {
+            if (this.item !== item || !base) return;
+            item.convert = base;
+            item.resumeAt = v.currentTime;
+            this.play(item);
+          });
+        };
+        v.addEventListener('timeupdate', check);
+      }
 
       if (item.kind !== 'live') {
         this.saveTimer = setInterval(() => this.saveProgress(), 5000);
@@ -879,6 +899,8 @@
       clearTimeout(this.watchdog);
       if (this.hls) { this.hls.destroy(); this.hls = null; }
       if (this.ts) { try { this.ts.destroy(); } catch {} this.ts = null; }
+      if (this.soundCheck) { this.video.removeEventListener('timeupdate', this.soundCheck); this.soundCheck = null; }
+      if (this.stopConv) { this.stopConv(); this.stopConv = null; }
       this.video.pause();
       this.video.removeAttribute('src');
       this.video.load();

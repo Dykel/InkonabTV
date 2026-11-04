@@ -2106,11 +2106,14 @@
       return h < 48 ? `${h} hour${h > 1 ? 's' : ''} ago` : new Date(t).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
     },
 
-    // ---------- app updates (InkonabTV+ sideload: CFG.updateUrl) ----------
+    // ---------- app updates (InkonabTV+ sideload and the Windows app: CFG.updateUrl) ----------
     // The download site has inkonabtv.apk and version.json ({ versionCode, versionName, sha256,
-    // notes }, written by scripts/release-plus.mjs). Checked once a day, or from Settings.
+    // notes }, written by scripts/release-plus.mjs); for Windows, windows.json with the
+    // installer's address (scripts/release-windows.mjs). Checked once a day, or from Settings.
+    updater() { return window.Native ? Native.player : window.Desktop && Desktop.updater; },
+
     async checkUpdate(manual) {
-      const P = window.Native && Native.player;
+      const P = this.updater();
       if (!CFG.updateUrl || !P || !P.appVersion || this.updating) return;
       const me = await P.appVersion().catch(() => null);
       if (!me || !me.updater) return;
@@ -2118,7 +2121,7 @@
       const base = CFG.updateUrl.replace(/\/?$/, '/');
       let v;
       try {
-        const r = await P.updateInfo({ url: base + 'version.json?t=' + Date.now() });
+        const r = await P.updateInfo({ url: base + (me.info || 'version.json') + '?t=' + Date.now() });
         if (!r.ok) throw new Error(r.text);
         v = JSON.parse(r.text);
       } catch {
@@ -2126,16 +2129,16 @@
         return;
       }
       Store.set('updChecked', Date.now());
-      if (!(Number(v.versionCode) > Number(me.code))) { if (manual) this.toast(`InkonabTV+ ${me.name} is the latest version`); return; }
+      if (!(Number(v.versionCode) > Number(me.code))) { if (manual) this.toast(`${me.product || 'InkonabTV+'} ${me.name} is the latest version`); return; }
       if (!manual && Store.get('updLater') === v.versionCode) return;
       if (!manual && (Player.isOpen() || !$('#modal').classList.contains('hidden'))) { Store.set('updChecked', 0); return; } // ask when nothing is open
       this.updateDialog(v, me, base);
     },
 
     updateDialog(v, me, base) {
-      const P = Native.player;
+      const P = this.updater(), product = me.product || 'InkonabTV+';
       const m = this.openModal(`${this.closeBtn()}
-        <h2 class="sheet-title">InkonabTV+ ${esc(v.versionName || '')} is available</h2>
+        <h2 class="sheet-title">${esc(product)} ${esc(v.versionName || '')} is available</h2>
         <p class="muted">You have ${esc(me.name)}.</p>
         ${v.notes ? `<ul class="upd-notes">${String(v.notes).split(/\n|·/).map(n => n.trim()).filter(Boolean).map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
         <p class="upd-status muted" id="updStatus"></p>
@@ -2171,12 +2174,14 @@
           $('#updFill', m) && ($('#updFill', m).style.width = pct + '%');
           status.textContent = `Downloading… ${pct}% (${(e.done / 1048576).toFixed(1)} MB)`;
         });
-        const r = await P.updateDownload({ url: base + 'inkonabtv.apk', sha256: v.sha256 || '' }).catch(e => ({ ok: false, detail: e.message }));
+        const r = await P.updateDownload({ url: v.url || base + 'inkonabtv.apk', sha256: v.sha256 || '' }).catch(e => ({ ok: false, detail: e.message }));
         h && h.remove && h.remove();
         this.updating = false;
         if (r.ok) {
-          status.textContent = 'Downloaded. Choose Install on the next screen — your sign-in and playlist are kept.';
-          actions.innerHTML = '<button class="btn primary" id="updInstall">Install</button>';
+          status.textContent = window.Desktop
+            ? 'Downloaded. InkonabTV closes, installs the update and opens again (Windows asks you to allow it) — your sign-in and playlist are kept.'
+            : 'Downloaded. Choose Install on the next screen — your sign-in and playlist are kept.';
+          actions.innerHTML = `<button class="btn primary" id="updInstall">${window.Desktop ? 'Install and restart' : 'Install'}</button>`;
           $('#updInstall', m).addEventListener('click', () => P.updateInstall());
           $('#updInstall', m).focus();
         } else {
@@ -2274,7 +2279,7 @@
           <p class="muted small-note">Movies, series and channels are saved on this device so the app opens instantly. They refresh by themselves in the background every 6 hours.</p>
           <div class="set-row vpn-actions"><button class="btn ghost" id="plRefresh">Refresh now</button></div>
         </section>
-        ${window.Native && CFG.updateUrl ? `<section class="set-group" id="updGroup" hidden>
+        ${(window.Native || window.Desktop) && CFG.updateUrl ? `<section class="set-group" id="updGroup" hidden>
           <h3>App updates</h3>
           <div class="kv"><span>This version</span><b id="updVersion">…</b></div>
           <p class="muted small-note">The app checks for a new version once a day.</p>
@@ -2359,10 +2364,10 @@
       });
       this.bindExtraPlaylists(m);
       if (window.Native && $('#vpnGroup', m)) this.bindVpnSettings(m);
-      if ($('#updGroup', m)) Native.player.appVersion().then(v => {
+      if ($('#updGroup', m)) this.updater().appVersion().then(v => {
         if (!v.updater) return;
         $('#updGroup', m).hidden = false;
-        $('#updVersion', m).textContent = `InkonabTV+ ${v.name}`;
+        $('#updVersion', m).textContent = `${v.product || 'InkonabTV+'} ${v.name}`;
         $('#updCheck', m).addEventListener('click', () => this.checkUpdate(true));
       }).catch(() => {});
       $('[data-close]', m).focus();

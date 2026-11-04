@@ -26,3 +26,10 @@ https://www.vpngate.net) and run by volunteers.
 | mpegts.js 1.7.3 | Apache-2.0 | `assets/js/vendor/mpegts.js` (website only) |
 | Exo 2 font (via Fontsource 5.3.0) | SIL Open Font License 1.1 | `assets/fonts/exo-2-*.woff2` |
 | Saira font (via Fontsource 5.3.0) | SIL Open Font License 1.1 | `assets/fonts/saira-*.woff2` |
+
+## Shipped inside the Windows app
+
+| Component | License | Where |
+| --- | --- | --- |
+| OpenVPN 2 + TAP-Windows6 (official OpenVPN Inc. build) | GPL-2.0 | `resources/openvpn` |
+| FFmpeg (BtbN LGPL shared build, unmodified) | LGPL-2.1-or-later | `resources/ffmpeg` — turns Dolby sound into AAC (`desktop/media.js`); source: https://github.com/BtbN/FFmpeg-Builds |

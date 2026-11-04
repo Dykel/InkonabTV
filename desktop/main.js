@@ -5,6 +5,8 @@
 const { app, BrowserWindow, shell, ipcMain, Menu } = require('electron');
 const path = require('path');
 const vpn = require('./vpn');
+const media = require('./media');
+const updater = require('./updater');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
@@ -48,10 +50,19 @@ function createWindow() {
 }
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
-app.whenReady().then(createWindow);
+app.whenReady().then(() => { media.startServer(); createWindow(); });
 app.on('window-all-closed', async () => { await vpn.disconnect().catch(() => {}); app.quit(); });
 
 // VPN, asked for by the page (preload.js).
 ipcMain.handle('vpn:status', () => vpn.status());
 ipcMain.handle('vpn:connect', (_e, hosts) => vpn.connect(hosts));
 ipcMain.handle('vpn:disconnect', () => vpn.disconnect());
+
+// Sound converter for Dolby films (media.js).
+ipcMain.handle('media:base', () => media.base());
+
+// App updates (updater.js); download progress goes back as 'update:progress'.
+ipcMain.handle('update:version', () => updater.appVersion());
+ipcMain.handle('update:info', (_e, o) => updater.updateInfo(o));
+ipcMain.handle('update:download', (e, o) => updater.updateDownload(o, p => e.sender.send('update:progress', p)));
+ipcMain.handle('update:install', () => updater.updateInstall());

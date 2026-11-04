@@ -9,7 +9,8 @@
   "scripts": {
     "copy-web": "node copy-web.mjs",
     "start": "npm run copy-web && electron .",
-    "dist:win": "npm run copy-web && electron-builder --win --x64"
+    "dist:win": "npm run copy-web && electron-builder --win --x64",
+    "release:windows": "npm run dist:win && node ../scripts/release-windows.mjs"
   },
   "build": {
     "appId": "tv.inkonab.desktop",
@@ -18,12 +19,21 @@
       "main.js",
       "preload.js",
       "vpn.js",
+      "media.js",
+      "updater.js",
       "www/**/*"
     ],
     "extraResources": [
       {
         "from": "vendor/openvpn/win",
         "to": "openvpn",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "vendor/ffmpeg/win",
+        "to": "ffmpeg",
         "filter": [
           "**/*"
         ]
