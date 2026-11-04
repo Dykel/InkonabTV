@@ -39,4 +39,4 @@ https://www.vpngate.net) and run by volunteers.
 | Component | License | Where |
 | --- | --- | --- |
 | OpenVPN 2.6.23 (Tunnelblick 10.0.2 build, statically linked OpenSSL 3.5.9, unmodified) | GPL-2.0 | `Contents/Resources/openvpn` — source: https://github.com/Tunnelblick/Tunnelblick |
-| FFmpeg 8.0 (LGPL build from `scripts/build-ffmpeg-mac.sh`, unmodified source) | LGPL-2.1-or-later | `Contents/Resources/ffmpeg` — source: https://ffmpeg.org/releases/ffmpeg-8.0.tar.xz |
+| FFmpeg 9.0.2 (static build by Martin Riedl, https://ffmpeg.martin-riedl.de, unmodified; `scripts/build-ffmpeg-mac.sh` makes a smaller LGPL one instead) | GPL-3.0 | `Contents/Resources/ffmpeg` — source: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz |
