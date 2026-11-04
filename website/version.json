@@ -1,0 +1,7 @@
+{
+  "versionCode": 11,
+  "versionName": "1.0.10",
+  "sha256": "5dbdd589c179edd5015432e6208ca5642f5add3b86fd3e5cd72a65eb9749834f",
+  "size": 17962884,
+  "notes": "Series: the next episode starts right after the one you watch, with a \"Next episode\" card in the last 30 s (OK plays it now)\nContinue watching keeps the right episode, even if you close while a film reopens\nFixed a crash when leaving a channel that was still connecting\n\"Try again\" when a show's episodes can't be loaded"
+}

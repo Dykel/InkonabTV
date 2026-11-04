@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en" data-l="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InkonabTV · Your playlists. Every screen.</title>
+<meta name="description" content="InkonabTV is a free, fast and beautiful player for your IPTV playlist on Android phones, Android TV, Google TV and Fire TV. Live TV with TV guide, movies, series, replay. No ads.">
+<meta name="theme-color" content="#0b1518">
+<link rel="icon" type="image/svg+xml" href="img/icon.svg">
+<link rel="apple-touch-icon" href="img/og-icon.png">
+<meta property="og:title" content="InkonabTV · Your playlists. Every screen.">
+<meta property="og:description" content="Free player for your IPTV playlist on Android phones, Android TV, Google TV and Fire TV. No ads.">
+<meta property="og:image" content="https://inkonabtv.alwaysdata.net/img/og.png">
+<meta property="og:url" content="https://inkonabtv.alwaysdata.net/">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+@font-face{font-family:Saira;src:url(fonts/Saira.woff2) format('woff2');font-weight:100 900;font-display:swap}
+@font-face{font-family:'Exo 2';src:url(fonts/Exo2.woff2) format('woff2');font-weight:100 900;font-display:swap}
+:root{
+  --bg:#0b1518;--bg2:#10232a;--card:#13262e;--card2:#183039;--line:rgba(255,255,255,.09);
+  --y:#fcc30b;--y2:#ffd84d;--fg:#f2f6f7;--mut:#9fb3b9;--ok:#3ddc97;
+  --r:22px;--max:1180px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{background:var(--bg);color:var(--fg);font:17px/1.6 'Exo 2',system-ui,sans-serif;overflow-x:hidden}
+html[data-l=en] [lang=fr],html[data-l=fr] [lang=en]{display:none!important}
+a{color:inherit;text-decoration:none}
+img{max-width:100%;height:auto;display:block}
+h1,h2,h3{font-family:Saira,sans-serif;line-height:1.05;letter-spacing:-.01em}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 16px}
+@media(min-width:700px){.wrap{padding:0 32px}}
+.y{color:var(--y)}
+.kicker{font:600 13px Saira;letter-spacing:.22em;text-transform:uppercase;color:var(--y)}
+.btn{display:inline-flex;align-items:center;gap:10px;border-radius:999px;padding:14px 24px;font:700 17px Saira;transition:transform .15s,background .15s,box-shadow .15s;cursor:pointer;border:0}
+.btn:hover{transform:translateY(-2px)}
+.btn-y{background:var(--y);color:#111;box-shadow:0 10px 30px rgba(252,195,11,.25)}
+.btn-y:hover{background:var(--y2)}
+.btn-g{background:rgba(255,255,255,.07);border:1px solid var(--line);color:var(--fg)}
+.btn svg{width:20px;height:20px}
+
+/* nav */
+nav{position:sticky;top:0;z-index:50;background:rgba(11,21,24,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:20px;height:68px}
+nav .logo img{height:34px}
+nav .links{display:none;gap:26px;margin-left:auto;font-weight:600;color:var(--mut)}
+nav .links a:hover{color:var(--fg)}
+nav .right{display:flex;gap:10px;align-items:center;margin-left:auto}
+@media(min-width:900px){nav .links{display:flex}nav .right{margin-left:0}}
+.lang{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;font:700 13px Saira}
+.lang button{background:none;border:0;color:var(--mut);padding:7px 11px;cursor:pointer;font:inherit}
+.lang button.on{background:var(--y);color:#111}
+nav .btn{padding:9px 16px;font-size:15px}
+@media(max-width:420px){nav .btn{display:none}}
+
+/* hero */
+.hero{position:relative;padding:56px 0 40px;overflow:hidden}
+.hero:before{content:"";position:absolute;inset:-20% -10% auto;height:120%;background:radial-gradient(55% 50% at 70% 35%,rgba(252,195,11,.16),transparent 70%),radial-gradient(60% 60% at 15% 10%,#1b3a45 0%,transparent 70%);pointer-events:none}
+.hero .wrap{position:relative;display:grid;gap:40px;align-items:center}
+@media(min-width:980px){.hero{padding:84px 0 70px}.hero .wrap{grid-template-columns:1.05fr 1fr}}
+@media(min-width:980px) and (max-width:1240px){.hero h1{font-size:62px}}
+.badge{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;background:rgba(252,195,11,.1);border:1px solid rgba(252,195,11,.35);color:var(--y);font:600 14px 'Exo 2'}
+.badge i{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(61,220,151,.2)}
+.hero h1{font-size:clamp(44px,7.4vw,84px);margin:18px 0 18px}
+.hero p.lead{font-size:clamp(17px,2vw,20px);color:var(--mut);max-width:540px}
+.cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
+.code{display:inline-flex;align-items:center;gap:12px;margin-top:22px;padding:10px 12px 10px 16px;border-radius:16px;background:var(--card);border:1px solid var(--line);color:var(--mut);font-size:15px}
+.code b{font:700 24px Saira;color:var(--fg);letter-spacing:.06em}
+.code button{background:rgba(255,255,255,.08);border:0;color:var(--fg);border-radius:10px;padding:6px 10px;font:600 13px 'Exo 2';cursor:pointer}
+.devices{position:relative;padding:0 12% 14% 0}
+.tv{border-radius:18px;padding:10px;background:linear-gradient(160deg,#2a2f33,#0b0d0e);box-shadow:0 40px 90px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06) inset;position:relative}
+.tv img{border-radius:10px}
+.tv:after{content:"";position:absolute;left:50%;bottom:-26px;width:24%;height:18px;transform:translateX(-50%);background:linear-gradient(#24292c,#0e1112);border-radius:0 0 10px 10px}
+.phone{position:absolute;right:0;top:14%;width:24%;border-radius:clamp(16px,3vw,30px);padding:clamp(4px,.6vw,7px);background:#050607;box-shadow:0 30px 60px rgba(0,0,0,.65),0 0 0 2px #2a3034}
+.phone img{border-radius:clamp(12px,2.4vw,24px)}
+
+/* platforms */
+.plat{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:rgba(255,255,255,.015)}
+.plat .wrap{display:flex;flex-wrap:wrap;gap:10px 14px;justify-content:center;padding-top:22px;padding-bottom:22px}
+.chip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;border:1px solid var(--line);font-weight:600;font-size:15px;white-space:nowrap}
+.chip.ok:before{content:"✓";color:var(--ok);font-weight:800}
+.chip.soon{color:var(--mut)}
+.chip.soon em{font-style:normal;font:700 11px Saira;letter-spacing:.1em;text-transform:uppercase;color:var(--y);background:rgba(252,195,11,.12);padding:2px 7px;border-radius:6px}
+
+section{padding:76px 0}
+@media(min-width:900px){section{padding:104px 0}}
+.head{max-width:720px;margin-bottom:44px}
+.head h2{font-size:clamp(34px,5vw,54px);margin-top:12px}
+.head p{color:var(--mut);margin-top:14px;font-size:18px}
+
+/* features */
+.grid{display:grid;gap:16px}
+@media(min-width:640px){.grid{grid-template-columns:1fr 1fr}}
+@media(min-width:1000px){.grid{grid-template-columns:repeat(3,1fr)}}
+.feat{background:linear-gradient(180deg,var(--card),rgba(19,38,46,.6));border:1px solid var(--line);border-radius:var(--r);padding:26px;transition:border-color .2s,transform .2s}
+.feat:hover{border-color:rgba(252,195,11,.4);transform:translateY(-3px)}
+.ic{width:52px;height:52px;border-radius:15px;background:var(--y);color:#111;display:grid;place-items:center;font-size:24px;margin-bottom:18px}
+.feat h3{font-size:22px;margin-bottom:8px}
+.feat p{color:var(--mut);font-size:16px}
+
+/* showcase */
+.show{display:grid;gap:22px;align-items:center;margin-top:70px}
+@media(min-width:900px){.show{grid-template-columns:1.25fr 1fr;gap:56px}.show.rev{grid-template-columns:1fr 1.25fr}.show.rev .shot{order:2}}
+.shot{border-radius:16px;overflow:hidden;border:1px solid var(--line);box-shadow:0 30px 70px rgba(0,0,0,.5)}
+.show h3{font-size:clamp(28px,3.6vw,40px);margin:10px 0 14px}
+.show p{color:var(--mut)}
+.show ul{list-style:none;margin-top:18px;display:grid;gap:10px}
+.show li{display:flex;gap:10px;color:#d4e0e3}
+.show li:before{content:"";flex:none;width:20px;height:20px;margin-top:3px;border-radius:6px;background:var(--y) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5' fill='none' stroke='%23111' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/14px no-repeat}
+
+/* download */
+#download{background:radial-gradient(70% 60% at 50% 0%,rgba(252,195,11,.09),transparent 70%),var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.dl{display:grid;gap:16px}
+@media(min-width:700px){.dl{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1200px){.dl{grid-template-columns:repeat(4,1fr)}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:28px;display:flex;flex-direction:column}
+.card.hot{border-color:rgba(252,195,11,.5);box-shadow:0 0 0 1px rgba(252,195,11,.2),0 30px 60px rgba(0,0,0,.35)}
+.card .top{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.card .top>span{font-size:30px}
+.card h3{font-size:24px}
+.card small{color:var(--mut);font-size:14px}
+.card ol{list-style:none;counter-reset:s;display:grid;gap:12px;margin:6px 0 24px;color:#d4e0e3;font-size:16px}
+.card ol li{counter-increment:s;display:flex;gap:12px}
+.card ol li:before{content:counter(s);flex:none;width:26px;height:26px;border-radius:50%;background:rgba(252,195,11,.14);color:var(--y);font:700 14px Saira;display:grid;place-items:center;margin-top:1px}
+.card .bigcode{font:800 46px Saira;letter-spacing:.08em;color:var(--y);text-align:center;padding:14px;border-radius:16px;background:rgba(0,0,0,.25);border:1px dashed rgba(252,195,11,.4);margin:2px 0 18px}
+.card .btn{margin-top:auto;justify-content:center}
+.ver{display:flex;flex-wrap:wrap;gap:8px 18px;justify-content:center;margin-top:28px;color:var(--mut);font-size:14px}
+.ver b{color:var(--fg)}
+.stores{display:grid;gap:16px;margin-top:16px}
+@media(min-width:760px){.stores{grid-template-columns:repeat(3,1fr)}}
+.store{display:flex;gap:14px;align-items:center;padding:18px 20px;border-radius:18px;border:1px solid var(--line);background:rgba(255,255,255,.025)}
+.store>span{font-size:26px}
+.store b{display:block;font-family:Saira;font-size:18px}
+.store small{color:var(--mut)}
+
+/* guides & faq */
+.acc{display:grid;gap:12px}
+details{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+details[open]{border-color:rgba(252,195,11,.35)}
+summary{list-style:none;cursor:pointer;padding:20px 22px;display:flex;align-items:center;gap:14px;font:700 19px Saira}
+summary::-webkit-details-marker{display:none}
+summary:after{content:"+";margin-left:auto;font:400 28px 'Exo 2';color:var(--y);transition:transform .2s}
+details[open] summary:after{transform:rotate(45deg)}
+summary span.e{font-size:24px}
+.body{padding:0 22px 22px;color:#d4e0e3}
+.body ol{padding-left:22px;display:grid;gap:8px}
+.body p{margin-top:10px;color:var(--mut)}
+.body b{color:var(--fg)}
+.body code{font:700 15px Saira;color:var(--y);background:rgba(252,195,11,.1);padding:1px 7px;border-radius:6px}
+.two{display:grid;gap:44px}
+@media(min-width:980px){.two{grid-template-columns:1fr 1fr}}
+
+/* support */
+.sup{display:grid;gap:16px}
+@media(min-width:760px){.sup{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1100px){.sup{grid-template-columns:repeat(4,1fr)}}
+.sup a{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:24px;transition:border-color .2s,transform .2s}
+.sup a:hover{border-color:rgba(252,195,11,.45);transform:translateY(-3px)}
+.sup .ic{margin-bottom:14px}
+.sup b{display:block;font:700 20px Saira;margin-bottom:6px}
+.sup p{color:var(--mut);font-size:15px}
+.sup em{display:inline-block;margin-top:12px;font-style:normal;color:var(--y);font-weight:700;font-size:15px}
+.donate{margin-top:16px;display:flex;flex-wrap:wrap;align-items:center;gap:18px;justify-content:space-between;padding:26px 28px;border-radius:var(--r);background:linear-gradient(110deg,rgba(252,195,11,.14),rgba(252,195,11,.03));border:1px solid rgba(252,195,11,.3)}
+.donate h3{font-size:24px}
+.donate p{color:var(--mut)}
+
+footer{border-top:1px solid var(--line);padding:40px 0 50px;color:var(--mut);font-size:14px}
+footer .wrap{display:flex;flex-wrap:wrap;gap:18px 30px;align-items:center;justify-content:space-between}
+footer img{height:30px}
+footer nav{position:static;background:none;border:0;backdrop-filter:none;display:flex;gap:20px}
+footer a:hover{color:var(--fg)}
+.note{max-width:var(--max);margin:20px auto 0;padding:0 16px;font-size:13px;color:#6f858b}
+@media(min-width:700px){.note{padding:0 32px}}
+
+.reveal{opacity:0;transform:translateY(18px);transition:opacity .6s,transform .6s}
+.reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none}html{scroll-behavior:auto}}
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,40px);opacity:0;background:var(--y);color:#111;font:700 15px Saira;padding:10px 18px;border-radius:999px;transition:.25s;z-index:99}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="InkonabTV"><img src="img/logo.svg" alt="InkonabTV"></a>
+    <div class="links">
+      <a href="#features"><span lang="en">Features</span><span lang="fr">Fonctions</span></a>
+      <a href="#download"><span lang="en">Download</span><span lang="fr">Télécharger</span></a>
+      <a href="#guides"><span lang="en">Guides</span><span lang="fr">Guides</span></a>
+      <a href="#support"><span lang="en">Support</span><span lang="fr">Assistance</span></a>
+    </div>
+    <div class="right">
+      <div class="lang" role="group" aria-label="Language"><button data-set="en">EN</button><button data-set="fr">FR</button></div>
+      <a class="btn btn-y" href="#download"><span lang="en">Get the app</span><span lang="fr">Obtenir l'appli</span></a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div>
+      <span class="badge"><i></i><span lang="en">Version <span class="vname">1.0.10</span> is out</span><span lang="fr">La version <span class="vname">1.0.10</span> est là</span></span>
+      <h1><span lang="en">Your playlists.<br><span class="y">Every screen.</span></span><span lang="fr">Vos playlists.<br><span class="y">Tous vos écrans.</span></span></h1>
+      <p class="lead"><span lang="en">A fast, beautiful player for your own IPTV playlist. Live TV with a real TV guide, movies and series with posters, replay and continue watching. Free, with no ads.</span><span lang="fr">Un lecteur rapide et élégant pour votre propre playlist IPTV. Télé en direct avec un vrai guide TV, films et séries avec affiches, replay et reprise de lecture. Gratuit, sans pub.</span></p>
+      <div class="cta">
+        <a class="btn btn-y" href="inkonabtv.apk" download><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 21h16"/></svg><span lang="en">Download for Android</span><span lang="fr">Télécharger pour Android</span></a>
+        <a class="btn btn-g" href="#guides"><span lang="en">How to install</span><span lang="fr">Comment installer</span></a>
+      </div>
+      <div class="code"><span><span lang="en">Android TV &amp; Fire TV · Downloader code</span><span lang="fr">Android TV &amp; Fire TV · code Downloader</span></span><b>3727335</b><button data-copy="3727335"><span lang="en">Copy</span><span lang="fr">Copier</span></button></div>
+    </div>
+    <div class="devices">
+      <div class="tv"><img src="img/tv_home.jpg" width="1280" height="720" alt="InkonabTV home screen on a TV"></div>
+      <div class="phone"><img src="img/ph_home.jpg" width="540" height="1169" alt="InkonabTV on an Android phone"></div>
+    </div>
+  </div>
+</header>
+
+<div class="plat">
+  <div class="wrap">
+    <span class="chip ok"><span lang="en">Android phones &amp; tablets</span><span lang="fr">Téléphones &amp; tablettes Android</span></span>
+    <span class="chip ok">Android TV · Google TV</span>
+    <span class="chip ok">Fire TV · Fire Stick</span>
+    <span class="chip ok"><span lang="en">Android TV boxes</span><span lang="fr">Box Android TV</span></span>
+    <span class="chip ok"><span lang="en">Windows PC</span><span lang="fr">PC Windows</span></span>
+    <span class="chip soon">Samsung TV <em><span lang="en">Soon</span><span lang="fr">Bientôt</span></em></span>
+    <span class="chip soon">Google Play <em><span lang="en">Soon</span><span lang="fr">Bientôt</span></em></span>
+    <span class="chip soon">iPhone · iPad · Mac <em><span lang="en">Soon</span><span lang="fr">Bientôt</span></em></span>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <div class="head reveal">
+      <div class="kicker"><span lang="en">Features</span><span lang="fr">Fonctions</span></div>
+      <h2><span lang="en">Everything you watch, <span class="y">beautifully organised.</span></span><span lang="fr">Tout ce que vous regardez, <span class="y">bien rangé.</span></span></h2>
+      <p><span lang="en">Built for the big screen and your remote, and just as good on your phone.</span><span lang="fr">Pensé pour la télé et la télécommande, et tout aussi bien sur téléphone.</span></p>
+    </div>
+    <div class="grid">
+      <div class="feat reveal"><div class="ic">📺</div><h3><span lang="en">Live TV &amp; TV guide</span><span lang="fr">Direct &amp; guide TV</span></h3><p><span lang="en">Channels by category, what's on now and next, and a week-wide programme grid.</span><span lang="fr">Chaînes par catégorie, programme en cours et suivant, et une grille sur toute la semaine.</span></p></div>
+      <div class="feat reveal"><div class="ic">🎬</div><h3><span lang="en">Movies &amp; series</span><span lang="fr">Films &amp; séries</span></h3><p><span lang="en">Posters, ratings, cast and trailers. Seasons and episodes neatly sorted.</span><span lang="fr">Affiches, notes, casting et bandes-annonces. Saisons et épisodes bien triés.</span></p></div>
+      <div class="feat reveal"><div class="ic">⏭</div><h3><span lang="en">Binge mode</span><span lang="fr">Mode binge</span></h3><p><span lang="en">The next episode starts by itself, and Continue watching takes you back to the exact moment.</span><span lang="fr">L'épisode suivant démarre tout seul, et Continuer à regarder vous ramène au bon moment.</span></p></div>
+      <div class="feat reveal"><div class="ic">⟲</div><h3>Replay</h3><p><span lang="en">Missed a show? Press ▶ while watching and replay today's programmes (where your provider offers catch-up).</span><span lang="fr">Une émission ratée ? Appuyez sur ▶ et revoyez les programmes du jour (si votre fournisseur propose le replay).</span></p></div>
+      <div class="feat reveal"><div class="ic">📲</div><h3><span lang="en">Set up from your phone</span><span lang="fr">Configuration par téléphone</span></h3><p><span lang="en">Scan the QR code on the TV and type your playlist on your phone. No more typing with the remote.</span><span lang="fr">Scannez le QR code de la télé et tapez votre playlist sur le téléphone. Fini la saisie à la télécommande.</span></p></div>
+      <div class="feat reveal"><div class="ic">⚡</div><h3><span lang="en">Instant &amp; steady</span><span lang="fr">Instantané &amp; stable</span></h3><p><span lang="en">Opens straight to your playlist, updates quietly in the background and retries by itself if the network drops.</span><span lang="fr">S'ouvre directement sur votre playlist, se met à jour en arrière-plan et réessaie tout seul si le réseau coupe.</span></p></div>
+    </div>
+
+    <div class="show reveal">
+      <div class="shot"><img src="img/tv_guide.jpg" width="1280" height="720" loading="lazy" alt="TV guide"></div>
+      <div>
+        <div class="kicker"><span lang="en">TV guide</span><span lang="fr">Guide TV</span></div>
+        <h3><span lang="en">See what's on. Then watch it.</span><span lang="fr">Voyez ce qui passe. Puis regardez.</span></h3>
+        <p><span lang="en">A clear programme grid with a live “now” line. Press OK on a show to watch it, or on a past one to replay it.</span><span lang="fr">Une grille claire avec la ligne « maintenant ». OK sur une émission pour la regarder, ou sur une émission passée pour la revoir.</span></p>
+        <ul>
+          <li><span lang="en">Favourites and recently watched channels</span><span lang="fr">Chaînes favorites et récemment regardées</span></li>
+          <li><span lang="en">Remote shortcuts: every arrow opens a panel</span><span lang="fr">Raccourcis télécommande : chaque flèche ouvre un panneau</span></li>
+          <li><span lang="en">Only the playlist languages you choose</span><span lang="fr">Seulement les langues de playlist choisies</span></li>
+        </ul>
+      </div>
+    </div>
+    <div class="show rev reveal">
+      <div class="shot"><img src="img/tv_movie_detail.jpg" width="1280" height="720" loading="lazy" alt="Movie details"></div>
+      <div>
+        <div class="kicker"><span lang="en">Movies &amp; series</span><span lang="fr">Films &amp; séries</span></div>
+        <h3><span lang="en">Like a streaming app. For your playlist.</span><span lang="fr">Comme une appli de streaming. Pour votre playlist.</span></h3>
+        <p><span lang="en">Big backdrops, summaries and cast, filters and sorting, and search across everything.</span><span lang="fr">Grandes images, résumés et casting, filtres et tri, et une recherche sur tout.</span></p>
+        <ul>
+          <li><span lang="en">MKV, HEVC, Dolby and DTS on Android</span><span lang="fr">MKV, HEVC, Dolby et DTS sur Android</span></li>
+          <li><span lang="en">My List for films, series and channels</span><span lang="fr">Ma liste pour films, séries et chaînes</span></li>
+          <li><span lang="en">6 languages: EN, FR, ES, DE, IT, PT</span><span lang="fr">6 langues : EN, FR, ES, DE, IT, PT</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <div class="head reveal">
+      <div class="kicker"><span lang="en">Download</span><span lang="fr">Télécharger</span></div>
+      <h2><span lang="en">Get InkonabTV+ <span class="y">in a minute.</span></span><span lang="fr">InkonabTV+ <span class="y">en une minute.</span></span></h2>
+      <p><span lang="en">Free and safe, straight from us. Pick your device.</span><span lang="fr">Gratuit et sûr, directement chez nous. Choisissez votre appareil.</span></p>
+    </div>
+    <div class="dl">
+      <div class="card hot reveal">
+        <div class="top"><span>📱</span><div><h3><span lang="en">Android phone</span><span lang="fr">Téléphone Android</span></h3><small><span lang="en">and tablets</span><span lang="fr">et tablettes</span></small></div></div>
+        <ol>
+          <li><span lang="en">Tap the button below on your phone.</span><span lang="fr">Touchez le bouton ci-dessous sur votre téléphone.</span></li>
+          <li><span lang="en">Open the file, allow installs from this source.</span><span lang="fr">Ouvrez le fichier, autorisez cette source.</span></li>
+          <li><span lang="en">Tap Install, then Open.</span><span lang="fr">Touchez Installer, puis Ouvrir.</span></li>
+        </ol>
+        <a class="btn btn-y" href="inkonabtv.apk" download><span lang="en">Download the APK</span><span lang="fr">Télécharger l'APK</span></a>
+      </div>
+      <div class="card reveal">
+        <div class="top"><span>📺</span><div><h3>Android TV · Google TV</h3><small><span lang="en">and Android TV boxes</span><span lang="fr">et box Android TV</span></small></div></div>
+        <ol>
+          <li><span lang="en">Install <b>Downloader by AFTVnews</b> from the Play Store.</span><span lang="fr">Installez <b>Downloader by AFTVnews</b> depuis le Play Store.</span></li>
+          <li><span lang="en">Open it and enter this code:</span><span lang="fr">Ouvrez-le et entrez ce code :</span></li>
+        </ol>
+        <div class="bigcode">3727335</div>
+        <a class="btn btn-g" href="#g-tv"><span lang="en">Full guide</span><span lang="fr">Guide complet</span></a>
+      </div>
+      <div class="card reveal">
+        <div class="top"><span>🔥</span><div><h3>Fire TV · Fire Stick</h3><small>Amazon</small></div></div>
+        <ol>
+          <li><span lang="en">Install <b>Downloader</b> from the Amazon store.</span><span lang="fr">Installez <b>Downloader</b> depuis la boutique Amazon.</span></li>
+          <li><span lang="en">Allow it to install unknown apps.</span><span lang="fr">Autorisez-le à installer des applis inconnues.</span></li>
+          <li><span lang="en">Enter the code <b>3727335</b>.</span><span lang="fr">Entrez le code <b>3727335</b>.</span></li>
+        </ol>
+        <a class="btn btn-g" href="#g-fire"><span lang="en">Full guide</span><span lang="fr">Guide complet</span></a>
+      </div>
+      <div class="card reveal">
+        <div class="top"><span>💻</span><div><h3><span lang="en">Windows PC</span><span lang="fr">PC Windows</span></h3><small><span lang="en">Windows 10 and 11 · 64-bit</span><span lang="fr">Windows 10 et 11 · 64 bits</span></small></div></div>
+        <ol>
+          <li><span lang="en">Download <b>inkonabtv.exe</b> (about 170 MB).</span><span lang="fr">Téléchargez <b>inkonabtv.exe</b> (environ 170 Mo).</span></li>
+          <li><span lang="en">Open it. If Windows warns you: <b>More info → Run anyway</b>.</span><span lang="fr">Ouvrez-le. Si Windows avertit : <b>Informations complémentaires → Exécuter quand même</b>.</span></li>
+          <li><span lang="en">Install, then open InkonabTV from the desktop.</span><span lang="fr">Installez, puis ouvrez InkonabTV depuis le bureau.</span></li>
+        </ol>
+        <a class="btn btn-y" href="https://github.com/Dykel/InkonabTV/releases/download/windows-v1.0.10/inkonabtv.exe"><span lang="en">Download for Windows</span><span lang="fr">Télécharger pour Windows</span></a>
+      </div>
+    </div>
+    <div class="ver"><span><span lang="en">Latest version</span><span lang="fr">Dernière version</span>: <b class="vname">1.0.10</b></span><span class="vsize"></span><span><span lang="en">Android 7 or newer · Windows 10/11</span><span lang="fr">Android 7 ou plus récent · Windows 10/11</span></span><span><span lang="en">Already installed? It updates itself.</span><span lang="fr">Déjà installée ? Elle se met à jour toute seule.</span></span></div>
+    <div class="stores">
+      <div class="store reveal"><span>▶️</span><div><b>Google Play</b><small><span lang="en">Coming soon · player for your own playlist</span><span lang="fr">Bientôt · lecteur pour votre propre playlist</span></small></div></div>
+      <div class="store reveal"><span>📺</span><div><b>Samsung TV</b><small><span lang="en">Coming soon · 2018 and newer</span><span lang="fr">Bientôt · modèles 2018 et plus</span></small></div></div>
+      <div class="store reveal"><span>🍏</span><div><b>iPhone · iPad · Mac</b><small><span lang="en">Coming soon to the App Store</span><span lang="fr">Bientôt sur l'App Store</span></small></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="guides">
+  <div class="wrap two">
+    <div>
+      <div class="head reveal" style="margin-bottom:28px">
+        <div class="kicker"><span lang="en">Guides A to Z</span><span lang="fr">Guides de A à Z</span></div>
+        <h2><span lang="en">Step by step, <span class="y">from download to TV.</span></span><span lang="fr">Pas à pas, <span class="y">du téléchargement à la télé.</span></span></h2>
+      </div>
+      <div class="acc">
+        <details id="g-phone"><summary><span class="e">📱</span><span lang="en">Android phone or tablet</span><span lang="fr">Téléphone ou tablette Android</span></summary><div class="body">
+          <ol lang="en"><li>Open Chrome on your phone and go to <b>inkonabtv.alwaysdata.net</b>, then tap <b>Download for Android</b>.</li><li>If Chrome says “File might be harmful”, tap <b>Download anyway</b>.</li><li>Tap <b>Open</b> (or open <code>inkonabtv.apk</code> in Downloads).</li><li>“Not allowed to install unknown apps”: tap <b>Settings</b>, switch on <b>Allow from this source</b>, go back.</li><li>Tap <b>Install</b>. If Play Protect warns you: <b>More details → Install anyway</b>.</li><li>Tap <b>Open</b> and sign in.</li></ol>
+          <ol lang="fr"><li>Ouvrez Chrome sur votre téléphone, allez sur <b>inkonabtv.alwaysdata.net</b> et touchez <b>Télécharger pour Android</b>.</li><li>Si Chrome dit « Fichier potentiellement dangereux », touchez <b>Télécharger quand même</b>.</li><li>Touchez <b>Ouvrir</b> (ou ouvrez <code>inkonabtv.apk</code> dans Téléchargements).</li><li>« Pas autorisé à installer des applis inconnues » : <b>Paramètres</b>, activez <b>Autoriser cette source</b>, revenez.</li><li>Touchez <b>Installer</b>. Si Play Protect avertit : <b>Plus de détails → Installer quand même</b>.</li><li>Touchez <b>Ouvrir</b> et connectez-vous.</li></ol>
+        </div></details>
+        <details id="g-tv"><summary><span class="e">📺</span>Android TV · Google TV · box</summary><div class="body">
+          <ol lang="en"><li>On the TV, open the <b>Play Store</b>, search “Downloader” and install <b>Downloader by AFTVnews</b> (orange icon).</li><li>Allow it to install apps: <b>Settings → Apps → Security &amp; restrictions → Unknown sources → Downloader ON</b> (on older Android TV: Device preferences → Security &amp; restrictions).</li><li>Open Downloader, allow access to files, close the tips.</li><li>In “Enter a URL or Search Term”, type <code>3727335</code> and press <b>Go</b>.</li><li>When the download finishes, press <b>Install</b>, then <b>Open</b>.</li><li>Optional: press <b>Delete</b> in Downloader to remove the installer file.</li></ol>
+          <ol lang="fr"><li>Sur la télé, ouvrez le <b>Play Store</b>, cherchez « Downloader » et installez <b>Downloader by AFTVnews</b> (icône orange).</li><li>Autorisez-le : <b>Paramètres → Applis → Sécurité et restrictions → Sources inconnues → Downloader activé</b> (anciennes Android TV : Préférences de l'appareil → Sécurité et restrictions).</li><li>Ouvrez Downloader, autorisez l'accès aux fichiers, fermez les astuces.</li><li>Dans « Enter a URL or Search Term », tapez <code>3727335</code> et appuyez sur <b>Go</b>.</li><li>À la fin du téléchargement, <b>Installer</b>, puis <b>Ouvrir</b>.</li><li>Facultatif : <b>Delete</b> dans Downloader pour supprimer le fichier d'installation.</li></ol>
+        </div></details>
+        <details id="g-fire"><summary><span class="e">🔥</span>Fire TV · Fire Stick</summary><div class="body">
+          <ol lang="en"><li>On the home screen, go to <b>Find → Search</b>, type “Downloader” and install it (by AFTVnews).</li><li>Turn on developer options once: <b>Settings → My Fire TV → About</b>, click your device name <b>7 times</b>.</li><li><b>Settings → My Fire TV → Developer options → Install unknown apps → Downloader ON</b>.</li><li>Open Downloader, type <code>3727335</code>, press <b>Go</b>.</li><li>Press <b>Install</b>, then <b>Open</b>.</li></ol>
+          <ol lang="fr"><li>Sur l'accueil, allez dans <b>Rechercher</b>, tapez « Downloader » et installez-le (par AFTVnews).</li><li>Activez les options développeur une fois : <b>Paramètres → Ma Fire TV → À propos</b>, cliquez <b>7 fois</b> sur le nom de l'appareil.</li><li><b>Paramètres → Ma Fire TV → Options pour les développeurs → Installer des applis inconnues → Downloader activé</b>.</li><li>Ouvrez Downloader, tapez <code>3727335</code>, appuyez sur <b>Go</b>.</li><li><b>Installer</b>, puis <b>Ouvrir</b>.</li></ol>
+        </div></details>
+        <details id="g-windows"><summary><span class="e">💻</span><span lang="en">Windows PC</span><span lang="fr">PC Windows</span></summary><div class="body">
+          <ol lang="en"><li>On your computer, go to <b>inkonabtv.alwaysdata.net</b> and click <b>Download for Windows</b>.</li><li>Open <code>inkonabtv.exe</code> from your Downloads.</li><li>If Windows says “Windows protected your PC”, click <b>More info</b>, then <b>Run anyway</b>.</li><li>Choose where to install, click <b>Install</b>, then <b>Finish</b>.</li><li>Open <b>InkonabTV</b> from the desktop or the Start menu and sign in. F11 switches to full screen.</li><li>The app updates itself when a new version is out.</li></ol>
+          <ol lang="fr"><li>Sur votre ordinateur, allez sur <b>inkonabtv.alwaysdata.net</b> et cliquez sur <b>Télécharger pour Windows</b>.</li><li>Ouvrez <code>inkonabtv.exe</code> dans vos Téléchargements.</li><li>Si Windows affiche « Windows a protégé votre ordinateur », cliquez sur <b>Informations complémentaires</b>, puis <b>Exécuter quand même</b>.</li><li>Choisissez l'emplacement, cliquez sur <b>Installer</b>, puis <b>Terminer</b>.</li><li>Ouvrez <b>InkonabTV</b> depuis le bureau ou le menu Démarrer et connectez-vous. F11 passe en plein écran.</li><li>L'appli se met à jour toute seule quand une nouvelle version sort.</li></ol>
+        </div></details>
+        <details id="g-setup"><summary><span class="e">⚙️</span><span lang="en">First setup: sign in</span><span lang="fr">Premier réglage : connexion</span></summary><div class="body">
+          <ol lang="en"><li>Open InkonabTV+. The sign-in screen appears.</li><li><b>Xtream Codes</b> tab: type your username and password, then <b>Sign in</b>.</li><li>Or <b>Set up from phone</b> (easiest on a TV): scan the QR code, type your details on the phone, press <b>Send to TV</b>.</li><li>Choose your playlist languages if asked. Wait a few seconds for the first load.</li><li>Enjoy Home, Live TV, Movies, Series and Search. Next time it opens instantly.</li></ol>
+          <ol lang="fr"><li>Ouvrez InkonabTV+. L'écran de connexion s'affiche.</li><li>Onglet <b>Xtream Codes</b> : tapez votre identifiant et votre mot de passe, puis <b>Se connecter</b>.</li><li>Ou <b>Configurer depuis le téléphone</b> (le plus simple sur télé) : scannez le QR code, tapez vos infos sur le téléphone, appuyez sur <b>Envoyer à la télé</b>.</li><li>Choisissez les langues de la playlist si demandé. Patientez quelques secondes au premier chargement.</li><li>Profitez de l'Accueil, du Direct, des Films, des Séries et de la Recherche. La fois suivante, tout s'ouvre instantanément.</li></ol>
+          <p><span lang="en">Extra M3U playlists: Settings → Extra playlists.</span><span lang="fr">Playlists M3U en plus : Réglages → Playlists supplémentaires.</span></p>
+        </div></details>
+        <details><summary><span class="e">▶️</span><span lang="en">Google Play &amp; Samsung TV</span><span lang="fr">Google Play &amp; Samsung TV</span></summary><div class="body">
+          <p lang="en" style="margin-top:0">Coming soon. Once live: open the store (<b>Play Store</b>, or <b>Apps → 🔍</b> on Samsung), search <b>InkonabTV</b>, install and open. The store version is a pure player: sign in with your own Xtream Codes server, username and password, an M3U link, or Set up from phone.</p>
+          <p lang="fr" style="margin-top:0">Bientôt. Une fois disponible : ouvrez la boutique (<b>Play Store</b>, ou <b>Apps → 🔍</b> sur Samsung), cherchez <b>InkonabTV</b>, installez et ouvrez. La version boutique est un lecteur pur : connectez-vous avec votre serveur Xtream Codes, identifiant et mot de passe, un lien M3U, ou Configurer depuis le téléphone.</p>
+        </div></details>
+      </div>
+    </div>
+    <div>
+      <div class="head reveal" style="margin-bottom:28px">
+        <div class="kicker">FAQ</div>
+        <h2><span lang="en">Good to <span class="y">know.</span></span><span lang="fr">Bon à <span class="y">savoir.</span></span></h2>
+      </div>
+      <div class="acc">
+        <details><summary><span lang="en">Is InkonabTV free?</span><span lang="fr">InkonabTV est gratuit ?</span></summary><div class="body"><span lang="en">Yes. Free, with no ads and no tracking.</span><span lang="fr">Oui. Gratuit, sans pub et sans pistage.</span></div></details>
+        <details><summary><span lang="en">Does it come with channels?</span><span lang="fr">Des chaînes sont-elles incluses ?</span></summary><div class="body"><span lang="en">InkonabTV is a player: you watch the playlist you already have, from your Xtream Codes login or an M3U link.</span><span lang="fr">InkonabTV est un lecteur : vous regardez la playlist que vous avez déjà, avec vos identifiants Xtream Codes ou un lien M3U.</span></div></details>
+        <details><summary><span lang="en">Is it safe? Where is my data?</span><span lang="fr">C'est sûr ? Où sont mes données ?</span></summary><div class="body"><span lang="en">Your playlist details stay on your device. We run no accounts and keep nothing. Install only from this site or the code 3727335. </span><span lang="fr">Les infos de votre playlist restent sur votre appareil. Pas de compte, rien n'est gardé chez nous. Installez seulement depuis ce site ou le code 3727335. </span><a class="y" href="privacy.html"><span lang="en">Privacy policy</span><span lang="fr">Confidentialité</span></a></div></details>
+        <details><summary><span lang="en">How do I update?</span><span lang="fr">Comment mettre à jour ?</span></summary><div class="body"><span lang="en">InkonabTV+ tells you when a new version is ready. You can also install it again the same way: your sign-in and settings are kept.</span><span lang="fr">InkonabTV+ vous prévient quand une nouvelle version est prête. Vous pouvez aussi la réinstaller de la même façon : connexion et réglages sont gardés.</span></div></details>
+        <details><summary><span lang="en">A channel won't play or keeps buffering</span><span lang="fr">Une chaîne ne marche pas ou coupe</span></summary><div class="body"><span lang="en">Try another channel, switch the live format in Settings (HLS / MPEG-TS), use a cable or 5 GHz Wi-Fi, and restart your router. If nothing plays, check your subscription with your provider. Still stuck? Ask our support bot.</span><span lang="fr">Essayez une autre chaîne, changez le format du direct dans les Réglages (HLS / MPEG-TS), utilisez un câble ou le Wi-Fi 5 GHz, redémarrez la box. Si rien ne marche, vérifiez votre abonnement chez votre fournisseur. Toujours bloqué ? Demandez à notre bot.</span></div></details>
+        <details><summary><span lang="en">How many devices can I use?</span><span lang="fr">Sur combien d'appareils ?</span></summary><div class="body"><span lang="en">Install it on as many devices as you like. How many can watch at once depends on your provider's subscription.</span><span lang="fr">Installez-la sur autant d'appareils que vous voulez. Le nombre d'écrans en même temps dépend de votre abonnement.</span></div></details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="support" style="padding-top:0">
+  <div class="wrap">
+    <div class="head reveal">
+      <div class="kicker"><span lang="en">Support</span><span lang="fr">Assistance</span></div>
+      <h2><span lang="en">Help is one <span class="y">message</span> away.</span><span lang="fr">L'aide est à un <span class="y">message</span>.</span></h2>
+      <p><span lang="en">Our Telegram bot answers right away in English and French, and a real person reads every message.</span><span lang="fr">Notre bot Telegram répond tout de suite en français et en anglais, et une vraie personne lit chaque message.</span></p>
+    </div>
+    <div class="sup">
+      <a class="reveal" href="https://t.me/InkonabTVHelpBot" target="_blank" rel="noopener"><div class="ic">🤖</div><b><span lang="en">Support bot</span><span lang="fr">Bot d'assistance</span></b><p><span lang="en">Guides, fixes and answers, 24/7.</span><span lang="fr">Guides, solutions et réponses, 24h/24.</span></p><em>@InkonabTVHelpBot →</em></a>
+      <a class="reveal" href="https://t.me/InkonabTVNews" target="_blank" rel="noopener"><div class="ic">📢</div><b><span lang="en">News channel</span><span lang="fr">Chaîne d'actus</span></b><p><span lang="en">New versions, features and tips.</span><span lang="fr">Nouvelles versions, fonctions et astuces.</span></p><em>t.me/InkonabTVNews →</em></a>
+      <a class="reveal" href="https://www.facebook.com/profile.php?id=61596171655758" target="_blank" rel="noopener"><div class="ic">👍</div><b>Facebook</b><p><span lang="en">Follow the page and share it.</span><span lang="fr">Suivez la page et partagez-la.</span></p><em>Inkonab TV →</em></a>
+      <a class="reveal" href="https://wa.me/23059755252" target="_blank" rel="noopener"><div class="ic">💬</div><b>WhatsApp</b><p><span lang="en">Prefer to chat? Message us.</span><span lang="fr">Vous préférez discuter ? Écrivez-nous.</span></p><em>+230 5975 5252 →</em></a>
+    </div>
+    <div class="donate reveal">
+      <div><h3><span lang="en">💛 Support InkonabTV</span><span lang="fr">💛 Soutenir InkonabTV</span></h3><p><span lang="en">The app is free. A small donation helps keep the updates coming.</span><span lang="fr">L'appli est gratuite. Un petit don aide à continuer les mises à jour.</span></p></div>
+      <a class="btn btn-y" href="https://paypal.me/fibiaccountant" target="_blank" rel="noopener"><span lang="en">Donate with PayPal</span><span lang="fr">Faire un don PayPal</span></a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <img src="img/logo.svg" alt="InkonabTV">
+    <nav>
+      <a href="#download"><span lang="en">Download</span><span lang="fr">Télécharger</span></a>
+      <a href="#guides">Guides</a>
+      <a href="https://t.me/InkonabTVHelpBot"><span lang="en">Support</span><span lang="fr">Assistance</span></a>
+      <a href="privacy.html"><span lang="en">Privacy</span><span lang="fr">Confidentialité</span></a>
+    </nav>
+    <span>© 2026 InkonabTV</span>
+  </div>
+  <p class="note"><span lang="en">InkonabTV is a media player. It does not include, host or sell any channels or content. Screenshots show demo content (Blender open movies).</span><span lang="fr">InkonabTV est un lecteur multimédia. Il n'inclut, n'héberge ni ne vend aucune chaîne ni contenu. Les captures montrent du contenu de démo (films libres Blender).</span></p>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  var root=document.documentElement;
+  function setLang(l){
+    root.setAttribute('data-l',l);root.lang=l;
+    document.querySelectorAll('.lang button').forEach(function(b){b.classList.toggle('on',b.dataset.set===l)});
+    try{localStorage.setItem('lang',l)}catch(e){}
+  }
+  var saved=null;try{saved=localStorage.getItem('lang')}catch(e){}
+  setLang(saved||((navigator.language||'en').toLowerCase().indexOf('fr')===0?'fr':'en'));
+  document.querySelectorAll('.lang button').forEach(function(b){b.onclick=function(){setLang(b.dataset.set)}});
+
+  var toast=document.getElementById('toast'),t;
+  document.querySelectorAll('[data-copy]').forEach(function(b){b.onclick=function(){
+    var v=b.dataset.copy;
+    (navigator.clipboard?navigator.clipboard.writeText(v):Promise.reject()).catch(function(){}).then(function(){
+      toast.textContent=(root.getAttribute('data-l')==='fr'?'Code copié : ':'Code copied: ')+v;
+      toast.classList.add('on');clearTimeout(t);t=setTimeout(function(){toast.classList.remove('on')},1800);
+    });
+  }});
+
+  // Latest version from version.json, when it's on the server.
+  fetch('version.json',{cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(v){
+    if(!v||!v.versionName)return;
+    document.querySelectorAll('.vname').forEach(function(e){e.textContent=v.versionName});
+    if(v.size){document.querySelector('.vsize').textContent=(v.size/1048576).toFixed(0)+' MB'}
+  }).catch(function(){});
+
+  // Open a guide when its link is used.
+  function openHash(){var d=document.getElementById(location.hash.slice(1));if(d&&d.tagName==='DETAILS')d.open=true}
+  window.addEventListener('hashchange',openHash);openHash();
+  document.querySelectorAll('a[href^="#g-"]').forEach(function(a){a.addEventListener('click',function(){setTimeout(openHash,0)})});
+
+  var io='IntersectionObserver' in window?new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})},{threshold:.12}):null;
+  document.querySelectorAll('.reveal').forEach(function(el){io?io.observe(el):el.classList.add('in')});
+})();
+</script>
+</body>
+</html>
