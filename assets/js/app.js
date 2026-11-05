@@ -954,11 +954,13 @@
     },
 
     // ---------- free playlists — available signed in or not ----------
-    // Built-in ones (config.js freePlaylists, none at the moment) and the viewer's own extra M3U
-    // playlists (Settings → Extra playlists). Each is a group pinned on top of Live TV.
+    // Built-in ones (config.js freePlaylists: MBC PLAY in InkonabTV+, none elsewhere; Settings can
+    // hide them) and the viewer's own extra M3U playlists (Settings → Extra playlists). Each is a
+    // group pinned on top of Live TV.
     loadFree() {
       if (!this.free) {
-        const lists = [...(CFG.freePlaylists || []).map(p => ({ ...p, builtin: true })), ...(Settings.extraPlaylists || [])];
+        const builtin = Settings.hideBuiltin ? [] : (CFG.freePlaylists || []).map(p => ({ ...p, builtin: true }));
+        const lists = [...builtin, ...(Settings.extraPlaylists || [])];
         this.free = Promise.all(lists.map(p =>
           M3U.load(p.url).then(list => list.map((c, i) => {
             const ch = { num: i + 1, name: c.name, label: c.name, stream_icon: c.logo, url: c.url, radio: c.radio, source: p.name, builtin: !!p.builtin,
@@ -2291,6 +2293,7 @@
         </section>` : ''}
         <section class="set-group" id="xpGroup">
           <h3>Extra playlists</h3>
+          ${(CFG.freePlaylists || []).length ? `<label class="set toggle"><span>Show ${esc(CFG.freePlaylists.map(p => p.name).join(' and '))}<small>Free TV and radio channels built into the app, on top of Live TV and on Home.</small></span><input type="checkbox" id="setBuiltin"></label>` : ''}
           <p class="muted small-note">Add M3U playlists of your own, for example free TV channels. Each one shows as a group on top of Live TV and as a row on Home.</p>
           <div id="xpList"></div>
           <label class="set"><span>Name</span><input class="field" id="xpName" maxlength="40" placeholder="My channels" autocapitalize="none" spellcheck="false"></label>
@@ -2337,6 +2340,11 @@
         resetPicks();
         this.route();
       });
+      const builtinBox = $('#setBuiltin', m);
+      if (builtinBox) {
+        builtinBox.checked = !Settings.hideBuiltin;
+        builtinBox.addEventListener('change', e => { save('hideBuiltin', !e.target.checked); this.extraChanged(); });
+      }
       const pinChange = $('#pinChange', m);
       if (pinChange) pinChange.addEventListener('click', async () => { if (await this.askPin('change')) await this.askPin('create'); });
       $('#testRelay', m).addEventListener('click', async () => {

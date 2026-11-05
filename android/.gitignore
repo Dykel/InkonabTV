@@ -104,3 +104,4 @@ app/src/main/res/xml/config.xml
 keystore.properties
 keystore/
 app/src/play/assets/public/
+app/src/full/assets/public/
