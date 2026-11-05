@@ -652,7 +652,12 @@
   // Minimal M3U parser: [{name, logo, group, url, radio}]
   const M3U = {
     async load(url) {
-      const text = await fetch(url, { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error('Playlist ' + r.status); return r.text(); });
+      const web = () => fetch(url, { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error('Playlist ' + r.status); return r.text(); });
+      // Android app: read it natively when the site sends no CORS headers (the WebView then
+      // refuses it, e.g. inkonabtv.alwaysdata.net/tv.m3u). App versions without fetchText fall back.
+      const P = window.Native && Native.player;
+      const native = () => P.fetchText({ url }).then(r => { if (!r.ok) throw new Error(r.text || 'Playlist failed'); return r.text; });
+      const text = P ? await web().catch(e => native().catch(() => { throw e; })) : await web();
       const out = [];
       let cur = null;
       for (const raw of text.split(/\r?\n/)) {

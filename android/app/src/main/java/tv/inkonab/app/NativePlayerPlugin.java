@@ -101,6 +101,54 @@ public class NativePlayerPlugin extends Plugin {
         });
     }
 
+    /**
+     * { url } → { ok, status, text }: reads a playlist (M3U) natively, for sites that send no CORS
+     * headers (the WebView refuses to read those). Follows redirects, also between http and https.
+     */
+    @PluginMethod
+    public void fetchText(PluginCall call) {
+        String link = call.getString("url", "");
+        new Thread(() -> {
+            JSObject out = new JSObject();
+            java.net.HttpURLConnection conn = null;
+            try {
+                String at = link;
+                for (int hops = 0; hops < 6; hops++) {
+                    conn = (java.net.HttpURLConnection) new java.net.URL(at).openConnection();
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(30000);
+                    conn.setUseCaches(false);
+                    conn.setInstanceFollowRedirects(false);
+                    conn.setRequestProperty("User-Agent", "InkonabTV");
+                    int code = conn.getResponseCode();
+                    if (code < 300 || code >= 400 || conn.getHeaderField("Location") == null) break;
+                    at = new java.net.URL(new java.net.URL(at), conn.getHeaderField("Location")).toString();
+                    conn.disconnect();
+                }
+                int code = conn.getResponseCode();
+                out.put("status", code);
+                if (code != 200) throw new Exception("Playlist " + code);
+                java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
+                try (java.io.InputStream in = conn.getInputStream()) {
+                    byte[] buf = new byte[65536];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        body.write(buf, 0, n);
+                        if (body.size() > 64 * 1024 * 1024) throw new Exception("Playlist too big");
+                    }
+                }
+                out.put("ok", true);
+                out.put("text", body.toString("UTF-8"));
+            } catch (Exception e) {
+                out.put("ok", false);
+                out.put("text", e.getMessage() == null ? e.toString() : e.getMessage());
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+            call.resolve(out);
+        }).start();
+    }
+
     /** Download { url, sha256 }, check it, then open Android's installer. Progress: "update" events. */
     @PluginMethod
     public void updateDownload(PluginCall call) {
