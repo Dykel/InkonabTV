@@ -1739,7 +1739,7 @@
         const { ch, prog } = progAt(b);
         const now = Date.now();
         const badge = !prog ? '<span class="chip">Live</span>'
-          : prog.start <= now && prog.end > now ? `<span class="badge live">● Live now</span> <span class="bar gp-bar"><i style="width:${(((now - prog.start) / (prog.end - prog.start)) * 100).toFixed(1)}%"></i></span>`
+          : prog.start <= now && prog.end > now ? `<span class="badge on-air">● Live now</span> <span class="bar gp-bar"><i style="width:${(((now - prog.start) / (prog.end - prog.start)) * 100).toFixed(1)}%"></i></span>`
           : prog.end <= now ? (this.canReplay(ch, prog) ? '<span class="badge replay">⟲ Replay — press OK</span>' : '<span class="chip">Ended</span>')
           : '<span class="chip">Upcoming</span>';
         info.innerHTML = `
@@ -2062,6 +2062,9 @@
         playEp(ep, true);
       });
       this.renderVersions(m, item, v => { if (v !== item) this.openSeries(v); });
+      // Open on the season of the episode to resume.
+      const last = this.cw().find(e => e.seriesId == item.id);
+      const resumeEp = last && flat.find(e => String(e.id) === String(last.id));
       const firstSeason = resumeEp ? resumeEp.season : seasons[0];
       $$('.season', m).forEach(x => x.classList.toggle('active', x.dataset.s === firstSeason));
       renderSeason(firstSeason);

@@ -1,8 +1,8 @@
 {
   "name": "inkonabtv",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "private": true,
-  "description": "InkonabTV player \u2014 web (GitHub Pages) and Android phone/TV app from one codebase",
+  "description": "InkonabTV player — web (GitHub Pages) and Android phone/TV app from one codebase",
   "license": "GPL-3.0-or-later",
   "scripts": {
     "build:web": "node scripts/build-web.mjs",
@@ -12,7 +12,8 @@
     "aab": "npm run sync && cd android && ./gradlew bundlePlayRelease",
     "release:plus": "npm run sync && cd android && ./gradlew assembleFullRelease && cd .. && node scripts/release-plus.mjs",
     "tizen": "node scripts/build-tizen.mjs",
-    "test": "node test/smoke.mjs"
+    "test": "node test/smoke.mjs",
+    "screens": "node test/screens.mjs"
   },
   "dependencies": {
     "@capacitor/android": "7.6.9",
