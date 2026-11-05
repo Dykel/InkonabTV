@@ -1,7 +1,7 @@
 {
   "versionCode": 13,
   "versionName": "1.0.12",
-  "sha256": "68ea8821563196e35287cd6439fd196b9997b37853c339f8c433c9812f5196a4",
-  "size": 17968940,
-  "notes": "Series open with their episode list again, on the season you were watching\nPhones held sideways: tabs on the left, more posters on screen\nBetter layout on tablets, foldables and car screens\nTV Guide: \"Live now\" badge fixed on wide screens"
+  "sha256": "56c41a6db1cda8a9060fc3491f170b46a1f540b8ef51181867ee7a414b373033",
+  "size": 17969464,
+  "notes": "MBC PLAY is back: free TV and radio on top of Live TV (Settings → Extra playlists can hide it)\nSeries open with their episode list again, on the season you were watching\nPhones held sideways: tabs on the left, more posters on screen\nBetter layout on tablets, foldables and car screens\nTV Guide: \"Live now\" badge fixed on wide screens"
 }
