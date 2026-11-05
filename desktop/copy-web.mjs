@@ -17,6 +17,7 @@ console.log('Web player copied to desktop/www');
 if (process.argv.includes('--store')) {
   const cfg = readFileSync(join(out, 'config.js'), 'utf8')
     .replace(/^(\s*server:\s*)'[^']*'/m, "$1''")
+    .replace(/^(\s*updateUrl:\s*)'[^']*'/m, "$1''")
     .replace(/^(\s*freePlaylists:\s*)\[[\s\S]*?\n\s*\]/m, '$1[]');
   writeFileSync(join(out, 'config.js'), cfg +
     "\n// Microsoft Store version (written by desktop/copy-web.mjs --store).\nObject.assign(window.INKONAB_CONFIG, { playerMode: true, server: '', freePlaylists: [], vpn: false, updateUrl: '' });\n");

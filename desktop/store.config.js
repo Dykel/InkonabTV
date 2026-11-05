@@ -25,6 +25,8 @@ module.exports = {
     backgroundColor: '#05090b',
     showNameOnTiles: true,
     languages: ['en-US'],
+    minVersion: '10.0.17763.0',       // Windows 10 1809, the oldest Electron supports
+    maxVersionTested: '10.0.26100.0', // Windows 11 24H2
     artifactName: 'InkonabTV-store-${version}.${ext}',
   },
 };
