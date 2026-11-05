@@ -1,0 +1,60 @@
+# Microsoft Store package (desktop/store.config.js): built on a Windows machine, because the
+# AppX/MSIX tools only run there. Run it from the Actions tab ("Run workflow"); the package is
+# attached to the run as "InkonabTV-store". The package identity comes from the repository
+# variables MS_IDENTITY_NAME, MS_PUBLISHER and MS_PUBLISHER_NAME (Settings → Secrets and
+# variables → Actions → Variables), copied from Partner Center → Product identity.
+name: Microsoft Store package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  store:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - run: npm ci
+
+      # The Dolby sound converter: the same BtbN LGPL build the Windows installer bundles,
+      # pinned to one dated build and checked against its SHA-256.
+      - name: FFmpeg
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FF_TAG: autobuild-2026-11-04-12-51
+          FF_ZIP: ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-shared-8.1.zip
+          FF_SHA256: 1b32a03bcc71e7db008484060dd1f5734369b14e4f5fea88368e96be35b7288d
+        run: |
+          gh release download $env:FF_TAG -R BtbN/FFmpeg-Builds -p $env:FF_ZIP -D $env:RUNNER_TEMP
+          $zip = Join-Path $env:RUNNER_TEMP $env:FF_ZIP
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $env:FF_SHA256) { throw "FFmpeg checksum mismatch" }
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\ff"
+          $src = Get-ChildItem "$env:RUNNER_TEMP\ff" -Directory | Select-Object -First 1
+          New-Item -ItemType Directory -Force vendor\ffmpeg\win | Out-Null
+          Copy-Item "$($src.FullName)\bin\ffmpeg.exe", "$($src.FullName)\bin\*.dll" vendor\ffmpeg\win
+          Copy-Item "$($src.FullName)\LICENSE.txt" vendor\ffmpeg\win\FFmpeg-LICENSE.txt
+
+      - run: npm run dist:store
+        env:
+          MS_IDENTITY_NAME: ${{ vars.MS_IDENTITY_NAME }}
+          MS_PUBLISHER: ${{ vars.MS_PUBLISHER }}
+          MS_PUBLISHER_NAME: ${{ vars.MS_PUBLISHER_NAME }}
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: InkonabTV-store
+          path: release/store/*.appx
+          if-no-files-found: error

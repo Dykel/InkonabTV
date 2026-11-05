@@ -11,6 +11,7 @@
     "start": "npm run copy-web && electron .",
     "dist:win": "npm run copy-web && electron-builder --win --x64",
     "release:windows": "npm run dist:win && node ../scripts/release-desktop.mjs win",
+    "dist:store": "node copy-web.mjs --store && electron-builder --win --x64 --config store.config.js",
     "dist:mac": "npm run copy-web && electron-builder --mac --universal --config.directories.output=../release/mac",
     "release:mac": "npm run dist:mac && node ../scripts/release-desktop.mjs mac"
   },

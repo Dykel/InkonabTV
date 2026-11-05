@@ -16,7 +16,7 @@ let downloaded = '';
 
 function appVersion() {
   return {
-    updater: app.isPackaged && (process.platform === 'win32' || mac),
+    updater: app.isPackaged && !process.windowsStore && (process.platform === 'win32' || mac), // the Store updates its own copy
     canInstall: true,
     name: app.getVersion(),
     code: codeOf(app.getVersion()),
