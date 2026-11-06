@@ -8,3 +8,6 @@ Self_Checklist*.xlsx
 .wrangler/
 release/
 beta-testers.csv
+
+# Hotel details (Wi-Fi password): not in the public repo
+hotel/hotel.json

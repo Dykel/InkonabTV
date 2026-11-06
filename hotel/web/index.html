@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1518">
+  <meta name="referrer" content="no-referrer">
+  <title>InkonabTV Hotel</title>
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
+  <link rel="stylesheet" href="hotel.css">
+</head>
+<body>
+  <!-- InkonabTV Hotel: one welcome screen with big channel tiles, the hotel's Wi-Fi and information.
+       No sign-in, films or series. Channels come from the hotel playlist, downloaded at every start. -->
+  <header class="top">
+    <div class="welcome">
+      <small>Welcome · Bienvenue</small>
+      <h1 id="hotelName"></h1>
+    </div>
+    <div class="clock"><b id="time"></b><span id="date"></span></div>
+  </header>
+
+  <main class="main">
+    <section class="tv">
+      <h2>Live TV <span>· Télévision</span></h2>
+      <div class="grid" id="grid"><p class="note" id="gridNote">Loading channels… · Chargement des chaînes…</p></div>
+    </section>
+
+    <aside class="side">
+      <section class="card wifi">
+        <h2>Wi-Fi <span>· Internet</span></h2>
+        <div class="wifi-row">
+          <img id="wifiQr" class="qr" alt="Wi-Fi QR code">
+          <div class="wifi-text">
+            <p class="hint">Scan with your phone camera<br><i>Scannez avec votre téléphone</i></p>
+            <dl>
+              <dt>Network · Réseau</dt><dd id="ssid"></dd>
+              <dt id="passLabel">Password · Mot de passe</dt><dd id="pass"></dd>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+      <section class="card info">
+        <h2>Hotel information <span>· Infos</span></h2>
+        <ul id="info"></ul>
+      </section>
+
+      <section class="card web">
+        <img id="webQr" class="qr small" alt="Website QR code">
+        <div>
+          <h2>Our website <span>· Notre site</span></h2>
+          <b id="webUrl"></b>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <div class="autoplay hidden" id="autoplay" role="status"></div>
+  <button class="gear" id="gear" aria-label="Settings">⚙</button>
+  <div class="modal hidden" id="modal" role="dialog" aria-modal="true"></div>
+  <div class="web-player hidden" id="webPlayer"><video id="video" autoplay playsinline controls></video></div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="assets/js/vendor/capacitor.js"></script>
+  <script src="config.js"></script>
+  <script src="assets/js/vendor/qrcode.js"></script>
+  <script src="assets/js/native.js"></script>
+  <script src="hotel.js"></script>
+</body>
+</html>

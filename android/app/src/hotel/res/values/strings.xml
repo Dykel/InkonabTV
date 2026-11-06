@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- Hotel version: its own name so it can sit next to the other InkonabTV apps. -->
+<resources>
+    <string name="app_name">InkonabTV Hotel</string>
+    <string name="title_activity_main">InkonabTV Hotel</string>
+</resources>

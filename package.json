@@ -13,7 +13,8 @@
     "release:plus": "npm run sync && cd android && ./gradlew assembleFullRelease && cd .. && node scripts/release-plus.mjs",
     "tizen": "node scripts/build-tizen.mjs",
     "test": "node test/smoke.mjs",
-    "screens": "node test/screens.mjs"
+    "screens": "node test/screens.mjs",
+    "apk:hotel": "npm run sync && cd android && ./gradlew assembleHotelRelease"
   },
   "dependencies": {
     "@capacitor/android": "7.6.9",

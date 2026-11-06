@@ -4,6 +4,7 @@ import android.app.UiModeManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.net.Uri;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.WebView;
 
@@ -72,6 +73,30 @@ public class NativePlayerPlugin extends Plugin {
         JSObject out = new JSObject();
         out.put("tv", ui != null && ui.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION);
         call.resolve(out);
+    }
+
+    // ---------- start with the TV (hotel version) ----------
+
+    /** { allowed }: Android 10+ opens an app from the background only with "Display over other apps". */
+    @PluginMethod
+    public void autostartStatus(PluginCall call) {
+        JSObject o = new JSObject();
+        o.put("allowed", android.os.Build.VERSION.SDK_INT < 29 || android.provider.Settings.canDrawOverlays(getContext()));
+        call.resolve(o);
+    }
+
+    /** Opens the "Display over other apps" switch for this app (or the app's info page if the TV hides it). */
+    @PluginMethod
+    public void autostartSettings(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            Uri pkg = Uri.parse("package:" + getContext().getPackageName());
+            try {
+                getActivity().startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkg));
+            } catch (Exception e) {
+                try { getActivity().startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)); } catch (Exception ignored) { }
+            }
+            call.resolve();
+        });
     }
 
     // ---------- self-update (sideload version; the Play version answers updater: false) ----------

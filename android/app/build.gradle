@@ -19,12 +19,25 @@ android {
     // Two versions from the same code:
     //   play  Google Play: a pure player (people add their own playlist), no VPN, no built-in server.
     //   full  sideload APK: built-in InkonabTV server and the free VPN (OpenVPN + VPN Gate).
+    //   hotel sideload APK for hotel room TVs: one welcome screen (hotel/web/) with the hotel
+    //         playlist, Wi-Fi and information, the free VPN, and it starts with the TV.
     flavorDimensions "store"
     productFlavors {
         play { dimension "store" }
         full {
             dimension "store"
             applicationIdSuffix ".full"
+        }
+        hotel {
+            dimension "store"
+            applicationIdSuffix ".hotel"
+        }
+    }
+    // The hotel version shares the sideload version's VPN and updater code and OpenVPN engine.
+    sourceSets {
+        hotel {
+            java.srcDirs += 'src/full/java'
+            jniLibs.srcDirs = ['src/full/jniLibs']
         }
     }
     // The OpenVPN engine (libovpnexec.so, full version) runs as a process, so native libs are extracted.

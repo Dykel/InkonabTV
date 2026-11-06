@@ -20,6 +20,16 @@ public class MainActivity extends BridgeActivity {
         tv.inkonab.app.vpn.VpnManager.get().init(this);
     }
 
+    // Hotel version: opened again when the TV is switched on (hotel/BootReceiver): let the welcome
+    // screen start its channel countdown again.
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        String why = intent.getStringExtra("hotelStart");
+        if (why != null && getBridge() != null)
+            getBridge().getWebView().evaluateJavascript("window.HotelStart && HotelStart('" + why + "')", null);
+    }
+
     // On a focused text field the WebView swallows the remote's OK button, so the page never sees
     // it. Tell the page; on TV it opens the on-screen keyboard for that field (native.js).
     @Override

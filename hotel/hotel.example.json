@@ -1,0 +1,38 @@
+{
+  "name": "Your Hotel",
+  "playlist": "https://inkonabtv.alwaysdata.net/hotel.m3u",
+  "website": "https://example.com/",
+  "wifi": {
+    "ssid": "Hotel Wi-Fi",
+    "security": "WPA",
+    "password": "change-me",
+    "qr": "WIFI:S:Hotel Wi-Fi;T:WPA;P:change-me;;"
+  },
+  "info": [
+    {
+      "en": "Check-in",
+      "fr": "Arrivée",
+      "time": "14:00"
+    },
+    {
+      "en": "Check-out",
+      "fr": "Départ",
+      "time": "11:00"
+    },
+    {
+      "en": "Breakfast",
+      "fr": "Petit-déjeuner",
+      "time": "7:00",
+      "note": {
+        "en": "Earlier on request",
+        "fr": "Plus tôt sur demande"
+      }
+    },
+    {
+      "en": "Dinner",
+      "fr": "Dîner",
+      "time": "19:00 – 20:30"
+    }
+  ],
+  "autoplayDelay": 10
+}
