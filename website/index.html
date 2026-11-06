@@ -135,6 +135,8 @@ section{padding:76px 0}
 .store>span{font-size:26px}
 .store b{display:block;font-family:Saira;font-size:18px}
 .store small{color:var(--mut)}
+.store.live{border-color:rgba(252,195,11,.45);background:rgba(252,195,11,.07)}.store.live:hover{background:rgba(252,195,11,.12)}.store.live small{color:#d4e0e3}
+.hplay{margin-top:14px;font-size:15px}.hplay a{color:var(--mut);text-decoration:underline}
 
 /* guides & faq */
 .acc{display:grid;gap:12px}
@@ -208,8 +210,9 @@ footer a:hover{color:var(--fg)}
       <p class="lead"><span lang="en">A fast, beautiful player for your own IPTV playlist. Live TV with a real TV guide, movies and series with posters, replay and continue watching. Free, with no ads.</span><span lang="fr">Un lecteur rapide et élégant pour votre propre playlist IPTV. Télé en direct avec un vrai guide TV, films et séries avec affiches, replay et reprise de lecture. Gratuit, sans pub.</span></p>
       <div class="cta">
         <a class="btn btn-y" href="inkonabtv.apk" download><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 21h16"/></svg><span lang="en">Download for Android</span><span lang="fr">Télécharger pour Android</span></a>
-        <a class="btn btn-g" href="#guides"><span lang="en">How to install</span><span lang="fr">Comment installer</span></a>
+        <a class="btn btn-g" href="https://play.google.com/store/apps/details?id=tv.inkonab.app" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.2v17.6c0 .5.5.8 1 .6l15-8.8c.4-.3.4-.9 0-1.2L6 2.6c-.5-.2-1 .1-1 .6z"/></svg><span lang="en">Get it on Google Play</span><span lang="fr">Disponible sur Google Play</span></a>
       </div>
+      <p class="hplay"><a href="#guides"><span lang="en">How to install</span><span lang="fr">Comment installer</span></a></p>
       <div class="code"><span><span lang="en">Android TV &amp; Fire TV · Downloader code</span><span lang="fr">Android TV &amp; Fire TV · code Downloader</span></span><b>3727335</b><button data-copy="3727335"><span lang="en">Copy</span><span lang="fr">Copier</span></button></div>
     </div>
     <div class="devices">
@@ -228,7 +231,7 @@ footer a:hover{color:var(--fg)}
     <span class="chip ok"><span lang="en">Windows PC</span><span lang="fr">PC Windows</span></span>
     <span class="chip ok">Mac</span>
     <span class="chip soon">Samsung TV <em><span lang="en">Soon</span><span lang="fr">Bientôt</span></em></span>
-    <span class="chip soon">Google Play <em><span lang="en">Soon</span><span lang="fr">Bientôt</span></em></span>
+    <a class="chip ok" href="https://play.google.com/store/apps/details?id=tv.inkonab.app" target="_blank" rel="noopener">Google Play</a>
     <span class="chip soon">iPhone · iPad <em><span lang="en">Soon</span><span lang="fr">Bientôt</span></em></span>
   </div>
 </div>
@@ -294,6 +297,7 @@ footer a:hover{color:var(--fg)}
           <li><span lang="en">Tap Install, then Open.</span><span lang="fr">Touchez Installer, puis Ouvrir.</span></li>
         </ol>
         <a class="btn btn-y" href="inkonabtv.apk" download><span lang="en">Download the APK</span><span lang="fr">Télécharger l'APK</span></a>
+        <a class="small-link" href="https://play.google.com/store/apps/details?id=tv.inkonab.app" target="_blank" rel="noopener"><span lang="en">Or get InkonabTV on Google Play</span><span lang="fr">Ou installez InkonabTV depuis Google Play</span></a>
       </div>
       <div class="card reveal">
         <div class="top"><span>📺</span><div><h3>Android TV · Google TV</h3><small><span lang="en">and Android TV boxes</span><span lang="fr">et box Android TV</span></small></div></div>
@@ -303,6 +307,7 @@ footer a:hover{color:var(--fg)}
         </ol>
         <div class="bigcode">3727335</div>
         <a class="btn btn-g" href="#g-tv"><span lang="en">Full guide</span><span lang="fr">Guide complet</span></a>
+        <a class="small-link" href="https://play.google.com/store/apps/details?id=tv.inkonab.app" target="_blank" rel="noopener"><span lang="en">Or search “InkonabTV” in the TV's Play Store</span><span lang="fr">Ou cherchez « InkonabTV » dans le Play Store de la TV</span></a>
       </div>
       <div class="card reveal">
         <div class="top"><span>🔥</span><div><h3>Fire TV · Fire Stick</h3><small>Amazon</small></div></div>
@@ -329,7 +334,7 @@ footer a:hover{color:var(--fg)}
     </div>
     <div class="ver"><span><span lang="en">Latest version</span><span lang="fr">Dernière version</span>: <b class="vname">1.0.10</b></span><span class="vsize"></span><span><span lang="en">Android 7 or newer · Windows 10/11 · macOS 12+</span><span lang="fr">Android 7 ou plus récent · Windows 10/11 · macOS 12+</span></span><span><span lang="en">Already installed? It updates itself.</span><span lang="fr">Déjà installée ? Elle se met à jour toute seule.</span></span></div>
     <div class="stores">
-      <div class="store reveal"><span>▶️</span><div><b>Google Play</b><small><span lang="en">Coming soon · player for your own playlist</span><span lang="fr">Bientôt · lecteur pour votre propre playlist</span></small></div></div>
+      <a class="store reveal live" href="https://play.google.com/store/apps/details?id=tv.inkonab.app" target="_blank" rel="noopener"><span>▶️</span><div><b>Google Play</b><small><span lang="en">Available now · phones, tablets and Android TV · player for your own playlist</span><span lang="fr">Disponible · téléphones, tablettes et Android TV · lecteur pour votre propre playlist</span></small></div></a>
       <div class="store reveal"><span>📺</span><div><b>Samsung TV</b><small><span lang="en">Coming soon · 2018 and newer</span><span lang="fr">Bientôt · modèles 2018 et plus</span></small></div></div>
       <div class="store reveal"><span>🍏</span><div><b>iPhone · iPad</b><small><span lang="en">Coming soon to the App Store</span><span lang="fr">Bientôt sur l'App Store</span></small></div></div>
     </div>
@@ -370,8 +375,8 @@ footer a:hover{color:var(--fg)}
           <p><span lang="en">Extra M3U playlists: Settings → Extra playlists.</span><span lang="fr">Playlists M3U en plus : Réglages → Playlists supplémentaires.</span></p>
         </div></details>
         <details><summary><span class="e">▶️</span><span lang="en">Google Play &amp; Samsung TV</span><span lang="fr">Google Play &amp; Samsung TV</span></summary><div class="body">
-          <p lang="en" style="margin-top:0">Coming soon. Once live: open the store (<b>Play Store</b>, or <b>Apps → 🔍</b> on Samsung), search <b>InkonabTV</b>, install and open. The store version is a pure player: sign in with your own Xtream Codes server, username and password, an M3U link, or Set up from phone.</p>
-          <p lang="fr" style="margin-top:0">Bientôt. Une fois disponible : ouvrez la boutique (<b>Play Store</b>, ou <b>Apps → 🔍</b> sur Samsung), cherchez <b>InkonabTV</b>, installez et ouvrez. La version boutique est un lecteur pur : connectez-vous avec votre serveur Xtream Codes, identifiant et mot de passe, un lien M3U, ou Configurer depuis le téléphone.</p>
+          <p lang="en" style="margin-top:0"><b>Google Play: available now</b> on phones, tablets and Android TV (<a href="https://play.google.com/store/apps/details?id=tv.inkonab.app" target="_blank" rel="noopener" style="text-decoration:underline">open the listing</a>). Samsung TV: coming soon. Open the store (<b>Play Store</b>, or <b>Apps → 🔍</b> on Samsung), search <b>InkonabTV</b>, install and open. The store version is a pure player: sign in with your own Xtream Codes server, username and password, an M3U link, or Set up from phone.</p>
+          <p lang="fr" style="margin-top:0"><b>Google Play : disponible</b> sur téléphones, tablettes et Android TV (<a href="https://play.google.com/store/apps/details?id=tv.inkonab.app" target="_blank" rel="noopener" style="text-decoration:underline">voir la fiche</a>). Samsung TV : bientôt. Ouvrez la boutique (<b>Play Store</b>, ou <b>Apps → 🔍</b> sur Samsung), cherchez <b>InkonabTV</b>, installez et ouvrez. La version boutique est un lecteur pur : connectez-vous avec votre serveur Xtream Codes, identifiant et mot de passe, un lien M3U, ou Configurer depuis le téléphone.</p>
         </div></details>
       </div>
     </div>
