@@ -253,13 +253,15 @@
       if (!$('modal').classList.contains('hidden')) { e.preventDefault(); closeSettings(); }
       return; // on the welcome screen: native.js asks App.confirmExit()
     }
+    if (pinInput && /^[0-9]$/.test(e.key)) { e.preventDefault(); pinInput(e.key); return; }
+    if (pinInput && (e.key === 'Backspace' || e.key === 'Delete')) { e.preventDefault(); pinInput('del'); return; }
     if (/^Arrow/.test(e.key)) { e.preventDefault(); move(e.key); return; }
     // Number keys on the remote: play that channel.
     if (/^[1-9]$/.test(e.key) && $('modal').classList.contains('hidden')) {
       const n = Number(e.key) - 1;
       if (channels[n]) { e.preventDefault(); play(n); }
     }
-    if (e.key === 'ContextMenu' || e.key === 'Menu') { e.preventDefault(); openSettings(); }
+    if (e.key === 'ContextMenu' || e.key === 'Menu') { e.preventDefault(); requestSettings(); }
   }, true);
   document.addEventListener('mousedown', () => stopCountdown(), true);
   document.addEventListener('touchstart', () => stopCountdown(), { capture: true, passive: true });
@@ -278,6 +280,8 @@
     const P = native();
     const vpn = P ? await P.vpnStatus().catch(() => null) : null;
     const auto = P && P.autostartStatus ? await P.autostartStatus().catch(() => null) : null;
+    const home = P && P.homeStatus ? await P.homeStatus().catch(() => null) : null;
+    const startOn = !!((auto && auto.allowed) || (home && home.isHome));
     const ver = P ? await P.appVersion().catch(() => null) : null;
     const secs = autoplaySecs();
     const modal = $('modal');
@@ -285,11 +289,25 @@
       <h2>Settings · Réglages</h2>
       <p>For hotel staff. Channels are downloaded from the hotel playlist at every start.</p>
 
-      <h3>1 · Start with the TV <span class="${auto && auto.allowed ? 'ok' : 'warn'}">${!P ? 'only in the TV app' : auto && auto.allowed ? 'ON ✓' : 'OFF'}</span></h3>
-      <p>The app opens by itself when the TV is switched on or wakes up. Android asks for
-        “Display over other apps” (or “Appear on top”) for this: press the button, choose
-        <b>InkonabTV Hotel</b>, switch it on, then press Back.</p>
-      ${P ? `<div class="row"><button class="btn${auto && auto.allowed ? '' : ' on'}" data-act="autostart">${auto && auto.allowed ? 'Open the setting' : 'Switch it on'}</button></div>` : ''}
+      <h3>1 · Start with the TV <span class="${startOn ? 'ok' : 'warn'}">${!P ? 'only in the TV app' : startOn ? 'ON ✓' : 'OFF'}</span></h3>
+      <p>The app opens by itself when the TV is switched on. Use <b>A</b>, or <b>B</b> if this TV has no
+        “Display over other apps” setting.</p>
+      ${P ? `<div class="opt">
+        <b>A · Display over other apps</b> ${auto && auto.allowed ? '<span class="okt">allowed ✓</span>' : ''}
+        <small>Press the button, choose <b>InkonabTV Hotel</b>, switch it on, then press Back.</small>
+        <div class="row"><button class="btn${startOn ? '' : ' on'}" data-act="autostart">${auto && auto.allowed ? 'Open the setting' : 'Switch it on'}</button></div>
+        ${autostartMsg ? `<small class="warnt">${autostartMsg}</small>` : ''}
+      </div>
+      ${home && home.available ? `<div class="opt">
+        <b>B · Use as the TV’s home screen</b> ${home.isHome ? '<span class="okt">ON ✓</span>' : ''}
+        <small>The TV opens InkonabTV Hotel at every start and when Home is pressed. The button presses
+          Home: if the TV asks which home app to use, choose <b>InkonabTV Hotel</b> → <b>Always</b>.
+          If the TV’s own home screen just opens, this TV doesn’t allow it: use A.</small>
+        <div class="row">${home.isHome || home.enabled
+          ? `${home.isHome ? '' : '<button class="btn" data-act="home-on">Try again</button>'}<button class="btn" data-act="home-off">Stop using as home screen</button>`
+          : '<button class="btn" data-act="home-on">Use as home screen</button>'}</div>
+        ${home.enabled && !home.isHome ? '<small class="warnt">Not the home screen: this TV kept its own. Use A instead (or “Stop using as home screen”).</small>' : ''}
+      </div>` : ''}` : ''}
 
       <h3>2 · Autoplay when the app opens <span class="${secs >= 0 ? 'ok' : 'warn'}">${secs < 0 ? 'OFF' : secs === 0 ? 'ON · at once' : 'ON · after ' + secs + ' s'}</span></h3>
       <p>Plays the last watched channel. Guests can press any button during the countdown to stay on this screen.</p>
@@ -302,6 +320,7 @@
         <div class="row">${['auto', 'always', 'off'].map(m => `<button class="btn${vpn.mode === m ? ' on' : ''}" data-vpn="${m}">${{ auto: 'Automatic', always: 'Always on', off: 'Off' }[m]}</button>`).join('')}</div>` : ''}
 
       <div class="row last">
+        <button class="btn" data-act="pin">Change PIN</button>
         <button class="btn" data-act="reload">Reload channels</button>
         <button class="btn" data-act="close">Close</button>
         <span class="status">${ver ? 'InkonabTV Hotel ' + esc(ver.name) + ' · ' : ''}${channels.length} channels</span>
@@ -318,13 +337,33 @@
       openSettings('[data-autoplay="' + b.dataset.autoplay + '"]');
     }));
     const on = (act, fn) => { const b = modal.querySelector(`[data-act="${act}"]`); if (b) b.addEventListener('click', fn); };
-    on('autostart', () => { settingsAway = true; P.autostartSettings().catch(() => {}); });
+    on('autostart', async () => {
+      settingsAway = true;
+      const r = await P.autostartSettings().catch(() => null);
+      if (!r || r.screen === 'none') {
+        settingsAway = false;
+        autostartMsg = 'This TV has no “Display over other apps” setting. Use B instead.';
+        openSettings('[data-act="home-on"]');
+      }
+    });
+    on('home-on', async () => {
+      settingsAway = true;
+      const r = await P.homeSet({ on: true }).catch(() => null);
+      if (r && r.isHome) { settingsAway = false; toast('InkonabTV Hotel is now the home screen'); openSettings('[data-act="home-off"]'); }
+      else if (!r || !r.asked) { settingsAway = false; openSettings('[data-act="home-on"]'); }
+    });
+    on('home-off', async () => {
+      await P.homeSet({ on: false }).catch(() => null);
+      openSettings('[data-act="home-on"]');
+    });
     on('reload', () => { closeSettings(); loadChannels().then(n => { toast(n + ' channels'); focusFirst(); }); });
+    on('pin', changePin);
     on('close', closeSettings);
     const f = (typeof focusKey === 'string' && modal.querySelector(focusKey)) || modal.querySelector('.btn');
     if (f) f.focus();
   }
   let settingsAway = false;
+  let autostartMsg = '';
   // Back from Android's "Display over other apps" screen: show the new state. (The page isn't
   // always told it was hidden while another screen was on top, so listen for the app's resume too.)
   const backFromSettings = () => {
@@ -335,11 +374,74 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) backFromSettings(); });
   window.addEventListener('focus', backFromSettings);
   if (window.Native && Native.app) Native.app.addListener('resume', () => setTimeout(backFromSettings, 300));
+  // ---------- settings PIN (default 1234; changed in Settings, saved on this TV) ----------
+  let pinInput = null;
+  const pinNow = () => store.get('pin') || String(H.pin || '1234');
+
+  // Shows a 4-digit PIN pad (remote number keys or the on-screen buttons). done(pin) returns true
+  // when the PIN is accepted; false shows "Wrong PIN" and starts again.
+  function askPin(title, note, done) {
+    stopCountdown();
+    let typed = '';
+    const modal = $('modal');
+    modal.innerHTML = `<div class="sheet pin-sheet">
+      <h2>${esc(title)}</h2>
+      <p>${esc(note)}</p>
+      <div class="pin-dots" id="pinDots">${'<i></i>'.repeat(4)}</div>
+      <p class="pin-err" id="pinErr">&nbsp;</p>
+      <div class="pin-pad">${['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'close'].map(k =>
+        `<button class="btn" data-k="${k}">${k === 'del' ? '⌫' : k === 'close' ? 'Cancel' : k}</button>`).join('')}</div>
+    </div>`;
+    modal.classList.remove('hidden');
+    const paint = () => $('pinDots').querySelectorAll('i').forEach((d, n) => d.classList.toggle('on', n < typed.length));
+    pinInput = k => {
+      if (k === 'close') return closeSettings();
+      if (k === 'del') { typed = typed.slice(0, -1); paint(); return; }
+      if (typed.length >= 4) return;
+      typed += k;
+      paint();
+      if (typed.length < 4) return;
+      const pin = typed;
+      setTimeout(() => {
+        if (done(pin) !== false) return;
+        typed = '';
+        paint();
+        $('pinErr').textContent = 'Wrong PIN · Code incorrect';
+      }, 150);
+    };
+    modal.querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', () => pinInput && pinInput(b.dataset.k)));
+    modal.querySelector('[data-k="5"]').focus();
+  }
+
+  function requestSettings() {
+    askPin('Settings · Réglages', 'Enter the staff PIN · Entrez le code du personnel', pin => {
+      if (pin !== pinNow()) return false;
+      pinInput = null;
+      openSettings();
+      return true;
+    });
+  }
+
+  function changePin() {
+    askPin('New PIN · Nouveau code', 'Choose 4 digits for the Settings PIN.', first => {
+      askPin('Repeat the new PIN', 'Enter the same 4 digits again.', second => {
+        if (second !== first) return false;
+        store.set('pin', first);
+        pinInput = null;
+        toast('PIN changed · Code modifié');
+        openSettings('[data-act="pin"]');
+        return true;
+      });
+      return true;
+    });
+  }
+
   function closeSettings() {
+    pinInput = null;
     $('modal').classList.add('hidden');
     $('gear').focus();
   }
-  $('gear').addEventListener('click', () => openSettings());
+  $('gear').addEventListener('click', requestSettings);
 
   function toast(msg) {
     const t = $('toast');
@@ -357,7 +459,7 @@
       toast('Press Back again to leave · Appuyez encore sur Retour pour quitter');
       return false;
     },
-    openSettings,
+    openSettings: () => { if ($('modal').classList.contains('hidden')) requestSettings(); },
   };
 
   // The TV was switched on again (MainActivity, hotel/BootReceiver): fresh channels, then the countdown.

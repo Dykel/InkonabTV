@@ -85,17 +85,75 @@ public class NativePlayerPlugin extends Plugin {
         call.resolve(o);
     }
 
-    /** Opens the "Display over other apps" switch for this app (or the app's info page if the TV hides it). */
+    /**
+     * Opens the "Display over other apps" switch. TVs differ: this app's own page, the list of
+     * apps, or Android TV's settings screen. → { screen: "app" | "list" | "tv" | "none" }; "none"
+     * when the TV has no such screen (then only home-screen mode or adb can make the app start).
+     */
     @PluginMethod
     public void autostartSettings(PluginCall call) {
         getActivity().runOnUiThread(() -> {
-            Uri pkg = Uri.parse("package:" + getContext().getPackageName());
-            try {
-                getActivity().startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkg));
-            } catch (Exception e) {
-                try { getActivity().startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)); } catch (Exception ignored) { }
+            String act = android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION;
+            Intent[] tries = {
+                new Intent(act, Uri.parse("package:" + getContext().getPackageName())),
+                new Intent(act),
+                new Intent().setClassName("com.android.tv.settings", "com.android.tv.settings.device.apps.specialaccess.SystemAlertActivity"),
+            };
+            String[] names = { "app", "list", "tv" };
+            JSObject out = new JSObject();
+            out.put("screen", "none");
+            for (int i = 0; i < tries.length; i++) {
+                if (tries[i].resolveActivity(getContext().getPackageManager()) == null) continue;
+                try { getActivity().startActivity(tries[i]); out.put("screen", names[i]); break; } catch (Exception ignored) { }
             }
-            call.resolve();
+            call.resolve(out);
+        });
+    }
+
+    // ---------- home-screen mode (hotel version) ----------
+    // The hotel manifest has a disabled "home screen" entry (activity-alias .hotel.HotelHome).
+    // Turned on and chosen as the TV's home app, the TV opens InkonabTV Hotel at every start and
+    // on the Home button, with no "Display over other apps" needed.
+
+    private android.content.ComponentName homeAlias() {
+        return new android.content.ComponentName(getContext().getPackageName(), "tv.inkonab.app.hotel.HotelHome");
+    }
+
+    private JSObject homeJson() {
+        JSObject o = new JSObject();
+        android.content.pm.PackageManager pm = getContext().getPackageManager();
+        boolean exists = true;
+        try { pm.getActivityInfo(homeAlias(), android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS); } catch (Exception e) { exists = false; }
+        o.put("available", exists);
+        o.put("enabled", exists && pm.getComponentEnabledSetting(homeAlias()) == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED);
+        android.content.pm.ResolveInfo r = pm.resolveActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+        o.put("isHome", r != null && r.activityInfo != null && getContext().getPackageName().equals(r.activityInfo.packageName));
+        return o;
+    }
+
+    @PluginMethod
+    public void homeStatus(PluginCall call) { call.resolve(homeJson()); }
+
+    /** { on }: on = offer InkonabTV Hotel as the home app (Android asks which one to use); off = remove it. */
+    @PluginMethod
+    public void homeSet(PluginCall call) {
+        boolean on = call.getBoolean("on", false);
+        getActivity().runOnUiThread(() -> {
+            android.content.pm.PackageManager pm = getContext().getPackageManager();
+            try {
+                pm.setComponentEnabledSetting(homeAlias(), on ? android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                    : android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED, android.content.pm.PackageManager.DONT_KILL_APP);
+            } catch (Exception e) { call.reject("Home-screen mode isn't available"); return; }
+            JSObject o = homeJson();
+            if (on && !o.getBool("isHome")) {
+                // Press Home for the staff: a TV that lets apps be its home screen asks which one
+                // to use (choose InkonabTV Hotel → Always); one that keeps its own launcher opens it.
+                try {
+                    getActivity().startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    o.put("asked", "home");
+                } catch (Exception ignored) { }
+            }
+            call.resolve(o);
         });
     }
 

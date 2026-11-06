@@ -16,6 +16,20 @@
                 android:value="vpn" />
         </service>
 
+        <!-- Home-screen mode (off until staff turn it on in Settings): chosen as the TV's home app,
+             the welcome screen opens at every start and on the Home button. -->
+        <activity-alias
+            android:name=".hotel.HotelHome"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- Opens the welcome screen when the TV starts. -->
         <receiver
             android:name=".hotel.BootReceiver"
@@ -33,6 +47,14 @@
             android:authorities="${applicationId}.wakewatcher"
             android:exported="false" />
     </application>
+
+    <!-- To see which app is the TV's home screen (Android 11+ hides other apps otherwise). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+    </queries>
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Android 10+ only lets an app open itself from the background with "Display over other apps". -->
