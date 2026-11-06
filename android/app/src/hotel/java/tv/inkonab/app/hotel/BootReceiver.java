@@ -19,6 +19,8 @@ public class BootReceiver extends BroadcastReceiver {
 
     /** Brings the welcome screen to the front. Android 10+ allows it only with "Display over other apps". */
     static void open(Context c, String why) {
+        // Staff switch in the app's Settings: "Open the app when the TV starts".
+        if (!c.getSharedPreferences("hotel", Context.MODE_PRIVATE).getBoolean("autostart", true)) return;
         if (Build.VERSION.SDK_INT >= 29 && !Settings.canDrawOverlays(c)) {
             Log.w("InkonabHotel", "Can't open on " + why + ": \"Display over other apps\" is not allowed");
             return;

@@ -281,7 +281,9 @@
     const vpn = P ? await P.vpnStatus().catch(() => null) : null;
     const auto = P && P.autostartStatus ? await P.autostartStatus().catch(() => null) : null;
     const home = P && P.homeStatus ? await P.homeStatus().catch(() => null) : null;
-    const startOn = !!((auto && auto.allowed) || (home && home.isHome));
+    const autoOn = !auto || auto.on !== false;
+    const canStart = !!((auto && auto.allowed) || (home && home.isHome));
+    const startOn = autoOn && canStart;
     const ver = P ? await P.appVersion().catch(() => null) : null;
     const secs = autoplaySecs();
     const modal = $('modal');
@@ -289,17 +291,30 @@
       <h2>Settings · Réglages</h2>
       <p>For hotel staff. Channels are downloaded from the hotel playlist at every start.</p>
 
-      <h3>1 · Start with the TV <span class="${startOn ? 'ok' : 'warn'}">${!P ? 'only in the TV app' : startOn ? 'ON ✓' : 'OFF'}</span></h3>
-      <p>The app opens by itself when the TV is switched on. Use <b>A</b>, or <b>B</b> if this TV has no
-        “Display over other apps” setting.</p>
-      ${P ? `<div class="opt">
+      <h3>1 · Open the app when the TV starts <span class="${startOn ? 'ok' : 'warn'}">${!P ? 'only in the TV app' : startOn ? 'ON ✓' : autoOn ? 'ON · not allowed yet' : 'OFF'}</span></h3>
+      ${P ? `<div class="row">
+        <button class="btn${autoOn ? ' on' : ''}" data-autostart="1">ON</button>
+        <button class="btn${autoOn ? '' : ' on'}" data-autostart="0">OFF</button>
+      </div>` : ''}
+      ${P && autoOn && !canStart ? `<p class="warnp">Android must allow it first: press <b>A · Allow</b> below and switch
+        on <b>InkonabTV Hotel</b> (“Display over other apps” / “Appear on top”), then press Back. Some TVs also need <b>B</b>. If this TV has no such setting, use <b>C</b>.</p>` : ''}
+      ${P && autoOn ? `` : '<p>The app won’t open by itself. Guests open it from the TV’s apps.</p>'}
+      ${P && autoOn ? `<div class="opt">
         <b>A · Display over other apps</b> ${auto && auto.allowed ? '<span class="okt">allowed ✓</span>' : ''}
-        <small>Press the button, choose <b>InkonabTV Hotel</b>, switch it on, then press Back.</small>
-        <div class="row"><button class="btn${startOn ? '' : ' on'}" data-act="autostart">${auto && auto.allowed ? 'Open the setting' : 'Switch it on'}</button></div>
+        <small>Opens Android’s permission screen: choose <b>InkonabTV Hotel</b>, switch it on, then press Back.</small>
+        <div class="row"><button class="btn" data-act="autostart">${auto && auto.allowed ? 'Open the setting' : 'Allow'}</button></div>
         ${autostartMsg ? `<small class="warnt">${autostartMsg}</small>` : ''}
       </div>
+      <div class="opt">
+        <b>B · Auto-start permission</b> <span class="muted">TCL, Xiaomi, Hisense and other TVs</span>
+        <small>Some TVs also block apps at power-on until <b>Auto-start</b> (or “Auto-launch”, “Startup”,
+          “Run at boot”) is allowed. Press the button: on the screen that opens, find <b>InkonabTV Hotel</b>
+          and allow it. If the app’s info page opens, look under <b>Permissions</b> or <b>Auto-start</b>.</small>
+        <div class="row"><button class="btn" data-act="vendor">Open auto-start setting</button></div>
+        ${vendorMsg ? `<small class="okt">${esc(vendorMsg)}</small>` : ''}
+      </div>
       ${home && home.available ? `<div class="opt">
-        <b>B · Use as the TV’s home screen</b> ${home.isHome ? '<span class="okt">ON ✓</span>' : ''}
+        <b>C · Use as the TV’s home screen</b> ${home.isHome ? '<span class="okt">ON ✓</span>' : ''}
         <small>The TV opens InkonabTV Hotel at every start and when Home is pressed. The button presses
           Home: if the TV asks which home app to use, choose <b>InkonabTV Hotel</b> → <b>Always</b>.
           If the TV’s own home screen just opens, this TV doesn’t allow it: use A.</small>
@@ -332,6 +347,19 @@
       if (b.dataset.vpn === 'always') P.vpnConnect().catch(() => {});
       openSettings('[data-vpn="' + b.dataset.vpn + '"]');
     }));
+    modal.querySelectorAll('[data-autostart]').forEach(b => b.addEventListener('click', async () => {
+      const on = b.dataset.autostart === '1';
+      const r = await P.autostartSet({ on }).catch(() => null);
+      // Turned on but Android doesn't allow it yet: go straight to the permission screen.
+      if (on && r && !r.allowed && !(home && home.isHome)) {
+        settingsAway = true;
+        const opened = await P.autostartSettings().catch(() => null);
+        if (opened && opened.screen !== 'none') { toast('Choose InkonabTV Hotel and switch it on, then press Back'); return; }
+        settingsAway = false;
+        autostartMsg = 'This TV has no “Display over other apps” setting. Use C instead.';
+      }
+      openSettings('[data-autostart="' + b.dataset.autostart + '"]');
+    }));
     modal.querySelectorAll('[data-autoplay]').forEach(b => b.addEventListener('click', () => {
       store.set('autoplay', b.dataset.autoplay);
       openSettings('[data-autoplay="' + b.dataset.autoplay + '"]');
@@ -339,12 +367,23 @@
     const on = (act, fn) => { const b = modal.querySelector(`[data-act="${act}"]`); if (b) b.addEventListener('click', fn); };
     on('autostart', async () => {
       settingsAway = true;
+      lastAway = '[data-act="autostart"]';
       const r = await P.autostartSettings().catch(() => null);
       if (!r || r.screen === 'none') {
         settingsAway = false;
-        autostartMsg = 'This TV has no “Display over other apps” setting. Use B instead.';
+        autostartMsg = 'This TV has no “Display over other apps” setting. Use C instead.';
         openSettings('[data-act="home-on"]');
       }
+    });
+    on('vendor', async () => {
+      settingsAway = true;
+      lastAway = '[data-act="vendor"]';
+      const r = await P.autostartVendor().catch(() => null);
+      vendorMsg = !r || r.screen === 'none' ? 'This TV has no auto-start screen: A is enough here.'
+        : r.screen === 'app-info' ? 'Opened the app’s info page (no separate auto-start screen found).'
+        : 'Opened the TV’s auto-start screen (' + r.name + ').';
+      if (!r || r.screen === 'none') { settingsAway = false; openSettings('[data-act="vendor"]'); }
+      else toast('Find InkonabTV Hotel, allow Auto-start, then press Back');
     });
     on('home-on', async () => {
       settingsAway = true;
@@ -364,12 +403,14 @@
   }
   let settingsAway = false;
   let autostartMsg = '';
+  let vendorMsg = '';
+  let lastAway = '[data-act="autostart"]';
   // Back from Android's "Display over other apps" screen: show the new state. (The page isn't
   // always told it was hidden while another screen was on top, so listen for the app's resume too.)
   const backFromSettings = () => {
     if (!settingsAway || $('modal').classList.contains('hidden')) return;
     settingsAway = false;
-    openSettings('[data-act="autostart"]');
+    openSettings(lastAway);
   };
   document.addEventListener('visibilitychange', () => { if (!document.hidden) backFromSettings(); });
   window.addEventListener('focus', backFromSettings);

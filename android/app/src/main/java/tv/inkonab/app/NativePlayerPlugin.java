@@ -82,7 +82,16 @@ public class NativePlayerPlugin extends Plugin {
     public void autostartStatus(PluginCall call) {
         JSObject o = new JSObject();
         o.put("allowed", android.os.Build.VERSION.SDK_INT < 29 || android.provider.Settings.canDrawOverlays(getContext()));
+        // The hotel switch "Open the app when the TV starts" (read by hotel/BootReceiver); on by default.
+        o.put("on", getContext().getSharedPreferences("hotel", Context.MODE_PRIVATE).getBoolean("autostart", true));
         call.resolve(o);
+    }
+
+    /** { on }: the hotel switch "Open the app when the TV starts". */
+    @PluginMethod
+    public void autostartSet(PluginCall call) {
+        getContext().getSharedPreferences("hotel", Context.MODE_PRIVATE).edit().putBoolean("autostart", call.getBoolean("on", true)).apply();
+        autostartStatus(call);
     }
 
     /**
@@ -106,6 +115,61 @@ public class NativePlayerPlugin extends Plugin {
                 if (tries[i].resolveActivity(getContext().getPackageManager()) == null) continue;
                 try { getActivity().startActivity(tries[i]); out.put("screen", names[i]); break; } catch (Exception ignored) { }
             }
+            call.resolve(out);
+        });
+    }
+
+    /**
+     * Many TVs (TCL, Xiaomi, Hisense, Skyworth…) have their own "Auto-start" permission on top of
+     * Android's: apps aren't told the TV started until it's allowed. Opens that screen: known
+     * makers' auto-start managers, then any system screen whose name says auto-start, then this
+     * app's info page (where such TVs usually show the switch). → { screen, name }.
+     */
+    @PluginMethod
+    public void autostartVendor(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            android.content.pm.PackageManager pm = getContext().getPackageManager();
+            java.util.List<Intent> tries = new java.util.ArrayList<>();
+            String[][] known = {
+                { "com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity" },
+                { "com.letv.android.letvsafe", "com.letv.android.letvsafe.AutobootManageActivity" },
+                { "com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity" },
+                { "com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity" },
+                { "com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity" },
+                { "com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity" },
+                { "com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity" },
+                { "com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity" },
+                { "com.asus.mobilemanager", "com.asus.mobilemanager.autostart.AutoStartActivity" },
+            };
+            for (String[] k : known) tries.add(new Intent().setClassName(k[0], k[1]));
+            // Any other system screen named like an auto-start manager (TV makers name them freely).
+            java.util.regex.Pattern named = java.util.regex.Pattern.compile("(?i)(auto.?start|auto.?boot|auto.?launch|self.?start|boot.?start|start.?up.?(app|manage)|bootup)");
+            try {
+                for (android.content.pm.ApplicationInfo app : pm.getInstalledApplications(0)) {
+                    if ((app.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0) continue;
+                    android.content.pm.PackageInfo pi;
+                    try { pi = pm.getPackageInfo(app.packageName, android.content.pm.PackageManager.GET_ACTIVITIES); } catch (Exception e) { continue; }
+                    if (pi.activities == null) continue;
+                    for (android.content.pm.ActivityInfo ai : pi.activities)
+                        if (ai.exported && named.matcher(ai.name).find()) tries.add(new Intent().setClassName(ai.packageName, ai.name));
+                }
+            } catch (Exception ignored) { }
+            JSObject out = new JSObject();
+            for (Intent t : tries) {
+                // Only screens that really exist on this TV.
+                try { pm.getActivityInfo(t.getComponent(), 0); } catch (Exception e) { continue; }
+                try {
+                    getActivity().startActivity(t.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    out.put("screen", "autostart");
+                    out.put("name", t.getComponent() == null ? "" : t.getComponent().flattenToShortString());
+                    call.resolve(out);
+                    return;
+                } catch (Exception ignored) { }
+            }
+            try {
+                getActivity().startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getContext().getPackageName())));
+                out.put("screen", "app-info");
+            } catch (Exception e) { out.put("screen", "none"); }
             call.resolve(out);
         });
     }

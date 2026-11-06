@@ -56,6 +56,8 @@
         </intent>
     </queries>
 
+    <!-- To find the TV maker's own "Auto-start" settings screen (sideload app, not on Google Play). -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Android 10+ only lets an app open itself from the background with "Display over other apps". -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

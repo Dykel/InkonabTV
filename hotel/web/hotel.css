@@ -130,7 +130,10 @@ dd { margin: 0 0 6px; font-size: 21px; font-weight: 700; overflow-wrap: anywhere
 .sheet h3 .muted { color: var(--muted); font-weight: 400; padding: 0; }
 .sheet p { margin: 4px 0 10px; font-size: 16px; }
 .sheet .row { margin-bottom: 6px; }
+.sheet p.warnp { color: #ffb4ab; }
+.sheet p.warnp b { color: var(--text); }
 .sheet .opt { border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px 4px; margin: 6px 0 8px; }
+.sheet .opt .muted { color: var(--muted); font-size: 14px; margin-left: 6px; }
 .sheet .opt > b { font-size: 18px; }
 .sheet .opt small { display: block; color: var(--muted); font-size: 15px; margin: 2px 0 8px; line-height: 1.35; }
 .sheet .opt small b { color: var(--text); }
