@@ -35,6 +35,12 @@ public class MainActivity extends BridgeActivity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         int k = e.getKeyCode();
+        // The remote's Menu button: the WebView doesn't pass it on; the hotel screen opens its settings.
+        if (k == KeyEvent.KEYCODE_MENU && getBridge() != null) {
+            if (e.getAction() == KeyEvent.ACTION_UP)
+                getBridge().getWebView().evaluateJavascript("window.App && App.openSettings && App.openSettings()", null);
+            return true;
+        }
         // Same for ▲/▼ after the keyboard was closed: an editable field keeps them for its cursor.
         if (e.getAction() == KeyEvent.ACTION_DOWN && (k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN) && getBridge() != null) {
             String dir = k == KeyEvent.KEYCODE_DPAD_UP ? "ArrowUp" : "ArrowDown";

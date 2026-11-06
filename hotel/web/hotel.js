@@ -194,7 +194,7 @@
   // ---------- autoplay at start ----------
 
   function startCountdown() {
-    const secs = Number(H.autoplayDelay);
+    const secs = autoplaySecs();
     if (!channels.length || !(secs >= 0)) return;
     const last = store.get('last');
     let i = Math.max(0, channels.findIndex(c => c.url === last));
@@ -266,48 +266,80 @@
 
   // ---------- staff settings (⚙ at the bottom right, or the remote's Menu key) ----------
 
-  async function openSettings() {
+  // Autoplay at start: chosen in Settings (saved on this TV), else hotel.json's autoplayDelay.
+  // -1 = off, 0 = at once, else seconds of countdown.
+  function autoplaySecs() {
+    const saved = store.get('autoplay');
+    return saved != null && saved !== '' ? Number(saved) : Number(H.autoplayDelay);
+  }
+
+  async function openSettings(focusKey) {
     stopCountdown();
     const P = native();
     const vpn = P ? await P.vpnStatus().catch(() => null) : null;
     const auto = P && P.autostartStatus ? await P.autostartStatus().catch(() => null) : null;
     const ver = P ? await P.appVersion().catch(() => null) : null;
+    const secs = autoplaySecs();
     const modal = $('modal');
     modal.innerHTML = `<div class="sheet">
       <h2>Settings · Réglages</h2>
       <p>For hotel staff. Channels are downloaded from the hotel playlist at every start.</p>
+
+      <h3>1 · Start with the TV <span class="${auto && auto.allowed ? 'ok' : 'warn'}">${!P ? 'only in the TV app' : auto && auto.allowed ? 'ON ✓' : 'OFF'}</span></h3>
+      <p>The app opens by itself when the TV is switched on or wakes up. Android asks for
+        “Display over other apps” (or “Appear on top”) for this: press the button, choose
+        <b>InkonabTV Hotel</b>, switch it on, then press Back.</p>
+      ${P ? `<div class="row"><button class="btn${auto && auto.allowed ? '' : ' on'}" data-act="autostart">${auto && auto.allowed ? 'Open the setting' : 'Switch it on'}</button></div>` : ''}
+
+      <h3>2 · Autoplay when the app opens <span class="${secs >= 0 ? 'ok' : 'warn'}">${secs < 0 ? 'OFF' : secs === 0 ? 'ON · at once' : 'ON · after ' + secs + ' s'}</span></h3>
+      <p>Plays the last watched channel. Guests can press any button during the countdown to stay on this screen.</p>
+      <div class="row">${[[-1, 'Off'], [0, 'At once'], [5, '5 s'], [10, '10 s'], [30, '30 s']].map(([v, l]) =>
+        `<button class="btn${secs === v ? ' on' : ''}" data-autoplay="${v}">${l}</button>`).join('')}</div>
+
       ${vpn && vpn.available ? `
-        <h2 style="font-size:20px">Free VPN</h2>
-        <p>Automatic: used only when a channel won’t play. <span class="status">Now: ${esc(vpn.state)}${vpn.server ? ' · ' + esc(vpn.server) : ''}</span></p>
+        <h3>3 · Free VPN <span class="muted">${esc(vpn.state)}${vpn.server ? ' · ' + esc(vpn.server) : ''}</span></h3>
+        <p>Automatic: used only when a channel won’t play.</p>
         <div class="row">${['auto', 'always', 'off'].map(m => `<button class="btn${vpn.mode === m ? ' on' : ''}" data-vpn="${m}">${{ auto: 'Automatic', always: 'Always on', off: 'Off' }[m]}</button>`).join('')}</div>` : ''}
-      ${auto ? `
-        <h2 style="font-size:20px">Start with the TV</h2>
-        <p>The app opens by itself when the TV is switched on. Android needs “Display over other apps” allowed for this.
-          <span class="status">Now: ${auto.allowed ? 'allowed ✓' : 'not allowed yet'}</span></p>
-        <div class="row"><button class="btn" data-act="autostart">${auto.allowed ? 'Open the setting' : 'Allow it'}</button></div>` : ''}
-      <div class="row">
+
+      <div class="row last">
         <button class="btn" data-act="reload">Reload channels</button>
-        <button class="btn on" data-act="close">Close</button>
+        <button class="btn" data-act="close">Close</button>
+        <span class="status">${ver ? 'InkonabTV Hotel ' + esc(ver.name) + ' · ' : ''}${channels.length} channels</span>
       </div>
-      <p class="status">${ver ? 'InkonabTV Hotel ' + esc(ver.name) + ' · ' : ''}${channels.length} channels</p>
     </div>`;
     modal.classList.remove('hidden');
     modal.querySelectorAll('[data-vpn]').forEach(b => b.addEventListener('click', async () => {
       await P.vpnSettings({ mode: b.dataset.vpn }).catch(() => {});
       if (b.dataset.vpn === 'always') P.vpnConnect().catch(() => {});
-      openSettings();
+      openSettings('[data-vpn="' + b.dataset.vpn + '"]');
+    }));
+    modal.querySelectorAll('[data-autoplay]').forEach(b => b.addEventListener('click', () => {
+      store.set('autoplay', b.dataset.autoplay);
+      openSettings('[data-autoplay="' + b.dataset.autoplay + '"]');
     }));
     const on = (act, fn) => { const b = modal.querySelector(`[data-act="${act}"]`); if (b) b.addEventListener('click', fn); };
-    on('autostart', () => P.autostartSettings().catch(() => {}));
+    on('autostart', () => { settingsAway = true; P.autostartSettings().catch(() => {}); });
     on('reload', () => { closeSettings(); loadChannels().then(n => { toast(n + ' channels'); focusFirst(); }); });
     on('close', closeSettings);
-    (modal.querySelector('.btn.on[data-act="close"]') || modal.querySelector('.btn')).focus();
+    const f = (typeof focusKey === 'string' && modal.querySelector(focusKey)) || modal.querySelector('.btn');
+    if (f) f.focus();
   }
+  let settingsAway = false;
+  // Back from Android's "Display over other apps" screen: show the new state. (The page isn't
+  // always told it was hidden while another screen was on top, so listen for the app's resume too.)
+  const backFromSettings = () => {
+    if (!settingsAway || $('modal').classList.contains('hidden')) return;
+    settingsAway = false;
+    openSettings('[data-act="autostart"]');
+  };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) backFromSettings(); });
+  window.addEventListener('focus', backFromSettings);
+  if (window.Native && Native.app) Native.app.addListener('resume', () => setTimeout(backFromSettings, 300));
   function closeSettings() {
     $('modal').classList.add('hidden');
     $('gear').focus();
   }
-  $('gear').addEventListener('click', openSettings);
+  $('gear').addEventListener('click', () => openSettings());
 
   function toast(msg) {
     const t = $('toast');

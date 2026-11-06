@@ -38,7 +38,9 @@ public final class Updater {
 
     /** Android 8+ asks once per app before it may install other APKs. */
     public static boolean canInstall(Context c) {
-        return Build.VERSION.SDK_INT < 26 || c.getPackageManager().canRequestPackageInstalls();
+        // A build without REQUEST_INSTALL_PACKAGES (hotel version) gets a SecurityException here.
+        try { return Build.VERSION.SDK_INT < 26 || c.getPackageManager().canRequestPackageInstalls(); }
+        catch (Exception e) { return false; }
     }
 
     /** The "Install unknown apps" switch for this app. */
