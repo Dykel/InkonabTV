@@ -14,7 +14,7 @@ public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context c, Intent i) {
         WakeWatcher.watch(c);
-        open(c, "boot");
+        WakeWatcher.openSoon(c, "boot");
     }
 
     /** Brings the welcome screen to the front. Android 10+ allows it only with "Display over other apps". */

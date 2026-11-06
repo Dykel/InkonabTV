@@ -27,9 +27,7 @@ public class WakeWatcher extends ContentProvider {
         watching = true;
         Context app = c.getApplicationContext();
         app.registerReceiver(new BroadcastReceiver() {
-            @Override public void onReceive(Context ctx, Intent i) {
-                if (started == 0) BootReceiver.open(ctx, "wake");
-            }
+            @Override public void onReceive(Context ctx, Intent i) { openSoon(ctx, "wake"); }
         }, new IntentFilter(Intent.ACTION_SCREEN_ON));
         if (app instanceof Application) ((Application) app).registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
             @Override public void onActivityStarted(Activity a) { started++; }
@@ -40,6 +38,17 @@ public class WakeWatcher extends ContentProvider {
             @Override public void onActivitySaveInstanceState(Activity a, Bundle b) {}
             @Override public void onActivityDestroyed(Activity a) {}
         });
+    }
+
+    /**
+     * Opens the welcome screen now and checks again a few seconds later: many TVs show their own
+     * home screen just after switching on, on top of the app.
+     */
+    static void openSoon(Context c, String why) {
+        Context app = c.getApplicationContext();
+        android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        for (long at : new long[] { 0, 3000, 8000, 15000 })
+            h.postDelayed(() -> { if (started == 0) BootReceiver.open(app, why); }, at);
     }
 
     @Override public boolean onCreate() { if (getContext() != null) watch(getContext()); return true; }
