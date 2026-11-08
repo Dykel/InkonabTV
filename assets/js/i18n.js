@@ -241,8 +241,7 @@
     'Can’t open the player': ['Impossible d’ouvrir le lecteur', 'No se puede abrir el reproductor', 'Player kann nicht geöffnet werden', 'Impossibile aprire il lettore', 'Não é possível abrir o leitor'],
 
     // network
-    'No network connection': ['Pas de connexion réseau', 'Sin conexión de red', 'Keine Netzwerkverbindung', 'Nessuna connessione di rete', 'Sem ligação à rede'],
-    'Check your TV’s network settings. The app continues by itself when the connection is back.': ['Vérifiez les paramètres réseau du téléviseur. L’application reprendra d’elle-même au retour de la connexion.', 'Revisa los ajustes de red del televisor. La app continuará sola cuando vuelva la conexión.', 'Prüfe die Netzwerkeinstellungen des Fernsehers. Die App macht von selbst weiter, sobald die Verbindung zurück ist.', 'Controlla le impostazioni di rete della TV. L’app riprenderà da sola al ritorno della connessione.', 'Verifique as definições de rede da TV. A app continua sozinha quando a ligação voltar.'],
+    'No connection · reconnecting…': ['Pas de connexion · reconnexion…', 'Sin conexión · reconectando…', 'Keine Verbindung · wird neu verbunden…', 'Nessuna connessione · riconnessione…', 'Sem ligação · a religar…'],
     'Connection restored': ['Connexion rétablie', 'Conexión restablecida', 'Verbindung wiederhergestellt', 'Connessione ripristinata', 'Ligação restabelecida'],
 
     // settings

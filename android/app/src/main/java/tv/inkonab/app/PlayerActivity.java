@@ -37,6 +37,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
@@ -109,6 +110,8 @@ public class PlayerActivity extends AppCompatActivity {
     // Automatic recovery: copies (version × format) already tried for the current channel.
     private final HashSet<String> tried = new HashSet<>();
     private boolean altFormat, readyOnce;
+    private static final int SAME_SERVER_TRIES = 2;
+    private int sameServerTries;         // full retries on the current VPN server (reset once it plays)
     private int reconnects;              // quiet reconnects in a row (reset once it plays again)
     private final List<Long> freezes = new ArrayList<>();
     private String epgTpl = "", cuTpl = "", tz = "UTC";
@@ -193,7 +196,8 @@ public class PlayerActivity extends AppCompatActivity {
         // wait for 6 s of video so it doesn't stop again straight away. A lost segment is retried
         // 8 times before it counts as an error.
         DefaultLoadControl buffers = new DefaultLoadControl.Builder()
-            .setBufferDurationsMs(30000, 120000, 2500, 6000)
+            // Live: minimum = maximum, so loading never pauses to wait for the buffer to run down.
+            .setBufferDurationsMs(live ? 120000 : 30000, 120000, 2500, 6000)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build();
         player = new ExoPlayer.Builder(this, renderers)
@@ -201,6 +205,8 @@ public class PlayerActivity extends AppCompatActivity {
                 .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(8)))
             .setLoadControl(buffers)
             .build();
+        // Live keeps the CPU and the network awake for as long as the channel plays.
+        if (live) player.setWakeMode(C.WAKE_MODE_NETWORK);
         view.setPlayer(player);
         player.addListener(new Player.Listener() {
             @Override
@@ -208,6 +214,7 @@ public class PlayerActivity extends AppCompatActivity {
                 if (state == Player.STATE_BUFFERING && readyOnce) onFreeze();
                 if (state == Player.STATE_READY) {
                     readyOnce = true;
+                    sameServerTries = 0;
                     reconnects = 0;
                     main.removeCallbacks(watchdog);
                     errorView.setVisibility(View.GONE);
@@ -327,7 +334,8 @@ public class PlayerActivity extends AppCompatActivity {
         return false;
     }
 
-    // A stream that never starts within 15 s counts as failed.
+    private static final long LIVE_START = 15000, LIVE_START_VPN = 45000;
+    // A stream that never starts in that time counts as failed.
     private final Runnable watchdog = () -> { if (player != null && !readyOnce && live) onFail("timeout"); };
 
     private void onFail(String why) {
@@ -412,6 +420,14 @@ public class PlayerActivity extends AppCompatActivity {
         vpn.init(this);
         String mode = vpn.mode();
         if ("off".equals(mode) || isFree(current())) return false;
+        // Live, VPN up: a provider that's slow to start isn't the server's fault. Try again on the
+        // same server; only one that fails every time is left for another country.
+        if (live && vpn.isUp() && sameServerTries < SAME_SERVER_TRIES) {
+            sameServerTries++;
+            showInfo("This channel is slow to start\nStaying on " + vpn.serverLabel() + "…");
+            main.postDelayed(() -> { if (player == null) return; tried.clear(); altFormat = false; startPlayback(0); }, 1000);
+            return true;
+        }
         if (vpnAttempts >= MAX_COUNTRIES) {
             // None of them helped: a last direct try, then give up.
             if (vpn.busy() && !directTried && !"always".equals(mode)) {
@@ -429,6 +445,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (vpn.isUp()) {
             showInfo("Not playing through " + vpn.serverLabel() + "\nTrying a VPN server in another country…");
             vpnWatch = true;
+            sameServerTries = 0;
             vpn.switchServer(this::afterVpn);
             return true;
         }
@@ -1482,7 +1499,8 @@ public class PlayerActivity extends AppCompatActivity {
             if (path != null && path.toLowerCase().endsWith(".m3u8")) item.setMimeType(MimeTypes.APPLICATION_M3U8);
             readyOnce = false;
             main.removeCallbacks(watchdog);
-            main.postDelayed(watchdog, 15000);
+            // Through the free VPN a provider can take 20 s just to answer: don't give up on a good server.
+            main.postDelayed(watchdog, VpnManager.get().isUp() ? LIVE_START_VPN : LIVE_START);
             if (hasNext() && replayUrl == null) {
                 // The next episode follows in the same player, which loads it while the credits run.
                 List<MediaItem> list = new ArrayList<>();

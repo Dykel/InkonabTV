@@ -275,8 +275,10 @@
       if (el) return;
       el = document.createElement('div');
       el.id = 'vpnWait';
-      el.className = 'vpn-wait';
-      el.setAttribute('role', 'alert');
+      // Full screen only while signing in; once the app is open it's a small note, and everything stays usable.
+      const signingIn = !$('#login').classList.contains('hidden');
+      el.className = 'vpn-wait' + (signingIn ? '' : ' quiet');
+      el.setAttribute('role', signingIn ? 'alert' : 'status');
       el.innerHTML = `<div class="vpn-wait-box"><div class="loader"><span></span></div>
         <h2>We’re optimising your internet connection</h2>
         <p>Please wait, this can take up to a minute.</p>
@@ -660,14 +662,23 @@
     },
 
     // ---------- network lost / back ----------
+    // TVs report "offline" when they shouldn't (a VPN changing server, a Wi-Fi blip) and can miss
+    // "online" afterwards, so the event only starts a real check. A small note appears when the
+    // internet truly doesn't answer and nothing is playing, and goes as soon as it answers again.
     watchNetwork() {
       const box = document.createElement('div');
       box.className = 'net-down';
       box.hidden = true;
-      box.setAttribute('role', 'alert');
-      box.innerHTML = '<b>No network connection</b><span>Check your TV’s network settings. The app continues by itself when the connection is back.</span>';
+      box.setAttribute('role', 'status');
+      box.textContent = T('No connection · reconnecting…');
       document.body.appendChild(box);
-      const down = () => { box.hidden = false; };
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const answers = async () => {
+        const c = new AbortController(), t = setTimeout(() => c.abort(), 6000);
+        try { await fetch('https://api.themoviedb.org/', { mode: 'no-cors', cache: 'no-store', signal: c.signal }); return true; }
+        catch { return false; }
+        finally { clearTimeout(t); }
+      };
       const up = () => {
         if (box.hidden) return;
         box.hidden = true;
@@ -675,9 +686,24 @@
         if (Player.isOpen() && Player.el.dataset.state === 'error') Player.play({ ...Player.item, tried: null });
         else if (this.api && $('#view .empty #retry')) this.route();
       };
-      window.addEventListener('offline', down);
+      let checking = false;
+      const check = async () => {
+        if (checking) return;
+        checking = true;
+        await wait(8000); // a VPN changing server is back by then
+        for (let fails = 0; fails < 2; fails++) { if (await answers()) { checking = false; return up(); } await wait(3000); }
+        // Really down: say so unless a video is on screen, and keep checking until it's back.
+        while (!(await answers())) {
+          const playing = Player.busy() && !(Player.isOpen() && Player.el.dataset.state === 'error');
+          box.hidden = playing || !!$('#vpnWait'); // the VPN note already says what's happening
+          await wait(10000);
+        }
+        checking = false;
+        up();
+      };
+      window.addEventListener('offline', check);
       window.addEventListener('online', up);
-      if (navigator.onLine === false) down();
+      if (navigator.onLine === false) check();
     },
 
     // ---------- parental PIN ----------
