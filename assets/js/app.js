@@ -1440,11 +1440,11 @@
           <section class="grid-wrap">
             <div class="grid-head">
               <h2 id="gridTitle"></h2>
-              <select class="field sort" id="genre" aria-label="Genre" hidden></select>
               <select class="field sort" id="sort">
                 <option value="auto">Default order</option><option value="added">Recently added</option><option value="name">A – Z</option><option value="rating">Top rated</option>
               </select>
             </div>
+            <div class="genre-cards" id="genres" hidden></div>
             <div class="grid" id="grid"></div>
             <div class="sentinel" id="sentinel"></div>
           </section>
@@ -1452,18 +1452,20 @@
 
       let current = items, shown = 0;
       const grid = $('#grid', main);
-      const sortSel = $('#sort', main), genreSel = $('#genre', main);
-      // The list grows while titles are being looked up; left alone while the viewer is on it.
-      const paintGenres = want => {
-        if (!genreSel.isConnected || document.activeElement === genreSel) return;
-        const value = String(want || genreSel.value), n = {};
+      const sortSel = $('#sort', main), genreRow = $('#genres', main);
+      let genre = String(wanted || '');
+      // The row grows while titles are being looked up; left alone while the viewer is on it.
+      const paintGenres = () => {
+        if (!genreRow.isConnected || genreRow.contains(document.activeElement)) return;
+        const n = {};
         for (const i of latest) for (const g of this.genresOf(i)) n[g] = (n[g] || 0) + 1;
-        const list = GENRES.filter(g => n[g.id] || String(g.id) === value).map(g => ({ ...g, label: T(g.name) })).sort((a, b) => a.label.localeCompare(b.label));
-        genreSel.innerHTML = `<option value="">${esc(T('All genres'))}</option>` + list.map(g => `<option value="${g.id}">${esc(g.label)} · ${n[g.id] || 0}</option>`).join('');
-        genreSel.value = value;
-        genreSel.hidden = !list.length;
+        const list = GENRES.filter(g => n[g.id] || String(g.id) === genre).map(g => ({ ...g, label: T(g.name) })).sort((x, y) => x.label.localeCompare(y.label));
+        const tile = (id, label, count, hue) => `<button class="genre-card${id === genre ? ' active' : ''}" data-g="${id}" style="--h:${hue}"><b>${esc(label)}</b><small>${count}</small></button>`;
+        genreRow.innerHTML = tile('', T('All genres'), latest.length, 200) + list.map(g => tile(String(g.id), g.label, n[g.id] || 0, (GENRES.indexOf(GENRES.find(x => x.id === g.id)) * 47 + 10) % 360)).join('');
+        genreRow.hidden = !list.length;
       };
-      paintGenres(wanted);
+      paintGenres();
+      if (genre) { const b = $('.genre-card.active', genreRow); if (b) genreRow.scrollLeft = b.offsetLeft - 20; }
       // Covers already on screen get their genres as they're found.
       const paintCovers = () => $$('.poster:not(.has-genre)', grid).forEach(p => {
         const c = p.closest('.card'), item = byId.get(c.dataset.kind + c.dataset.id), html = item && this.coverGenreHtml(item);
@@ -1477,7 +1479,7 @@
       };
       const show = (cat, name) => {
         let list = cat === '@fav' ? mine() : cat in virtual ? virtual[cat] : uniq(items.filter(i => i.cat === cat));
-        const g = Number(genreSel.value);
+        const g = Number(genre);
         if (g) list = list.filter(i => this.genresOf(i).includes(g));
         const s = sortSel.value;
         if (s === 'name') list = [...list].sort((a, b) => a.name.localeCompare(b.name));
@@ -1500,10 +1502,14 @@
         const b = $('.cat.active', main);
         show(b.dataset.cat, b.firstChild.textContent.trim());
       });
-      genreSel.addEventListener('change', () => {
+      genreRow.addEventListener('click', e => {
+        const card = e.target.closest('.genre-card');
+        if (!card) return;
+        genre = card.dataset.g;
+        $$('.genre-card', genreRow).forEach(c => c.classList.toggle('active', c === card));
         // Top picks are a short list: a genre is looked for in the whole catalog.
         let b = $('.cat.active', main);
-        if (genreSel.value && /^@(top|popular)$/.test(b.dataset.cat)) {
+        if (genre && /^@(top|popular)$/.test(b.dataset.cat)) {
           b.classList.remove('active');
           b = $('.cat[data-cat=""]', main);
           b.classList.add('active');
