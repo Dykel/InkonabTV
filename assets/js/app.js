@@ -1599,9 +1599,11 @@
     async renderLive(main) {
       this.setBackdrop('');
       const [base, cat] = await Promise.all([this.liveGroups(), this.liveCatalog()]);
-      const pinned = g => g.free || g.special;
-      const groups = [...base.filter(pinned), ...cat.genres, ...base.filter(g => !pinned(g))];
-      const byKey = new Map(groups.map(g => [g.key, g]));
+      // TV and wider: genres are a row of pills. Phones: they stay in the swipeable category row.
+      const phone = matchMedia('(max-width: 860px)').matches, pinned = g => g.free || g.special;
+      const groups = phone ? [...base.filter(pinned), ...cat.genres, ...base.filter(g => !pinned(g))] : base;
+      const genrePills = phone ? [] : cat.genres;
+      const byKey = new Map([...groups, ...cat.genres].map(g => [g.key, g]));
       const catName = cat.catName;
 
       main.innerHTML = `
@@ -1614,6 +1616,10 @@
           </aside>
           <section class="channels">
             <div class="grid-head"><h2 id="chTitle"></h2><input class="field" type="search" placeholder="Find channel" id="chFilter"></div>
+            <div class="genre-cards" id="liveGenres"${genrePills.length ? '' : ' hidden'}>
+              <button class="genre-card" data-cat="">${esc(this.infoName('All genres'))}</button>
+              ${genrePills.map(g => `<button class="genre-card" data-cat="${esc(g.key)}">${esc(g.name)}</button>`).join('')}
+            </div>
             <div class="ch-list" id="chList"></div>
             <div class="sentinel" id="chEnd"></div>
           </section>
@@ -1649,21 +1655,29 @@
         chList.innerHTML = current.length ? '' : '<div class="empty"><p>No channels.</p></div>';
         moreChannels();
       };
+      // A category, or a genre pill (which looks across every category). "All genres" goes back
+      // to the category that was showing.
+      const pills = $('#liveGenres', main);
+      let lastCat = null;
       const pick = b => {
+        const isCat = b.classList.contains('cat');
+        if (!isCat && !b.dataset.cat) return pick(lastCat || $('.cat', main));
+        if (isCat) lastCat = b;
         $$('.cat', main).forEach(c => c.classList.toggle('active', c === b));
+        $$('.genre-card', pills).forEach(c => c.classList.toggle('active', isCat ? !c.dataset.cat : c === b));
         $('#chFilter', main).value = '';
         this.liveCat = b.dataset.cat;
         renderChannels(b.dataset.cat);
       };
 
       $('#catList', main).addEventListener('click', e => { const b = e.target.closest('.cat'); if (b) pick(b); });
+      pills.addEventListener('click', e => { const b = e.target.closest('.genre-card'); if (b) pick(b); });
       $('#catFilter', main).addEventListener('input', e => {
         const q = fold(e.target.value);
         $$('.cat', main).forEach(c => { c.hidden = q && !c.dataset.name.includes(q); });
       });
       $('#chFilter', main).addEventListener('input', debounce(e => {
-        const b = $('.cat.active', main);
-        if (b) renderChannels(b.dataset.cat, fold(e.target.value));
+        if (group) renderChannels(group.key, fold(e.target.value));
       }, 150));
 
       const play = (index, version) => this.playChannel(current, index, group, version);
@@ -1724,7 +1738,7 @@
       chList.addEventListener('click', e => { const b = e.target.closest('.ch'); if (b) play(Number(b.dataset.i)); });
 
       // Reopen on the group (and channel) watched last.
-      const start = (this.liveCat && $(`.cat[data-cat="${CSS.escape(this.liveCat)}"]`, main)) || $('.cat:not([data-genre])', main) || $('.cat', main);
+      const start = (this.liveCat && $(`[data-cat="${CSS.escape(this.liveCat)}"]`, main)) || $('.cat:not([data-genre])', main) || $('.cat', main);
       if (!start) return;
       pick(start);
       start.scrollIntoView({ block: 'nearest' });
