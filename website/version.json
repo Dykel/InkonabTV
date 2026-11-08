@@ -1,7 +1,7 @@
 {
-  "versionCode": 16,
-  "versionName": "1.0.15",
-  "sha256": "d1fcb0ea7872844e79f8ab3dff3c829df679165f653b34223b312739d35347e5",
-  "size": 17980604,
-  "notes": "Fixed in-app updates failing with \"isn't signed by InkonabTV\" on some TVs\nNew modern look, genre filters on Movies, Series and Live TV\nGenres on covers, in your Info language\nSearch a genre, like \"comedy\" or \"sport\", to jump straight to it\nMBC PLAY is built in again (Settings → Extra playlists can hide it)"
+  "versionCode": 18,
+  "versionName": "1.0.17",
+  "sha256": "b296f6f62857bf5129bbcaf3557dccd323093fe41317a7f0466c8790ad447050",
+  "size": 17982992,
+  "notes": "A notice when your subscription is about to end\nYour login details in Settings are now hidden behind a code (1234 until you change it)\nIf an update can't install, the app tells you how to install it with Downloader\nNew modern look, genre filters on Movies, Series and Live TV"
 }
