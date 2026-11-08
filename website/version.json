@@ -1,7 +1,7 @@
 {
-  "versionCode": 18,
-  "versionName": "1.0.17",
-  "sha256": "b296f6f62857bf5129bbcaf3557dccd323093fe41317a7f0466c8790ad447050",
-  "size": 17982992,
-  "notes": "A notice when your subscription is about to end\nYour login details in Settings are now hidden behind a code (1234 until you change it)\nIf an update can't install, the app tells you how to install it with Downloader\nNew modern look, genre filters on Movies, Series and Live TV"
+  "versionCode": 19,
+  "versionName": "1.0.18",
+  "sha256": "3a5f225e9186d15c926039c34e9e2271e634283ada548835ec74bf586cb81926",
+  "size": 17983064,
+  "notes": "Fixed the code keypad losing the remote before you could enter all 4 digits\nA notice when your subscription is about to end\nYour login details in Settings are hidden behind a code (1234 until you change it)"
 }
