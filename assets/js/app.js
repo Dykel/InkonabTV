@@ -995,9 +995,25 @@
         .filter(i => !store[this.genreKey(i)] && !i.versions.some(v => textGenres(v.genre).length));
       let failed = 0, saved = Date.now(), fresh = 0;
       const flush = () => { Disk.set('genres.v1', store); saved = Date.now(); fresh = 0; if (this.onGenres) this.onGenres(); };
-      const worker = async () => {
+      // The free VPN is slow: through it, one title at a time and only now and then.
+      let vpnOn = false, vpnAt = 0;
+      const vpnBusy = async () => {
+        if (Date.now() - vpnAt > 5000) {
+          vpnAt = Date.now();
+          const P = (window.Native && Native.player) || (window.Desktop && Desktop.vpn);
+          const v = P && P.vpnStatus ? await P.vpnStatus().catch(() => null) : null;
+          vpnOn = !!v && (v.state === 'connected' || v.state === 'connecting');
+        }
+        return vpnOn;
+      };
+      const worker = async n => {
         while (queue.length && failed < 8 && this.api === api) {
-          if (Player.isOpen()) { await wait(3000); continue; }
+          if (Player.busy()) { await wait(3000); continue; }
+          if (await vpnBusy()) {
+            if (n) { await wait(5000); continue; }
+            await wait(1000);
+            if (Player.busy()) continue;
+          }
           const i = queue.shift();
           try {
             const ids = await TMDB.genres(i.kind === 'movie' ? 'movie' : 'tv', i.tmdb, i.name, i.year);
@@ -1010,7 +1026,7 @@
         }
       };
       flush();
-      await Promise.all([worker(), worker(), worker(), worker()]);
+      await Promise.all([worker(0), worker(1), worker(2), worker(3)]);
       if (fresh) flush();
     },
 
@@ -2342,7 +2358,7 @@
       if (!end || days < 0 || days > 7) return;
       const today = new Date().toDateString();
       if (Store.get('expNotice') === today) return;
-      if (Player.isOpen() || !$('#modal').classList.contains('hidden')) { setTimeout(() => this.checkExpiry(), 60000); return; }
+      if (Player.busy() || !$('#modal').classList.contains('hidden')) { setTimeout(() => this.checkExpiry(), 60000); return; }
       Store.set('expNotice', today);
       const date = new Date(end).toLocaleDateString(LOCALE, { year: 'numeric', month: 'long', day: 'numeric' });
       const text = days === 0 ? 'Your subscription ends today.' : days === 1 ? `Your subscription ends tomorrow, on ${date}.` : `Your subscription ends in ${days} days, on ${date}.`;

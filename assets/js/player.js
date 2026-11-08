@@ -101,6 +101,8 @@
     },
 
     isOpen() { return !this.el.classList.contains('hidden'); },
+    // A video is on screen, here or in the Android app's own player (isOpen() doesn't see that one).
+    busy() { return this.isOpen() || !!this.nativeOpen; },
 
     // item: {kind, id, ext, title, subtitle, img, resumeAt, list, index, onProgress, onEnded}
     open(item) {
@@ -178,10 +180,12 @@
       }
       const back = document.activeElement;
       let r = {};
+      this.nativeOpen = true;
       try {
         await Native.player.stage({ payload: JSON.stringify(payload) });
         r = await Native.player.play({ staged: true });
       } catch (e) { App.toast('Can’t open the player'); console.warn('[native player]', e); }
+      this.nativeOpen = false;
       if (item.kind !== 'live') {
         const at = r.index || 0; // the episode the viewer stopped on
         for (const i of r.done || []) if (item.onFinished) item.onFinished(i);
