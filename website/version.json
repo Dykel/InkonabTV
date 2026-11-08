@@ -1,7 +1,7 @@
 {
   "versionCode": 15,
   "versionName": "1.0.14",
-  "sha256": "3b2d59468d9cb3e8df63274a97c8c79c1d505b6f307101fe39f88366cd4619ff",
-  "size": 17979176,
+  "sha256": "11287d5ac9c851a2bf64d8262fa5542a0e92c8913de2980aba021e5a99187753",
+  "size": 17979600,
   "notes": "Movies and series: filter by genre, detected automatically in the background\nLive TV: new Sports, News, Kids, Movies, Music and Documentaries groups\nSearch a genre, like \"comedy\" or \"sport\", to jump straight to it\nLong channel lists open faster\nMBC PLAY is built in again (Settings → Extra playlists can hide it)"
 }
