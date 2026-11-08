@@ -625,6 +625,23 @@
       if (map.size) Store.set(cacheKey, { t: Date.now(), list: [...map] });
       return map;
     },
+    // TMDB's own genre names in a language: { id: name }. Saved for 30 days.
+    async genreNames(lang) {
+      if (!CFG.tmdbKey) return {};
+      const key = 'tmdbGenres.' + lang, saved = Store.get(key);
+      if (saved && Date.now() - saved.t < 30 * 864e5) return saved.map;
+      const list = type => {
+        const u = new URL(`https://api.themoviedb.org/3/genre/${type}/list`);
+        u.searchParams.set('api_key', CFG.tmdbKey);
+        u.searchParams.set('language', lang);
+        return fetch(u).then(r => (r.ok ? r.json() : {})).catch(() => ({}));
+      };
+      const [tv, movie] = await Promise.all([list('tv'), list('movie')]);
+      const map = {};
+      for (const g of [...(tv.genres || []), ...(movie.genres || [])]) map[g.id] = g.name;
+      if (Object.keys(map).length) Store.set(key, { t: Date.now(), map });
+      return map;
+    },
     // A title's TMDB genre ids: by TMDB id, or by searching its name when it has none.
     // [] when TMDB doesn't know it. Throws when TMDB can't be reached (e.busy: too many requests).
     async genres(type, id, name, year) {

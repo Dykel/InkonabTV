@@ -22,7 +22,7 @@ module.exports = {
     publisherDisplayName: process.env.MS_PUBLISHER_NAME || 'InkonabTV',
     applicationId: 'InkonabTV',
     displayName: 'InkonabTV',
-    backgroundColor: '#05090b',
+    backgroundColor: '#07080b',
     showNameOnTiles: true,
     languages: ['en-US'],
     minVersion: '10.0.17763.0',       // Windows 10 1809, the oldest Electron supports

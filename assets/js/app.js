@@ -948,8 +948,17 @@
     async genreCats(kind) {
       const names = this.data.catNames || (this.data.catNames = {}); // this.data is per account
       if (!names[kind]) names[kind] = Object.fromEntries((await this.loadCats(kind)).map(c => [String(c.category_id), c.category_name]));
-      await this.loadGenres();
+      await Promise.all([this.loadGenres(), this.loadGenreNames()]);
     },
+    // Genres follow the Info language in Settings: TMDB's names, else the app's own table.
+    async loadGenreNames() {
+      const lang = Settings.tmdbLang;
+      if (this.genreNames && this.genreNames.lang === lang) return;
+      const map = await Promise.race([TMDB.genreNames(lang), new Promise(r => setTimeout(() => r(null), 2500))]); // never hold up the page
+      if (map) this.genreNames = { lang, map };
+    },
+    infoName(name) { return (window.I18N.tr && I18N.tr(name, Settings.tmdbLang.split('-')[0])) || T(name); },
+    genreName(g) { return (this.genreNames && this.genreNames.map[g.id]) || this.infoName(g.name); },
     // Needs genreCats(kind) first. Every copy of a title counts: one may be in "FR: ACTION".
     genresOf(i) {
       if (!i.kw) i.kw = [...new Set((i.versions || [i]).flatMap(v => [...textGenres(this.data.catNames[i.kind][v.cat]), ...textGenres(v.genre)]))];
@@ -961,7 +970,7 @@
       if (!this.genreStore || !this.data.catNames || !this.data.catNames[i.kind]) return '';
       const ids = this.genresOf(i), tmdb = this.genreStore[this.genreKey(i)] || [];
       return [...tmdb, ...ids].filter((g, n, all) => all.indexOf(g) === n).slice(0, 2)
-        .map(g => T(GENRES.find(x => x.id === g).name)).join(' · ');
+        .map(g => this.genreName(GENRES.find(x => x.id === g))).join(' · ');
     },
     coverGenreHtml(i) { const g = this.coverGenres(i); return g ? `<span class="cover-genre">${esc(g)}</span>` : ''; },
     // Looks up, newest first and a few at a time, the titles not known yet; pauses during playback
@@ -1095,7 +1104,7 @@
           const byKey = new Map();
           for (const g of groups) for (const c of g.channels) if (!byKey.has(c.gkey)) byKey.set(c.gkey, c);
           // Groups by genre for the Live TV page: the category's name decides, else the channel's.
-          const genres = LIVE_GENRES.map(g => ({ ...g, key: '@genre:' + g.key, genre: g.key, special: true, channels: [], seen: new Set() }));
+          const genres = LIVE_GENRES.map(g => ({ ...g, name: this.infoName(g.name), key: '@genre:' + g.key, genre: g.key, special: true, channels: [], seen: new Set() }));
           for (const grp of groups) {
             if (/\bradio\b/.test(words(grp.name))) continue;
             const named = grp.free ? [] : genres.filter(g => g.re.test(words(grp.name)));
@@ -1459,9 +1468,9 @@
         if (!genreRow.isConnected || genreRow.contains(document.activeElement)) return;
         const n = {};
         for (const i of latest) for (const g of this.genresOf(i)) n[g] = (n[g] || 0) + 1;
-        const list = GENRES.filter(g => n[g.id] || String(g.id) === genre).map(g => ({ ...g, label: T(g.name) })).sort((x, y) => x.label.localeCompare(y.label));
-        const tile = (id, label, count, hue) => `<button class="genre-card${id === genre ? ' active' : ''}" data-g="${id}" style="--h:${hue}"><b>${esc(label)}</b><small>${count}</small></button>`;
-        genreRow.innerHTML = tile('', T('All genres'), latest.length, 200) + list.map(g => tile(String(g.id), g.label, n[g.id] || 0, (GENRES.indexOf(GENRES.find(x => x.id === g.id)) * 47 + 10) % 360)).join('');
+        const list = GENRES.filter(g => n[g.id] || String(g.id) === genre).map(g => ({ ...g, label: this.genreName(g) })).sort((x, y) => x.label.localeCompare(y.label));
+        const tile = (id, label) => `<button class="genre-card${id === genre ? ' active' : ''}" data-g="${id}">${esc(label)}</button>`;
+        genreRow.innerHTML = tile('', this.infoName('All genres')) + list.map(g => tile(String(g.id), g.label)).join('');
         genreRow.hidden = !list.length;
       };
       paintGenres();
@@ -2251,10 +2260,10 @@
         const [vod, series, live, free, liveCat] = await Promise.all([this.loadVod(), this.loadSeries(), this.loadLive(), this.loadFree(), this.liveCatalog(), this.genreCats('movie'), this.genreCats('series')]);
         if (fold(q.value.trim()) !== term) return;
         // Typing a genre ("comedy", "comédie", "sport") offers that genre as a filter.
-        const isGenre = g => term.length >= 3 && (fold(g.name).includes(term) || fold(T(g.name)).includes(term) || g.re.test(words(term)));
+        const isGenre = g => term.length >= 3 && (fold(g.name).includes(term) || fold(this.genreName(g)).includes(term) || g.re.test(words(term)));
         const hits = GENRES.filter(isGenre);
-        const genreBtn = (go, label, where) => `<button class="season" data-go-genre="${go}">${esc(T(label))} · ${esc(T(where))}</button>`;
-        const inKind = (list, kind, label) => hits.filter(g => list.some(i => this.genresOf(i).includes(g.id))).map(g => genreBtn(kind + ':' + g.id, g.name, label));
+        const genreBtn = (go, label, where) => `<button class="season" data-go-genre="${go}">${esc(label)} · ${esc(T(where))}</button>`;
+        const inKind = (list, kind, label) => hits.filter(g => list.some(i => this.genresOf(i).includes(g.id))).map(g => genreBtn(kind + ':' + g.id, this.genreName(g), label));
         const genreBtns = [
           ...inKind(uniq(this.allowed(vod)), 'movie', 'Movies'), ...inKind(uniq(series), 'series', 'Series'),
           ...liveCat.genres.filter(isGenre).map(g => genreBtn('live:' + g.genre, g.name, 'Live TV')),
@@ -2510,7 +2519,7 @@
       $('#setRelay', m).addEventListener('change', e => save('relay', e.target.value.trim()));
       $('#setFormat', m).addEventListener('change', e => save('liveFormat', e.target.value));
       const resetPicks = () => { delete this.data.moviePicks; delete this.data.seriesPicks; delete this.data.liveCatalog; };
-      $('#setLang', m).addEventListener('change', e => { save('tmdbLang', e.target.value); TMDB.cache.clear(); resetPicks(); });
+      $('#setLang', m).addEventListener('change', e => { save('tmdbLang', e.target.value); TMDB.cache.clear(); resetPicks(); this.redrawLater = true; });
       $('#setAdult', m).addEventListener('change', async e => {
         const box = e.target, on = box.checked;
         // Turning adult categories on needs the parental PIN (created the first time).

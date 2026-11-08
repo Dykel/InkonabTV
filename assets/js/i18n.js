@@ -11,8 +11,6 @@
   window.T = s => s;
   // The TV menu language changed while the app was open: reload in the new language.
   window.addEventListener('languagechange', () => location.reload());
-  if (col < 0) return;
-
   const D = {
     // genres
     'All genres': ['Tous les genres', 'Todos los géneros', 'Alle Genres', 'Tutti i generi', 'Todos os géneros'],
@@ -374,6 +372,10 @@
     [/^Quality · (.+)$/, ['Qualité · $1', 'Calidad · $1', 'Qualität · $1', 'Qualità · $1', 'Qualidade · $1']],
     [/^Quality: (.+)$/, ['Qualité : $1', 'Calidad: $1', 'Qualität: $1', 'Qualità: $1', 'Qualidade: $1']],
   ];
+
+  // A name from the table in another language (the Info language in Settings).
+  window.I18N.tr = (s, code) => { const c = LANGS.indexOf(code); return c >= 0 && D[s] ? D[s][c] : null; };
+  if (col < 0) return;
 
   const one = s => {
     const t = D[s];

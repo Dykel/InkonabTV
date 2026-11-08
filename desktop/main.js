@@ -20,7 +20,7 @@ function createWindow() {
     height: 780,
     minWidth: 800,
     minHeight: 500,
-    backgroundColor: '#05090b',
+    backgroundColor: '#07080b',
     title: 'InkonabTV',
     icon: path.join(__dirname, 'www', 'icons', 'icon-512.png'),
     autoHideMenuBar: true,
