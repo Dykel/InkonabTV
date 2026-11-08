@@ -4,6 +4,9 @@
   const DIRS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
 
   function scope() {
+    // The code keypad sits on top of everything, including an open Settings window.
+    const keypad = document.querySelector('.pin-dlg');
+    if (keypad) return keypad;
     const modal = document.querySelector('#modal:not(.hidden)');
     if (modal) return modal;
     const login = document.querySelector('#login:not(.hidden)');
