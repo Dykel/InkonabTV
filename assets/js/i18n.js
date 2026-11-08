@@ -12,6 +12,20 @@
   // The TV menu language changed while the app was open: reload in the new language.
   window.addEventListener('languagechange', () => location.reload());
   const D = {
+    // access code and expiry
+    'Show login details': ['Afficher les identifiants', 'Mostrar datos de acceso', 'Zugangsdaten anzeigen', 'Mostra dati di accesso', 'Mostrar dados de acesso'],
+    'Change code': ['Changer le code', 'Cambiar código', 'Code ändern', 'Cambia codice', 'Alterar código'],
+    'Enter the access code': ['Saisissez le code d’accès', 'Introduce el código de acceso', 'Zugangscode eingeben', 'Inserisci il codice di accesso', 'Introduza o código de acesso'],
+    'Enter your current code': ['Saisissez votre code actuel', 'Introduce tu código actual', 'Aktuellen Code eingeben', 'Inserisci il codice attuale', 'Introduza o código atual'],
+    'Create a new 4-digit code': ['Créez un nouveau code à 4 chiffres', 'Crea un código nuevo de 4 dígitos', 'Neuen 4-stelligen Code erstellen', 'Crea un nuovo codice di 4 cifre', 'Crie um novo código de 4 dígitos'],
+    'Enter the code again': ['Saisissez à nouveau le code', 'Introduce el código otra vez', 'Code erneut eingeben', 'Inserisci di nuovo il codice', 'Introduza o código novamente'],
+    'Wrong code': ['Code incorrect', 'Código incorrecto', 'Falscher Code', 'Codice errato', 'Código incorreto'],
+    'The codes don’t match': ['Les codes ne correspondent pas', 'Los códigos no coinciden', 'Die Codes stimmen nicht überein', 'I codici non corrispondono', 'Os códigos não coincidem'],
+    'Code saved': ['Code enregistré', 'Código guardado', 'Code gespeichert', 'Codice salvato', 'Código guardado'],
+    'Your login details are hidden. The code is 1234 until you change it, so change it to keep them private.': ['Vos identifiants sont masqués. Le code est 1234 tant que vous ne le changez pas : changez-le pour les garder privés.', 'Tus datos de acceso están ocultos. El código es 1234 hasta que lo cambies: cámbialo para mantenerlos privados.', 'Deine Zugangsdaten sind verborgen. Der Code ist 1234, bis du ihn änderst. Ändere ihn, damit sie privat bleiben.', 'I tuoi dati di accesso sono nascosti. Il codice è 1234 finché non lo cambi: cambialo per mantenerli privati.', 'Os seus dados de acesso estão ocultos. O código é 1234 até o alterar: altere-o para os manter privados.'],
+    'Your subscription ends soon': ['Votre abonnement se termine bientôt', 'Tu suscripción termina pronto', 'Dein Abo endet bald', 'Il tuo abbonamento sta per scadere', 'A sua subscrição termina em breve'],
+    'Your subscription ends today.': ['Votre abonnement se termine aujourd’hui.', 'Tu suscripción termina hoy.', 'Dein Abo endet heute.', 'Il tuo abbonamento scade oggi.', 'A sua subscrição termina hoje.'],
+    'Contact your provider to renew it and keep watching.': ['Contactez votre fournisseur pour le renouveler et continuer à regarder.', 'Contacta con tu proveedor para renovarla y seguir viendo.', 'Wende dich an deinen Anbieter, um es zu verlängern und weiterzuschauen.', 'Contatta il tuo fornitore per rinnovarlo e continuare a guardare.', 'Contacte o seu fornecedor para a renovar e continuar a ver.'],
     // genres
     'All genres': ['Tous les genres', 'Todos los géneros', 'Alle Genres', 'Tutti i generi', 'Todos os géneros'],
     'Genres': ['Genres', 'Géneros', 'Genres', 'Generi', 'Géneros'],
@@ -358,6 +372,9 @@
     [/^(\d+) min ago$/, ['il y a $1 min', 'hace $1 min', 'vor $1 Min.', '$1 min fa', 'há $1 min']],
     [/^(\d+) hours? ago$/, ['il y a $1 h', 'hace $1 h', 'vor $1 Std.', '$1 ore fa', 'há $1 h']],
     [/^Playlist updated: (\d+) new, (\d+) removed, (\d+) changed$/, ['Playlist mise à jour : $1 nouveaux, $2 retirés, $3 modifiés', 'Lista actualizada: $1 nuevos, $2 eliminados, $3 cambiados', 'Playlist aktualisiert: $1 neu, $2 entfernt, $3 geändert', 'Playlist aggiornata: $1 nuovi, $2 rimossi, $3 modificati', 'Lista atualizada: $1 novos, $2 removidos, $3 alterados']],
+    [/^If the update doesn’t install, open the Downloader app and enter code (\d+)\.$/, ['Si la mise à jour ne s’installe pas, ouvrez l’application Downloader et saisissez le code $1.', 'Si la actualización no se instala, abre la app Downloader e introduce el código $1.', 'Wenn das Update nicht installiert wird, öffne die Downloader-App und gib den Code $1 ein.', 'Se l’aggiornamento non si installa, apri l’app Downloader e inserisci il codice $1.', 'Se a atualização não for instalada, abra a app Downloader e introduza o código $1.']],
+    [/^Your subscription ends tomorrow, on (.+)\.$/, ['Votre abonnement se termine demain, le $1.', 'Tu suscripción termina mañana, el $1.', 'Dein Abo endet morgen, am $1.', 'Il tuo abbonamento scade domani, il $1.', 'A sua subscrição termina amanhã, a $1.']],
+    [/^Your subscription ends in (\d+) days, on (.+)\.$/, ['Votre abonnement se termine dans $1 jours, le $2.', 'Tu suscripción termina en $1 días, el $2.', 'Dein Abo endet in $1 Tagen, am $2.', 'Il tuo abbonamento scade tra $1 giorni, il $2.', 'A sua subscrição termina dentro de $1 dias, a $2.']],
     [/^Show (MBC PLAY)$/, ['Afficher $1', 'Mostrar $1', '$1 anzeigen', 'Mostra $1', 'Mostrar $1']],
     [/^Next episode in (\d+) s$/, ['Épisode suivant dans $1 s', 'Siguiente episodio en $1 s', 'Nächste Folge in $1 s', 'Prossimo episodio tra $1 s', 'Próximo episódio em $1 s']],
     [/^Retrying in (\d+) s$/, ['Nouvel essai dans $1 s', 'Reintentando en $1 s', 'Neuer Versuch in $1 s', 'Nuovo tentativo tra $1 s', 'Nova tentativa em $1 s']],

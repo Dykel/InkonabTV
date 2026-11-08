@@ -316,6 +316,7 @@
       if (this.api === api) setTimeout(() => this.api === api && this.refreshInBackground(api), 3000);
       if (this.api === api && api.primeGuide) setTimeout(() => this.api === api && api.primeGuide(), 20000);
       setTimeout(() => this.checkUpdate(false), 30000);
+      setTimeout(() => this.checkExpiry(), 12000);
     },
 
     // Update the saved playlist when it was last checked more than 10 minutes ago. VPN version:
@@ -681,9 +682,13 @@
 
     // ---------- parental PIN ----------
     // Resolves true when the right PIN is entered (or a new one is created twice), false on cancel.
-    askPin(mode) {
+    // Parental PIN, or with account = true the code that protects the login details.
+    accountCode() { return Settings.accountPin || '1234'; },
+    askPin(mode, account = false) {
       return new Promise(resolve => {
-        const steps = mode === 'create' ? ['Create a 4-digit PIN', 'Enter the PIN again'] : [mode === 'change' ? 'Enter your current PIN' : 'Enter your parental PIN'];
+        const steps = account
+          ? (mode === 'create' ? ['Create a new 4-digit code', 'Enter the code again'] : [mode === 'change' ? 'Enter your current code' : 'Enter the access code'])
+          : (mode === 'create' ? ['Create a 4-digit PIN', 'Enter the PIN again'] : [mode === 'change' ? 'Enter your current PIN' : 'Enter your parental PIN']);
         let step = 0, digits = '', first = '';
         const back = document.activeElement;
         const dlg = document.createElement('div');
@@ -715,12 +720,12 @@
           paint();
           if (digits.length < 4) return;
           setTimeout(() => {
-            if (mode !== 'create') return digits === Settings.adultPin ? done(true) : fail('Wrong PIN');
+            if (mode !== 'create') return digits === (account ? this.accountCode() : Settings.adultPin) ? done(true) : fail(account ? 'Wrong code' : 'Wrong PIN');
             if (step === 0) { first = digits; step = 1; digits = ''; $('.pin-err', dlg).textContent = ''; return paint(); }
-            if (digits !== first) { step = 0; return fail('The PINs don’t match'); }
-            Settings.adultPin = digits;
+            if (digits !== first) { step = 0; return fail(account ? 'The codes don’t match' : 'The PINs don’t match'); }
+            Settings[account ? 'accountPin' : 'adultPin'] = digits;
             Settings.save();
-            this.toast('PIN saved');
+            this.toast(account ? 'Code saved' : 'PIN saved');
             done(true);
           }, 150);
         };
@@ -738,6 +743,8 @@
 
     logout() {
       Store.del('creds');
+      delete Settings.accountPin; // forgotten code: signing out resets it, and clears the login
+      Settings.save();
       // Genres belong to the titles, not the account: a new login doesn't look them up again.
       Disk.clear().then(() => this.genreStore && Disk.set('genres.v1', this.genreStore));
       this.api = null;
@@ -2327,6 +2334,27 @@
     // installer's address (scripts/release-windows.mjs). Checked once a day, or from Settings.
     updater() { return window.Native ? Native.player : window.Desktop && Desktop.updater; },
 
+    // Subscription ending within a week: tell the viewer, at most once a day, when nothing is open.
+    checkExpiry() {
+      if (!this.api || !this.api.info) return;
+      const end = Number((this.api.info.user_info || {}).exp_date) * 1000;
+      const days = Math.ceil((end - Date.now()) / 864e5);
+      if (!end || days < 0 || days > 7) return;
+      const today = new Date().toDateString();
+      if (Store.get('expNotice') === today) return;
+      if (Player.isOpen() || !$('#modal').classList.contains('hidden')) { setTimeout(() => this.checkExpiry(), 60000); return; }
+      Store.set('expNotice', today);
+      const date = new Date(end).toLocaleDateString(LOCALE, { year: 'numeric', month: 'long', day: 'numeric' });
+      const text = days === 0 ? 'Your subscription ends today.' : days === 1 ? `Your subscription ends tomorrow, on ${date}.` : `Your subscription ends in ${days} days, on ${date}.`;
+      const m = this.openModal(`${this.closeBtn()}
+        <h2 class="sheet-title">Your subscription ends soon</h2>
+        <p>${esc(text)}</p>
+        <p class="muted">Contact your provider to renew it and keep watching.</p>
+        <div class="set-actions"><button class="btn primary" id="expOk">OK</button></div>`, 'settings upd');
+      $('#expOk', m).addEventListener('click', () => this.closeModal());
+      $('#expOk', m).focus();
+    },
+
     async checkUpdate(manual) {
       const P = this.updater();
       if (!CFG.updateUrl || !P || !P.appVersion || this.updating) return;
@@ -2360,6 +2388,12 @@
         <div class="set-actions" id="updActions"><button class="btn ghost" id="updLater">Later</button><button class="btn primary" id="updNow">Update now</button></div>`, 'settings upd');
       const status = $('#updStatus', m), actions = $('#updActions', m);
       $('#updLater', m).addEventListener('click', () => { Store.set('updLater', v.versionCode); this.closeModal(); });
+      // InkonabTV+ on Android: the way to update by hand if the installer doesn't go through.
+      const help = () => {
+        const old = $('.upd-help', m);
+        if (old) old.remove();
+        if (CFG.downloaderCode && window.Native) status.insertAdjacentHTML('afterend', `<p class="muted upd-help">${esc(T(`If the update doesn’t install, open the Downloader app and enter code ${CFG.downloaderCode}.`))}</p>`);
+      };
       const start = async () => {
         const now = await P.appVersion().catch(() => me);
         if (!now.canInstall) {
@@ -2395,10 +2429,12 @@
         if (r.ok) {
           status.textContent = me.installNote || 'Downloaded. Choose Install on the next screen — your sign-in and playlist are kept.';
           actions.innerHTML = `<button class="btn primary" id="updInstall">${esc(me.installLabel || 'Install')}</button>`;
+          help();
           $('#updInstall', m).addEventListener('click', () => P.updateInstall());
           $('#updInstall', m).focus();
         } else {
           status.textContent = 'The update couldn’t be installed: ' + (r.detail || 'download failed') + '.';
+          help();
           actions.innerHTML = '<button class="btn ghost" id="updClose">Close</button><button class="btn primary" id="updRetry">Try again</button>';
           $('#updClose', m).addEventListener('click', () => this.closeModal());
           $('#updRetry', m).addEventListener('click', start);
@@ -2444,16 +2480,21 @@
       const exp = Number(ui.exp_date) ? new Date(Number(ui.exp_date) * 1000).toLocaleDateString(LOCALE, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Never';
       const langs = [['en-US', 'English'], ['fr-FR', 'Français'], ['es-ES', 'Español'], ['de-DE', 'Deutsch'], ['it-IT', 'Italiano'], ['pt-PT', 'Português'], ['nl-NL', 'Nederlands'], ['ar-SA', 'العربية'], ['tr-TR', 'Türkçe']];
       if (!langs.some(l => l[0] === Settings.tmdbLang)) langs.unshift([Settings.tmdbLang, Settings.tmdbLang]);
+      // Login details stay out of the page until the access code is entered.
+      const secrets = { playlist: this.api.url, server: this.api.server, user: this.api.username, m3u: this.api.m3uUrl(), epg: this.api.epgUrl() };
+      const dots = '••••••••';
       const m = this.openModal(`${this.closeBtn()}
         <h2 class="sheet-title">Settings</h2>
         <section class="set-group">
           <h3>Account</h3>
-          ${this.api.isM3U ? `<div class="kv link"><span>Playlist</span><code>${esc(this.api.url)}</code></div>` : `
-          ${CFG.playerMode ? `<div class="kv link"><span>Server</span><code>${esc(this.api.server)}</code></div>` : ''}
-          <div class="kv"><span>Username</span><b>${esc(this.api.username)}</b></div>
+          ${this.api.isM3U ? `<div class="kv link"><span>Playlist</span><code data-secret="playlist">${dots}</code></div>` : `
+          ${CFG.playerMode ? `<div class="kv link"><span>Server</span><code data-secret="server">${dots}</code></div>` : ''}
+          <div class="kv"><span>Username</span><b data-secret="user">${dots}</b></div>
           <div class="kv"><span>Status</span><b class="ok">${esc(ui.status || 'Active')}</b></div>
           <div class="kv"><span>Expires</span><b>${esc(exp)}</b></div>
           <div class="kv"><span>Connections</span><b>${esc(ui.active_cons ?? '–')} / ${esc(ui.max_connections ?? '–')}</b></div>`}
+          <p class="muted small-note" id="codeNote"${Settings.accountPin ? ' hidden' : ''}>Your login details are hidden. The code is 1234 until you change it, so change it to keep them private.</p>
+          <div class="set-row vpn-actions"><button class="btn ghost" id="showLogin">Show login details</button><button class="btn ghost" id="changeCode">Change code</button></div>
         </section>
         <section class="set-group">
           <h3>Playback</h3>
@@ -2515,8 +2556,8 @@
         </section>
         <section class="set-group">
           <h3>Playlist links</h3>
-          <div class="kv link"><span>M3U</span><code>${esc(this.api.m3uUrl())}</code><button class="round-btn sm" data-copy="${esc(this.api.m3uUrl())}" aria-label="Copy M3U link">${ICONS.copy}</button></div>
-          ${this.api.epgUrl() ? `<div class="kv link"><span>EPG</span><code>${esc(this.api.epgUrl())}</code><button class="round-btn sm" data-copy="${esc(this.api.epgUrl())}" aria-label="Copy EPG link">${ICONS.copy}</button></div>` : ''}
+          <div class="kv link"><span>M3U</span><code data-secret="m3u">${dots}</code><button class="round-btn sm" data-copy="m3u" aria-label="Copy M3U link" hidden>${ICONS.copy}</button></div>
+          ${secrets.epg ? `<div class="kv link"><span>EPG</span><code data-secret="epg">${dots}</code><button class="round-btn sm" data-copy="epg" aria-label="Copy EPG link" hidden>${ICONS.copy}</button></div>` : ''}
           ${CFG.privacyUrl ? `<div class="kv link"><span>Privacy policy</span><code>${esc(CFG.privacyUrl.replace(/^https?:\/\//, ''))}</code></div>` : ''}
         </section>
         <div class="set-actions">
@@ -2552,6 +2593,16 @@
         builtinBox.checked = !Settings.hideBuiltin;
         builtinBox.addEventListener('change', e => { save('hideBuiltin', !e.target.checked); this.extraChanged(); });
       }
+      $('#showLogin', m).addEventListener('click', async () => {
+        if (!(await this.askPin('check', true))) return;
+        $$('[data-secret]', m).forEach(e => { e.textContent = secrets[e.dataset.secret]; });
+        $$('[data-copy]', m).forEach(b => { b.hidden = false; });
+        $('#showLogin', m).hidden = true;
+        $('#changeCode', m).focus();
+      });
+      $('#changeCode', m).addEventListener('click', async () => {
+        if (await this.askPin('change', true) && await this.askPin('create', true)) $('#codeNote', m).hidden = true;
+      });
       const pinChange = $('#pinChange', m);
       if (pinChange) pinChange.addEventListener('click', async () => { if (await this.askPin('change')) await this.askPin('create'); });
       $('#testRelay', m).addEventListener('click', async () => {
@@ -2563,7 +2614,7 @@
           this.toast(d && d.user_info ? 'Relay works ✓' : 'Relay answered, but not with your account');
         } catch { this.toast('Relay not reachable'); }
       });
-      $$('[data-copy]', m).forEach(b => b.addEventListener('click', () => { navigator.clipboard && navigator.clipboard.writeText(b.dataset.copy); this.toast('Copied'); }));
+      $$('[data-copy]', m).forEach(b => b.addEventListener('click', () => { navigator.clipboard && navigator.clipboard.writeText(secrets[b.dataset.copy]); this.toast('Copied'); }));
       $('#clearCw', m).addEventListener('click', () => { Store.set('cw', []); this.toast('Cleared'); this.renderContinue(); });
       $('#logout', m).addEventListener('click', () => this.logout());
       $('#plRefresh', m).addEventListener('click', async e => {

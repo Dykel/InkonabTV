@@ -1053,6 +1053,8 @@ img.broken { visibility: hidden; }
 .upd-bar { flex: 1; height: 10px; border-radius: 6px; background: rgba(255,255,255,.1); overflow: hidden; align-self: center; }
 .upd-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
 
+.upd-help { margin: 10px 0 0; color: var(--text); }
+
 /* Movies / Series: genres as one row of slim filter pills. Margins rather than `gap`: older
    Samsung TVs. The right edge fades so it's clear the row goes on. */
 .grid-wrap { min-width: 0; }
