@@ -1,7 +1,7 @@
 {
-  "versionCode": 14,
-  "versionName": "1.0.13",
-  "sha256": "4874d11372586020ce6115ee77b871fab6e7a583f91a46274f1c2811de8ce072",
-  "size": 17970188,
-  "notes": "MBC PLAY is back: free TV and radio on top of Live TV (Settings → Extra playlists can hide it)\nExtra playlists from sites that block web apps now load too\nSeries open with their episode list again, on the season you were watching\nPhones held sideways: tabs on the left, more posters on screen\nBetter layout on tablets, foldables and car screens"
+  "versionCode": 15,
+  "versionName": "1.0.14",
+  "sha256": "a2818a0948f9f0bdcd742fb9c4b07c72bdd5b8bf7aca7ad742f74d545f3af907",
+  "size": 17978376,
+  "notes": "Movies and series: filter by genre, detected automatically in the background\nLive TV: new Sports, News, Kids, Movies, Music and Documentaries groups\nSearch a genre, like \"comedy\" or \"sport\", to jump straight to it\nLong channel lists open faster\nMBC PLAY is built in again (Settings → Extra playlists can hide it)"
 }

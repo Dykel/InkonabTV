@@ -2219,9 +2219,13 @@
       q.focus();
       const res = $('#results', m);
       let byId = new Map();
-      const run = debounce(async () => {
+      // Samsung TVs: every search redraws dozens of posters, too much to do on each letter typed
+      // with the remote. Wait for a pause and 3 letters (or Enter / Done with 2), and show fewer.
+      const samsung = document.documentElement.classList.contains('tizen');
+      const limit = samsung ? 18 : 36;
+      const search = async now => {
         const term = fold(q.value.trim());
-        if (term.length < 2) { res.innerHTML = '<p class="muted center">Start typing to search.</p>'; return; }
+        if (term.length < (samsung && !now ? 3 : 2)) { res.innerHTML = '<p class="muted center">Start typing to search.</p>'; return; }
         res.innerHTML = '<div class="loader small"><span></span></div>';
         const [vod, series, live, free, liveCat] = await Promise.all([this.loadVod(), this.loadSeries(), this.loadLive(), this.loadFree(), this.liveCatalog(), this.genreCats('movie'), this.genreCats('series')]);
         if (fold(q.value.trim()) !== term) return;
@@ -2234,8 +2238,8 @@
           ...inKind(uniq(this.allowed(vod)), 'movie', 'Movies'), ...inKind(uniq(series), 'series', 'Series'),
           ...liveCat.genres.filter(isGenre).map(g => genreBtn('live:' + g.genre, g.name, 'Live TV')),
         ];
-        const match = list => list.filter(i => i.key.includes(term)).slice(0, 36);
-        const mv = match(uniq(this.allowed(vod))), sv = match(uniq(series)), lv = match(uniq([...free, ...this.allowed(live)])).slice(0, 24);
+        const match = list => list.filter(i => i.key.includes(term)).slice(0, limit);
+        const mv = match(uniq(this.allowed(vod))), sv = match(uniq(series)), lv = match(uniq([...free, ...this.allowed(live)])).slice(0, samsung ? 12 : 24);
         byId = new Map([...mv, ...sv].map(i => [i.kind + i.id, i]));
         res.innerHTML = (mv.length || sv.length || lv.length || genreBtns.length) ? [
           genreBtns.length && `<h3>Genres</h3><div class="seasons">${genreBtns.join('')}</div>`,
@@ -2256,8 +2260,11 @@
           const ch = e.target.closest('[data-live]');
           if (ch) this.playChannel(lv, Number(ch.dataset.live), { key: '@now:search', name: 'Search' });
         };
-      }, 250);
-      q.addEventListener('input', run);
+        if (samsung) $$('img', res).forEach(img => { img.decoding = 'async'; });
+      };
+      const run = debounce(search, samsung ? 1000 : 250);
+      q.addEventListener('input', () => run());
+      if (samsung) q.addEventListener('keydown', e => { if (e.key === 'Enter' || e.keyCode === 65376) search(true); }); // 65376: the TV keyboard's Done
       this.bindCards(res, (k, id) => byId.get(k + id));
     },
 
