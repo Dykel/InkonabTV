@@ -120,13 +120,20 @@ public final class Updater {
     @SuppressWarnings("deprecation")
     private static void check(Context c, File f) throws Exception {
         PackageManager pm = c.getPackageManager();
-        int flags = Build.VERSION.SDK_INT >= 28 ? PackageManager.GET_SIGNING_CERTIFICATES : PackageManager.GET_SIGNATURES;
+        int flags = Build.VERSION.SDK_INT >= 28 ? PackageManager.GET_SIGNING_CERTIFICATES | PackageManager.GET_SIGNATURES : PackageManager.GET_SIGNATURES;
         PackageInfo neu = pm.getPackageArchiveInfo(f.getPath(), flags);
         PackageInfo mine = pm.getPackageInfo(c.getPackageName(), flags);
         if (neu == null) throw new Exception("The download isn't an app");
         if (!c.getPackageName().equals(neu.packageName)) throw new Exception("The download is a different app");
         if (code(neu) <= code(mine)) throw new Exception("The download isn't newer than this version");
-        if (!Arrays.equals(signatures(neu), signatures(mine))) throw new Exception("The download isn't signed by InkonabTV");
+        // Some Android versions can't read the signature of a file that isn't installed yet. Only
+        // refuse a real difference: Android's installer itself rejects an update with another key.
+        Signature[] theirs = signatures(neu), ours = signatures(mine);
+        boolean readable = theirs != null && theirs.length > 0 && ours != null && ours.length > 0;
+        android.util.Log.i("InkonabUpdate", "Signatures: app " + fingerprint(ours) + ", update " + fingerprint(theirs) + ", Android " + Build.VERSION.SDK_INT);
+        if (readable && !Arrays.equals(theirs, ours)) {
+            throw new Exception("The download has a different signature (app " + fingerprint(ours) + ", update " + fingerprint(theirs) + ")");
+        }
     }
 
     @SuppressWarnings("deprecation")
@@ -136,6 +143,17 @@ public final class Updater {
     private static Signature[] signatures(PackageInfo p) {
         if (Build.VERSION.SDK_INT >= 28 && p.signingInfo != null) return p.signingInfo.getApkContentsSigners();
         return p.signatures;
+    }
+
+    /** First 8 hex digits of the certificate's SHA-256, or "none". */
+    private static String fingerprint(Signature[] s) {
+        if (s == null || s.length == 0) return "none";
+        try {
+            byte[] d = MessageDigest.getInstance("SHA-256").digest(s[0].toByteArray());
+            return String.format("%02x%02x%02x%02x", d[0], d[1], d[2], d[3]);
+        } catch (Exception e) {
+            return "unknown";
+        }
     }
 
     /** Open Android's installer for the downloaded APK. */
