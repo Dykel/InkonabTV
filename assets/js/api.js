@@ -619,11 +619,37 @@
       const map = new Map();
       for (const page of await Promise.all(jobs)) {
         for (const r of (page && page.results) || []) {
-          map.set(String(r.id), { date: r.release_date || r.first_air_date || '', pop: r.popularity || 0 });
+          map.set(String(r.id), { date: r.release_date || r.first_air_date || '', pop: r.popularity || 0, g: r.genre_ids || [] });
         }
       }
       if (map.size) Store.set(cacheKey, { t: Date.now(), list: [...map] });
       return map;
+    },
+    // A title's TMDB genre ids: by TMDB id, or by searching its name when it has none.
+    // [] when TMDB doesn't know it. Throws when TMDB can't be reached (e.busy: too many requests).
+    async genres(type, id, name, year) {
+      const call = async (path, params) => {
+        const u = new URL('https://api.themoviedb.org/3/' + path);
+        u.searchParams.set('api_key', CFG.tmdbKey);
+        for (const k in params) u.searchParams.set(k, params[k]);
+        const r = await fetch(u);
+        if (r.status === 429) throw Object.assign(new Error('TMDB busy'), { busy: true });
+        if (r.status === 404) return {};
+        if (!r.ok) throw new Error('TMDB ' + r.status);
+        return r.json();
+      };
+      if (id && id !== '0') return ((await call(`${type}/${id}`, { language: 'en-US' })).genres || []).map(g => g.id);
+      const plain = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const want = plain(name);
+      if (!want) return [];
+      const params = { query: name, language: Settings.tmdbLang };
+      if (year) params[type === 'movie' ? 'year' : 'first_air_date_year'] = year;
+      const results = (await call('search/' + type, params)).results || [];
+      // Only a matching title: a wrong film's genres are worse than none.
+      const same = r => [r.title, r.name, r.original_title, r.original_name].some(t => plain(t) === want);
+      const contains = r => { const t = plain(r.title || r.name); return t && (t.includes(want) || want.includes(t)); };
+      const hit = results.slice(0, 5).find(same) || (year && results[0] && contains(results[0]) ? results[0] : null);
+      return hit ? hit.genre_ids || [] : [];
     },
     normalize(d, base) {
       const logos = (d.images && d.images.logos) || [];

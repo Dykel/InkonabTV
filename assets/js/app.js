@@ -120,6 +120,35 @@
     try { langNamer = langNamer || new Intl.DisplayNames(['en'], { type: 'language' }); return langNamer.of(code.toLowerCase()) || code; } catch { return code; }
   }
 
+  // Genres. Films and series: TMDB's genre ids, plus whatever the provider's category name or genre
+  // field says ("FR: ACTION", "Comédie"), in the app's languages. Series-only TMDB genres are folded
+  // into the film ones. Live channels aren't in TMDB, so they go by category and channel names.
+  const words = s => fold(s).replace(/[^a-z0-9+]+/g, ' ').trim();
+  const GENRES = [
+    [28, 'Action', /\b(action|accion|azione)\b|\bart(s)? martiaux\b|\bmartial/], [12, 'Adventure', /adventure|aventur|avventur|abenteuer/],
+    [16, 'Animation', /\banim(e|es|ation|acion|azione|ados?|ated)\b|\bmanga\b|dessins? animes?|cartoons?\b|zeichentrick/],
+    [35, 'Comedy', /comed|komod|commedia|humou?r/], [80, 'Crime', /\bcrime|policier|\bpolar\b|\bkrimi|policiaco|poliziesco|\bmafia\b|\bgangster/],
+    [99, 'Documentary', /\bdocu|\bdoku|\bdoc\b/], [18, 'Drama', /\bdrama|\bdrame|\bdramma/],
+    [10751, 'Family', /\bfamil|\bkids?\b|enfants?\b|jeunesse|infantil|\bkinder(en)?\b|bambini|children/], [14, 'Fantasy', /\bfantas/],
+    [36, 'History', /\bhistor|\bhistoire|\bstoric|\bgeschichte\b/], [27, 'Horror', /\bhorr|epouvante|\bterror|grusel|\borrore\b/],
+    [10402, 'Music', /\bmusi[ckq]|\bconcerts?\b/], [9648, 'Mystery', /\bmyst|\bmisterio\b|\bmistero\b/],
+    [10749, 'Romance', /\broman[ct]|liebesfilm/], [878, 'Science Fiction', /sci ?fi\b|science ?fiction|\bsf\b|fantascienza|ciencia ficcion/],
+    [53, 'Thriller', /\bthriller|\bsuspense/], [10752, 'War', /\bwar\b|\bguerre\b|\bguerra\b|kriegsfilm/], [37, 'Western', /\bwestern/],
+    [10763, 'News', /\bnews\b/], [10764, 'Reality', /\breality\b|tele ?realite/], [10766, 'Soap', /\bsoaps?\b|telenovela/], [10767, 'Talk', /\btalk ?shows?\b/],
+  ].map(([id, name, re]) => ({ id, name, re }));
+  const TV_GENRES = { 10759: [28, 12], 10762: [10751], 10765: [878, 14], 10768: [10752] };
+  const genreIds = ids => [...new Set(ids.flatMap(g => TV_GENRES[g] || [g]))].filter(g => GENRES.some(x => x.id === g));
+  const textGenres = s => { const t = words(s); return t ? GENRES.filter(g => g.re.test(t)).map(g => g.id) : []; };
+  const LIVE_GENRES = [
+    ['sports', 'Sports', /\bsports?\b|\bspor\b|deportes?\b|\bbein\b(?! (cinema|movies?|od|series|box|drama|gourmet|documentary))|\bespn\b|eurosports?\b|\bmysport|\bdazn\b|\bfoot(ball)?\b|\bfutbol\b|\bsoccer\b|\bbaloncesto\b|\bligue\b|\bliga\b|\bleague\b|\bepl\b|\bchampionship\b|\bworld cup\b|\bequipe\b|\bppv\b|\bstaige\b|\bnba\b|\bnfl\b|\bnhl\b|\bmlb\b|\bncaa[a-z]*\b|\bf1\b|moto ?gp\b|\bufc\b|\btennis\b|\bgolf\b/],
+    ['news', 'News', /\bnews\b|\binfos?\b|\bactu|nachrichten|noticias|notizie|\bcnn\b|\bbfm|\blci\b|\bcnews\b|franceinfo|france ?24|al ?jazeera|euronews|\bmsnbc\b/],
+    ['kids', 'Kids', /\bkids?\b|jeunesse|enfants?\b|infantil|\bkinder\b|bambini|\bkinderen\b|disney(?!\+? (ppv|events?\b))|cartoon|nickelodeon|\bnick\b|\bgulli\b|\btiji\b|boomerang|\bpiwi\b|teletoon|baby ?tv|spacetoon|\bmbc ?3\b/],
+    ['movies', 'Movies', /\bcinemas?\b|\bcine\b|\bfilms?\b|\bmovies?\b|\bpeliculas?\b|\bhbo\b|\bocs\b|\bmbc ?(2|max|action|bollywood)\b/],
+    ['music', 'Music', /\bmusi[ckq]|\bmtv\b|\bmezzo\b|\btrace\b|\bnrj hits\b|\bmcm\b|\bvh1\b/],
+    ['docs', 'Documentaries', /\bdocu|\bdoku|discovery|nat ?geo|national geographic|\bplanete\b|\bhistory\b|animal planet|ushuaia/],
+    ['faith', 'Religion', /\bquran\b|\bcoran\b|\bislam|\bcatholi|\bchristian|\bgospel\b|\bbible\b/],
+  ].map(([key, name, re]) => ({ key, name, re }));
+
   // Keep one entry per title (versions are grouped by TMDB id, see App.group).
   const uniq = list => { const seen = new Set(); return list.filter(i => !seen.has(i.gkey) && seen.add(i.gkey)); };
 
@@ -134,7 +163,7 @@
     const n = parseName(v.name);
     return { kind: 'movie', id: v.stream_id, name: n.title, raw: v.name, lang: n.lang, year: n.year, quality: n.quality, tags: n.tags,
       img: v.stream_icon || '', added: Number(v.added) || 0, rating: parseFloat(v.rating) || 0, tmdb: v.tmdb || v.tmdb_id || '',
-      ext: v.container_extension || 'mp4', cat: String(v.category_id), adult: Number(v.is_adult) === 1, key: fold(v.name) };
+      ext: v.container_extension || 'mp4', genre: v.genre || '', cat: String(v.category_id), adult: Number(v.is_adult) === 1, key: fold(v.name) };
   }
   function fromSeries(s) {
     const n = parseName(s.name);
@@ -709,7 +738,8 @@
 
     logout() {
       Store.del('creds');
-      Disk.clear();
+      // Genres belong to the titles, not the account: a new login doesn't look them up again.
+      Disk.clear().then(() => this.genreStore && Disk.set('genres.v1', this.genreStore));
       this.api = null;
       this.data = {};
       this.closeModal();
@@ -861,6 +891,7 @@
       main.innerHTML = '<div class="loader"><span></span></div>';
       this.cancelRetry();
       const render = { home: this.renderHome, live: this.renderLive, guide: this.renderGuide, movies: this.renderMovies, series: this.renderSeries }[this.view];
+      setTimeout(() => this.detectGenres().catch(() => {}), 8000); // once, after the first page is up
       return render.call(this, main).then(() => { this.routeFails = 0; }).catch(err => {
         console.error(err);
         main.innerHTML = `<div class="empty"><h3>Couldn’t load this page</h3><p>${esc(err.message)}</p><p class="retry-count"></p><button class="btn" id="retry">Try again</button></div>`;
@@ -908,6 +939,57 @@
       }
       return list;
     },
+    // ---------- genres ----------
+    // this.genreStore: { 'm' or 's' + gkey: [genre ids] }, kept on disk: each title is looked up once.
+    loadGenres() {
+      return this.genreLoad || (this.genreLoad = Disk.get('genres.v1').then(g => (this.genreStore = g || {})));
+    },
+    genreKey: i => i.kind[0] + i.gkey,
+    async genreCats(kind) {
+      const names = this.data.catNames || (this.data.catNames = {}); // this.data is per account
+      if (!names[kind]) names[kind] = Object.fromEntries((await this.loadCats(kind)).map(c => [String(c.category_id), c.category_name]));
+      await this.loadGenres();
+    },
+    // Needs genreCats(kind) first. Every copy of a title counts: one may be in "FR: ACTION".
+    genresOf(i) {
+      if (!i.kw) i.kw = [...new Set(i.versions.flatMap(v => [...textGenres(this.data.catNames[i.kind][v.cat]), ...textGenres(v.genre)]))];
+      const found = this.genreStore[this.genreKey(i)];
+      return found && found.length ? [...new Set([...i.kw, ...found])] : i.kw;
+    },
+    // Looks up, newest first and a few at a time, the titles not known yet; pauses during playback
+    // so video keeps the connection and the TV's CPU. The genre lists fill in as it goes.
+    async detectGenres() {
+      // Once per account: a run for another account stops at its next title.
+      if (this.genreApi === this.api || !CFG.tmdbKey || !this.api) return;
+      this.genreApi = this.api;
+      const api = this.api, wait = ms => new Promise(r => setTimeout(r, ms));
+      const store = await this.loadGenres();
+      const [vod, series, topM, topS] = await Promise.all([this.loadVod().catch(() => []), this.loadSeries().catch(() => []), TMDB.top('movie'), TMDB.top('tv')]);
+      for (const [letter, top] of [['m', topM], ['s', topS]]) for (const [id, t] of top) if (t.g) store[letter + 't' + id] = genreIds(t.g);
+      // Titles whose provider genre field is usable (most series) need no lookup.
+      const queue = [...uniq(this.allowed(vod)), ...uniq(series)].sort((a, b) => b.added - a.added)
+        .filter(i => !store[this.genreKey(i)] && !i.versions.some(v => textGenres(v.genre).length));
+      let failed = 0, saved = Date.now(), fresh = 0;
+      const flush = () => { Disk.set('genres.v1', store); saved = Date.now(); fresh = 0; if (this.onGenres) this.onGenres(); };
+      const worker = async () => {
+        while (queue.length && failed < 8 && this.api === api) {
+          if (Player.isOpen()) { await wait(3000); continue; }
+          const i = queue.shift();
+          try {
+            const ids = await TMDB.genres(i.kind === 'movie' ? 'movie' : 'tv', i.tmdb, i.name, i.year);
+            store[this.genreKey(i)] = genreIds(ids);
+            failed = 0; fresh++;
+            if (Date.now() - saved > 15000) flush();
+          } catch (e) {
+            if (e.busy) { queue.unshift(i); await wait(10000); } else failed++;
+          }
+        }
+      };
+      flush();
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      if (fresh) flush();
+    },
+
     loadLive() {
       // Channels named "✶⋆✶ … ✶⋆✶" are the provider's section dividers, not real channels.
       // Copies of the same channel in other qualities share c.versions (best first).
@@ -1004,7 +1086,20 @@
           }
           const byKey = new Map();
           for (const g of groups) for (const c of g.channels) if (!byKey.has(c.gkey)) byKey.set(c.gkey, c);
-          return { groups, catName, byKey };
+          // Groups by genre for the Live TV page: the category's name decides, else the channel's.
+          const genres = LIVE_GENRES.map(g => ({ ...g, key: '@genre:' + g.key, genre: g.key, special: true, channels: [], seen: new Set() }));
+          for (const grp of groups) {
+            if (/\bradio\b/.test(words(grp.name))) continue;
+            const named = grp.free ? [] : genres.filter(g => g.re.test(words(grp.name)));
+            for (const c of grp.channels) {
+              const text = words(c.label);
+              if (c.radio || /event has not begun|\bno event\b/.test(text)) continue; // empty pay-per-view slots
+              for (const g of named.length ? named : genres.filter(x => x.re.test(text))) {
+                if (!g.seen.has(c.gkey)) { g.seen.add(c.gkey); g.channels.push(c); }
+              }
+            }
+          }
+          return { groups, catName, byKey, genres: genres.filter(g => g.channels.length) };
         })();
       }
       return this.data.liveCatalog;
@@ -1302,6 +1397,7 @@
     async renderBrowse(main, kind) {
       this.setBackdrop('');
       const [all, cats, picks] = await Promise.all([kind === 'movie' ? this.loadVod() : this.loadSeries(), this.loadCats(kind), this.tmdbPicks(kind)]);
+      await this.genreCats(kind);
       const items = this.allowed(all);
       const perCat = {};
       for (const i of items) (perCat[i.cat] || (perCat[i.cat] = new Set())).add(i.gkey);
@@ -1314,7 +1410,8 @@
       const mine = () => this.favs(kind).map(k => byGkey.get(k)).filter(Boolean);
       const virtual = { '': latest, '@top': picks.byDate, '@popular': picks.byPop };
       const titles = { '': `<b>Latest</b> ${label.toLowerCase()}`, '@top': `<b>Top</b> picks`, '@popular': `<b>Most</b> watched`, '@fav': `<b>My</b> List` };
-      const startCat = picks.byDate.length ? '@top' : '';
+      const wanted = this.wantGenre; this.wantGenre = 0; // chosen from Search
+      const startCat = picks.byDate.length && !wanted ? '@top' : '';
 
       main.innerHTML = `
         <section class="slider" id="slider" aria-roledescription="carousel"></section>
@@ -1333,6 +1430,7 @@
           <section class="grid-wrap">
             <div class="grid-head">
               <h2 id="gridTitle"></h2>
+              <select class="field sort" id="genre" aria-label="Genre" hidden></select>
               <select class="field sort" id="sort">
                 <option value="auto">Default order</option><option value="added">Recently added</option><option value="name">A – Z</option><option value="rating">Top rated</option>
               </select>
@@ -1344,7 +1442,19 @@
 
       let current = items, shown = 0;
       const grid = $('#grid', main);
-      const sortSel = $('#sort', main);
+      const sortSel = $('#sort', main), genreSel = $('#genre', main);
+      // The list grows while titles are being looked up; left alone while the viewer is on it.
+      const paintGenres = want => {
+        if (!genreSel.isConnected || document.activeElement === genreSel) return;
+        const value = String(want || genreSel.value), n = {};
+        for (const i of latest) for (const g of this.genresOf(i)) n[g] = (n[g] || 0) + 1;
+        const list = GENRES.filter(g => n[g.id] || String(g.id) === value).map(g => ({ ...g, label: T(g.name) })).sort((a, b) => a.label.localeCompare(b.label));
+        genreSel.innerHTML = `<option value="">${esc(T('All genres'))}</option>` + list.map(g => `<option value="${g.id}">${esc(g.label)} · ${n[g.id] || 0}</option>`).join('');
+        genreSel.value = value;
+        genreSel.hidden = !list.length;
+      };
+      paintGenres(wanted);
+      this.onGenres = () => paintGenres();
       const more = () => {
         const slice = current.slice(shown, shown + CHUNK);
         grid.insertAdjacentHTML('beforeend', slice.map(i => this.card(i)).join(''));
@@ -1352,6 +1462,8 @@
       };
       const show = (cat, name) => {
         let list = cat === '@fav' ? mine() : cat in virtual ? virtual[cat] : uniq(items.filter(i => i.cat === cat));
+        const g = Number(genreSel.value);
+        if (g) list = list.filter(i => this.genresOf(i).includes(g));
         const s = sortSel.value;
         if (s === 'name') list = [...list].sort((a, b) => a.name.localeCompare(b.name));
         else if (s === 'rating') list = [...list].sort((a, b) => b.rating - a.rating);
@@ -1371,6 +1483,16 @@
       });
       sortSel.addEventListener('change', () => {
         const b = $('.cat.active', main);
+        show(b.dataset.cat, b.firstChild.textContent.trim());
+      });
+      genreSel.addEventListener('change', () => {
+        // Top picks are a short list: a genre is looked for in the whole catalog.
+        let b = $('.cat.active', main);
+        if (genreSel.value && /^@(top|popular)$/.test(b.dataset.cat)) {
+          b.classList.remove('active');
+          b = $('.cat[data-cat=""]', main);
+          b.classList.add('active');
+        }
         show(b.dataset.cat, b.firstChild.textContent.trim());
       });
       $('#catFilter', main).addEventListener('input', e => {
@@ -1446,7 +1568,9 @@
     // ---------- live ----------
     async renderLive(main) {
       this.setBackdrop('');
-      const [groups, cat] = await Promise.all([this.liveGroups(), this.liveCatalog()]);
+      const [base, cat] = await Promise.all([this.liveGroups(), this.liveCatalog()]);
+      const pinned = g => g.free || g.special;
+      const groups = [...base.filter(pinned), ...cat.genres, ...base.filter(g => !pinned(g))];
       const byKey = new Map(groups.map(g => [g.key, g]));
       const catName = cat.catName;
 
@@ -1455,12 +1579,13 @@
           <aside class="cats">
             <input class="field" type="search" placeholder="Filter categories" id="catFilter">
             <div class="cat-list" id="catList">
-              ${groups.map(g => `<button class="cat${g.free || g.special ? ' special' : ''}" data-cat="${esc(g.key)}" data-name="${esc(fold(g.name))}">${g.key === '@fav' ? '★ ' : ''}${esc(g.name)} <span>${g.channels.length}</span></button>`).join('')}
+              ${groups.map(g => `<button class="cat${g.free || g.special ? ' special' : ''}"${g.genre ? ' data-genre' : ''} data-cat="${esc(g.key)}" data-name="${esc(fold(T(g.name) + ' ' + g.name))}">${g.key === '@fav' ? '★ ' : ''}${esc(g.name)} <span>${g.channels.length}</span></button>`).join('')}
             </div>
           </aside>
           <section class="channels">
             <div class="grid-head"><h2 id="chTitle"></h2><input class="field" type="search" placeholder="Find channel" id="chFilter"></div>
             <div class="ch-list" id="chList"></div>
+            <div class="sentinel" id="chEnd"></div>
           </section>
           <aside class="guide" id="guide"><div class="guide-empty">Select a channel to see what’s on.</div></aside>
         </div>`;
@@ -1477,11 +1602,22 @@
             <span class="ch-q">${c.url ? (c.radio ? '<span class="chip">Radio</span>' : '') : qualities(c).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</span>
             ${c.versions.some(v => Number(v.tv_archive)) ? '<span class="chip">Catch-up</span>' : ''}
           </button>`;
+      // Rows are added as the list scrolls: a genre can hold thousands of channels.
+      let shownCh = 0;
+      const moreChannels = (upTo = 0) => {
+        const end = Math.max(shownCh + 300, upTo + 50);
+        chList.insertAdjacentHTML('beforeend', current.slice(shownCh, end).map((c, i) => rowHtml(c, shownCh + i)).join(''));
+        shownCh = Math.min(end, current.length);
+      };
+      new IntersectionObserver(es => { if (es[0].isIntersecting && shownCh < current.length) moreChannels(); }, { rootMargin: '800px' })
+        .observe($('#chEnd', main));
       const renderChannels = (key, q = '') => {
         group = byKey.get(key);
         current = group.channels.filter(c => !q || c.versions.some(v => v.key.includes(q)));
         $('#chTitle', main).textContent = group.name;
-        chList.innerHTML = current.map(rowHtml).join('') || '<div class="empty"><p>No channels.</p></div>';
+        shownCh = 0;
+        chList.innerHTML = current.length ? '' : '<div class="empty"><p>No channels.</p></div>';
+        moreChannels();
       };
       const pick = b => {
         $$('.cat', main).forEach(c => c.classList.toggle('active', c === b));
@@ -1558,12 +1694,13 @@
       chList.addEventListener('click', e => { const b = e.target.closest('.ch'); if (b) play(Number(b.dataset.i)); });
 
       // Reopen on the group (and channel) watched last.
-      const start = (this.liveCat && $(`.cat[data-cat="${CSS.escape(this.liveCat)}"]`, main)) || $('.cat', main);
+      const start = (this.liveCat && $(`.cat[data-cat="${CSS.escape(this.liveCat)}"]`, main)) || $('.cat:not([data-genre])', main) || $('.cat', main);
       if (!start) return;
       pick(start);
       start.scrollIntoView({ block: 'nearest' });
       const at = this.liveFocus ? current.findIndex(c => c.gkey === this.liveFocus) : -1;
       this.liveFocus = null;
+      if (at >= shownCh) moreChannels(at);
       const target = at >= 0 ? chList.querySelector(`[data-i="${at}"]`) : start;
       target.focus({ preventScroll: true });
       target.scrollIntoView({ block: 'center' });
@@ -2086,17 +2223,36 @@
         const term = fold(q.value.trim());
         if (term.length < 2) { res.innerHTML = '<p class="muted center">Start typing to search.</p>'; return; }
         res.innerHTML = '<div class="loader small"><span></span></div>';
-        const [vod, series, live, free] = await Promise.all([this.loadVod(), this.loadSeries(), this.loadLive(), this.loadFree()]);
+        const [vod, series, live, free, liveCat] = await Promise.all([this.loadVod(), this.loadSeries(), this.loadLive(), this.loadFree(), this.liveCatalog(), this.genreCats('movie'), this.genreCats('series')]);
         if (fold(q.value.trim()) !== term) return;
+        // Typing a genre ("comedy", "comédie", "sport") offers that genre as a filter.
+        const isGenre = g => term.length >= 3 && (fold(g.name).includes(term) || fold(T(g.name)).includes(term) || g.re.test(words(term)));
+        const hits = GENRES.filter(isGenre);
+        const genreBtn = (go, label, where) => `<button class="season" data-go-genre="${go}">${esc(T(label))} · ${esc(T(where))}</button>`;
+        const inKind = (list, kind, label) => hits.filter(g => list.some(i => this.genresOf(i).includes(g.id))).map(g => genreBtn(kind + ':' + g.id, g.name, label));
+        const genreBtns = [
+          ...inKind(uniq(this.allowed(vod)), 'movie', 'Movies'), ...inKind(uniq(series), 'series', 'Series'),
+          ...liveCat.genres.filter(isGenre).map(g => genreBtn('live:' + g.genre, g.name, 'Live TV')),
+        ];
         const match = list => list.filter(i => i.key.includes(term)).slice(0, 36);
         const mv = match(uniq(this.allowed(vod))), sv = match(uniq(series)), lv = match(uniq([...free, ...this.allowed(live)])).slice(0, 24);
         byId = new Map([...mv, ...sv].map(i => [i.kind + i.id, i]));
-        res.innerHTML = (mv.length || sv.length || lv.length) ? [
+        res.innerHTML = (mv.length || sv.length || lv.length || genreBtns.length) ? [
+          genreBtns.length && `<h3>Genres</h3><div class="seasons">${genreBtns.join('')}</div>`,
           lv.length && `<h3>Channels</h3><div class="ch-grid">${lv.map((c, i) => `<button class="ch" data-live="${i}"><span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}</span><span class="ch-name">${esc(c.label)}</span><span class="ch-q">${(c.url ? (c.radio ? ['Radio'] : []) : [...new Set(c.versions.map(v => v.quality || 'SD'))]).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</span></button>`).join('')}</div>`,
           mv.length && `<h3>Movies</h3><div class="grid">${mv.map(i => this.card(i)).join('')}</div>`,
           sv.length && `<h3>Series</h3><div class="grid">${sv.map(i => this.card(i)).join('')}</div>`,
         ].filter(Boolean).join('') : '<p class="muted center">No results.</p>';
         res.onclick = e => {
+          const go = e.target.closest('[data-go-genre]');
+          if (go) {
+            const [kind, id] = go.dataset.goGenre.split(':');
+            if (kind === 'live') this.liveCat = '@genre:' + id; else this.wantGenre = Number(id);
+            const view = kind === 'live' ? 'live' : kind === 'movie' ? 'movies' : 'series';
+            this.closeModal();
+            if (this.view === view) this.route(); else location.hash = view;
+            return;
+          }
           const ch = e.target.closest('[data-live]');
           if (ch) this.playChannel(lv, Number(ch.dataset.live), { key: '@now:search', name: 'Search' });
         };
