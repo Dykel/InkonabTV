@@ -952,10 +952,18 @@
     },
     // Needs genreCats(kind) first. Every copy of a title counts: one may be in "FR: ACTION".
     genresOf(i) {
-      if (!i.kw) i.kw = [...new Set(i.versions.flatMap(v => [...textGenres(this.data.catNames[i.kind][v.cat]), ...textGenres(v.genre)]))];
+      if (!i.kw) i.kw = [...new Set((i.versions || [i]).flatMap(v => [...textGenres(this.data.catNames[i.kind][v.cat]), ...textGenres(v.genre)]))];
       const found = this.genreStore[this.genreKey(i)];
       return found && found.length ? [...new Set([...i.kw, ...found])] : i.kw;
     },
+    // Up to two genres for a cover, TMDB's own order first. Empty until the data is ready.
+    coverGenres(i) {
+      if (!this.genreStore || !this.data.catNames || !this.data.catNames[i.kind]) return '';
+      const ids = this.genresOf(i), tmdb = this.genreStore[this.genreKey(i)] || [];
+      return [...tmdb, ...ids].filter((g, n, all) => all.indexOf(g) === n).slice(0, 2)
+        .map(g => T(GENRES.find(x => x.id === g).name)).join(' · ');
+    },
+    coverGenreHtml(i) { const g = this.coverGenres(i); return g ? `<span class="cover-genre">${esc(g)}</span>` : ''; },
     // Looks up, newest first and a few at a time, the titles not known yet; pauses during playback
     // so video keeps the connection and the TV's CPU. The genre lists fill in as it goes.
     async detectGenres() {
@@ -1231,14 +1239,16 @@
       const langs = [...new Set(versions.map(v => v.lang).filter(Boolean))];
       const has4k = versions.some(v => v.quality === '4K');
       const sub = [item.year, langs.slice(0, 3).join(' · ') + (langs.length > 3 ? ` +${langs.length - 3}` : '')].filter(Boolean).join('  •  ');
+      const genre = this.coverGenreHtml(item);
       return `<button class="card${series ? ' is-series' : ''}" data-kind="${item.kind}" data-id="${item.id}">
-        <span class="poster">
+        <span class="poster${genre ? ' has-genre' : ''}">
           <span class="ph">${esc(item.name)}</span>
           ${item.img ? `<img loading="lazy" src="${esc(item.img)}" alt="">` : ''}
           ${series ? '<span class="badge">Series</span>' : ''}
           ${has4k ? '<span class="q">4K</span>' : ''}
           ${this.isFav(item.kind, item.gkey) ? '<span class="fav-badge" title="In My List">★</span>' : ''}
           ${versions.length > 1 ? `<span class="vcount">${versions.length} versions</span>` : ''}
+          ${genre}
           <span class="play">${ICONS.play}</span>
         </span>
         <span class="card-title">${esc(item.name)}</span>
@@ -1285,7 +1295,7 @@
 
     // ---------- home ----------
     async renderHome(main) {
-      const [vod, series] = await Promise.all([this.loadVod(), this.loadSeries()]);
+      const [vod, series] = await Promise.all([this.loadVod(), this.loadSeries(), this.genreCats('movie'), this.genreCats('series')]);
       const movies = uniq(this.allowed(vod)), shows = uniq(series);
       // Two movies, then one series, so both show up even when one side is updated more often.
       const latest = [];
@@ -1454,7 +1464,12 @@
         genreSel.hidden = !list.length;
       };
       paintGenres(wanted);
-      this.onGenres = () => paintGenres();
+      // Covers already on screen get their genres as they're found.
+      const paintCovers = () => $$('.poster:not(.has-genre)', grid).forEach(p => {
+        const c = p.closest('.card'), item = byId.get(c.dataset.kind + c.dataset.id), html = item && this.coverGenreHtml(item);
+        if (html) { p.classList.add('has-genre'); $('.play', p).insertAdjacentHTML('beforebegin', html); }
+      });
+      this.onGenres = () => { if (grid.isConnected) { paintGenres(); paintCovers(); } };
       const more = () => {
         const slice = current.slice(shown, shown + CHUNK);
         grid.insertAdjacentHTML('beforeend', slice.map(i => this.card(i)).join(''));

@@ -1054,6 +1054,19 @@ img.broken { visibility: hidden; }
 .upd-bar { flex: 1; height: 10px; border-radius: 6px; background: rgba(255,255,255,.1); overflow: hidden; align-self: center; }
 .upd-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
 
+/* Genres at the foot of a cover; the version count and My List star sit just above them. */
+.cover-genre {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 8px 7px;
+  font-size: .74rem; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-bottom-left-radius: inherit; border-bottom-right-radius: inherit;
+  background: linear-gradient(180deg, transparent, rgba(0,0,0,.85)); pointer-events: none;
+}
+.has-genre .vcount, .has-genre .fav-badge { bottom: 30px; z-index: 1; }
+@media (max-width: 860px) {
+  .cover-genre { font-size: .62rem; padding: 20px 6px 5px; }
+  .has-genre .vcount, .has-genre .fav-badge { bottom: 24px; }
+}
+
 /* =========================================================================
    Short landscape screens.
    Phones held sideways (≤ 860 × 520): the bottom tab bar becomes a rail on the left,
