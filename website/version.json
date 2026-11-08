@@ -1,7 +1,7 @@
 {
-  "versionCode": 15,
-  "versionName": "1.0.14",
-  "sha256": "5a954c974bac8ebbabdc934932f0d6b3ca48b49ed620d69ba96600e6a4b00a7f",
-  "size": 17980380,
-  "notes": "Movies and series: filter by genre, detected automatically in the background\nLive TV: new Sports, News, Kids, Movies, Music and Documentaries groups\nSearch a genre, like \"comedy\" or \"sport\", to jump straight to it\nLong channel lists open faster\nMBC PLAY is built in again (Settings → Extra playlists can hide it)"
+  "versionCode": 16,
+  "versionName": "1.0.15",
+  "sha256": "d1fcb0ea7872844e79f8ab3dff3c829df679165f653b34223b312739d35347e5",
+  "size": 17980604,
+  "notes": "Fixed in-app updates failing with \"isn't signed by InkonabTV\" on some TVs\nNew modern look, genre filters on Movies, Series and Live TV\nGenres on covers, in your Info language\nSearch a genre, like \"comedy\" or \"sport\", to jump straight to it\nMBC PLAY is built in again (Settings → Extra playlists can hide it)"
 }
