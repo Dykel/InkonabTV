@@ -1,7 +1,7 @@
 {
-  "versionCode": 22,
-  "versionName": "1.0.21",
-  "sha256": "5cb2ff25b6ee88119eac5caed4f9548b61a83ba7718b319701d4a448220459a4",
-  "size": 17985220,
-  "notes": "Films and series no longer get stuck on a slow VPN server\nFewer VPN server changes during a film\nPressing Play twice no longer opens two players"
+  "versionCode": 23,
+  "versionName": "1.0.22",
+  "sha256": "dfa7fe58d9de5500f67b80c3db1a70d9d1144e38b18d9290be08dcda45bc2d39",
+  "size": 17988320,
+  "notes": "Live keeps playing through network problems: it reconnects by itself, as long as it takes\nThe picture comes back faster after a freeze, even if it looks rough at first\nLive no longer stops on an error screen once a channel has played"
 }
