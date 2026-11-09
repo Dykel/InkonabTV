@@ -50,6 +50,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy;
 import androidx.media3.ui.PlayerView;
 
 import org.json.JSONArray;
@@ -197,22 +198,40 @@ public class PlayerActivity extends AppCompatActivity {
         // 8 times before it counts as an error.
         DefaultLoadControl buffers = new DefaultLoadControl.Builder()
             // Live: minimum = maximum, so loading never pauses to wait for the buffer to run down.
-            .setBufferDurationsMs(live ? 120000 : 30000, 120000, 2500, 6000)
+            // After a freeze live starts again on 1 s of video: a rough picture beats a stopped one.
+            .setBufferDurationsMs(live ? 120000 : 30000, 120000, live ? 1500 : 2500, live ? 1000 : 6000)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build();
         player = new ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(new DefaultMediaSourceFactory(new DefaultDataSource.Factory(this, http))
-                .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(8)))
+                .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(live ? 30 : 8) {
+                    // Live: a lost segment is asked for again quickly while what's loaded keeps playing.
+                    @Override public long getRetryDelayMsFor(LoadErrorHandlingPolicy.LoadErrorInfo info) {
+                        long wait = super.getRetryDelayMsFor(info);
+                        return !live || wait == C.TIME_UNSET ? wait : Math.min(1500L, 500L * info.errorCount);
+                    }
+                }))
             .setLoadControl(buffers)
             .build();
         // Live keeps the CPU and the network awake for as long as the channel plays.
-        if (live) player.setWakeMode(C.WAKE_MODE_NETWORK);
+        if (live) {
+            player.setWakeMode(C.WAKE_MODE_NETWORK);
+            player.setVideoFrameMetadataListener((pts, released, format, media) -> liveFrame = SystemClock.elapsedRealtime());
+            main.postDelayed(liveGuard, LIVE_GUARD_EVERY);
+        }
         view.setPlayer(player);
         player.addListener(new Player.Listener() {
             @Override
             public void onPlaybackStateChanged(int state) {
                 if (state == Player.STATE_BUFFERING && readyOnce) onFreeze();
                 if (state == Player.STATE_READY) {
+                    if (freezeAt > 0) Log.i(LIVE_TAG, "picture back after " + (SystemClock.elapsedRealtime() - freezeAt) + " ms");
+                    freezeAt = 0;
+                    if (live && replayUrl == null && !livePlayed) {
+                        livePlayed = true;
+                        liveGood = liveFrame = SystemClock.elapsedRealtime();
+                        Log.i(LIVE_TAG, "playing");
+                    }
                     readyOnce = true;
                     sameServerTries = 0;
                     reconnects = 0;
@@ -292,6 +311,7 @@ public class PlayerActivity extends AppCompatActivity {
      * reconnects quietly at the same position, waiting a little longer each time.
      */
     private boolean reconnect(PlaybackException e) {
+        if (live && replayUrl == null && livePlayed) { keepLive(e.getErrorCodeName()); return true; }
         boolean net = e.errorCode >= 2000 && e.errorCode < 3000;
         boolean behind = e.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW;
         if (!readyOnce || !(net || behind) || reconnects >= 8) return false;
@@ -305,17 +325,87 @@ public class PlayerActivity extends AppCompatActivity {
         return true;
     }
 
-    // A channel that plays is kept: a freeze is waited out. Only when it goes back to loading
-    // more than 3 times within 15 s does it move to another copy of the channel, and when every
-    // copy has been tried, to a VPN server in another country (VPN version only).
+    // ---------- live never stops ----------
+    // Once a channel has played, nothing ends it but the viewer. Lost data shows as a rough picture
+    // or a short jump: any error, or no picture for LIVE_STALL, reopens the same stream at the live
+    // position, for as long as it takes. Only LIVE_NEW_ROUTE without any picture tries another copy
+    // or VPN server. Freezing again and again drops to the lowest quality the stream offers.
+
+    private static final String LIVE_TAG = "InkonabLive";
+    private static final long LIVE_GUARD_EVERY = 2000, LIVE_STALL = 20000, LIVE_NEW_ROUTE = 90000;
+    private static final long LIVE_LOW_FOR = 300000;  // this long without a freeze: full quality again
+    private boolean livePlayed, liveRestartQueued, liveLowest;
+    private int liveRestarts, liveGen;
+    private long liveGood, liveLastRestart, liveLastRoute, freezeAt, lastFreeze;
+    private volatile long liveFrame;
+
     private void onFreeze() {
-        long now = System.currentTimeMillis();
-        while (!freezes.isEmpty() && now - freezes.get(0) > 15000) freezes.remove(0);
+        long now = SystemClock.elapsedRealtime();
+        freezeAt = now;
+        lastFreeze = now;
+        Log.i(LIVE_TAG, "freeze");
+        if (!live) return;
+        while (!freezes.isEmpty() && now - freezes.get(0) > 60000) freezes.remove(0);
         freezes.add(now);
-        if (freezes.size() <= 3 || !live) return;
-        freezes.clear();
-        if (nextCopy()) return;
-        tryVpn();
+        if (freezes.size() >= 3 && !liveLowest) setLiveLowest(true);
+    }
+
+    private void setLiveLowest(boolean low) {
+        liveLowest = low;
+        if (player == null) return;
+        Log.i(LIVE_TAG, low ? "lowest quality" : "full quality");
+        player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon().setForceLowestBitrate(low).build());
+    }
+
+    private final Runnable liveGuard = new Runnable() {
+        @Override public void run() {
+            if (player == null || isFinishing()) return;
+            main.postDelayed(this, LIVE_GUARD_EVERY);
+            long now = SystemClock.elapsedRealtime();
+            boolean away = !getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED);
+            if (!livePlayed || replayUrl != null || away || !player.getPlayWhenReady()) { liveGood = now; return; }
+            if (liveLowest && now - lastFreeze > LIVE_LOW_FOR) setLiveLowest(false);
+            boolean hasVideo = player.getCurrentTracks().isTypeSelected(C.TRACK_TYPE_VIDEO);
+            if (player.isPlaying() && (!hasVideo || now - liveFrame < LIVE_STALL)) {
+                liveGood = now;
+                if (now - liveLastRestart > 30000) liveRestarts = 0;
+                return;
+            }
+            if (now - liveGood >= LIVE_STALL && now - liveLastRestart >= LIVE_STALL) keepLive(player.isPlaying() ? "sound but no picture" : "no picture");
+        }
+    };
+
+    /** Reopen the channel at the live position; after a long time without a picture, try another way in. */
+    private void keepLive(String why) {
+        if (liveRestartQueued) return;
+        liveRestartQueued = true;
+        liveRestarts++;
+        final int gen = liveGen;
+        long now = SystemClock.elapsedRealtime();
+        liveLastRestart = now;
+        Log.i(LIVE_TAG, "restart " + liveRestarts + " (" + why + "), no picture for " + (now - liveGood) / 1000 + " s, VPN " + VpnManager.get().state());
+        main.postDelayed(() -> {
+            if (gen != liveGen) return;
+            liveRestartQueued = false;
+            if (isFinishing() || player == null) return;
+            long t = SystemClock.elapsedRealtime();
+            VpnManager vpn = VpnManager.get();
+            if (t - liveGood >= LIVE_NEW_ROUTE && t - liveLastRoute >= LIVE_NEW_ROUTE && vpn.state() != VpnManager.State.CONNECTING) {
+                liveLastRoute = t;
+                Log.i(LIVE_TAG, "trying another way in");
+                if (autoRetry()) return;
+                tried.clear();
+                altFormat = false;
+                if (vpn.isUp()) {
+                    vpnAttempts = 0;
+                    sameServerTries = SAME_SERVER_TRIES;
+                    if (tryVpn()) return;
+                }
+            }
+            player.seekToDefaultPosition();
+            player.prepare();
+            player.play();
+        }, Math.min(5000L, 500L * liveRestarts));
     }
 
     private boolean nextCopy() {
@@ -340,6 +430,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void onFail(String why) {
         main.removeCallbacks(watchdog);
+        if (live && replayUrl == null && livePlayed) { keepLive(why); return; }
         if (live && autoRetry()) return;
         if (tryVpn()) return;
         showError(live
@@ -374,6 +465,11 @@ public class PlayerActivity extends AppCompatActivity {
 
     // A channel or quality chosen by the viewer starts a fresh recovery cycle.
     private void freshStart() {
+        livePlayed = false;
+        liveRestartQueued = false;
+        liveRestarts = 0;
+        liveGen++;
+        if (liveLowest) setLiveLowest(false);
         tried.clear();
         altFormat = false;
         vpnTried = false;
@@ -472,6 +568,7 @@ public class PlayerActivity extends AppCompatActivity {
             if (!ok) {
                 vpnWatch = false;
                 if ("Disconnected".equals(detail)) return; // we dropped it ourselves (e.g. switched to a free channel)
+                if (live && replayUrl == null && livePlayed) { keepLive("VPN: " + detail); return; }
                 VpnManager vpn = VpnManager.get();
                 if (vpn.autoStarted() && !vpn.needVpn()) vpn.disconnect();
                 showError("Can't play this " + (live ? "channel" : "file") + ", even through the free VPN (" + detail + ").");

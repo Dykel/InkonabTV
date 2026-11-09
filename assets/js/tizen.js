@@ -164,8 +164,9 @@
         // Slow lines: start after 5 s of video, and after a freeze wait for 10 s so it doesn't
         // stop again straight away. Adaptive streams start on their lowest level and climb.
         try {
-          av.setBufferingParam('PLAYER_BUFFER_FOR_PLAY', 'PLAYER_BUFFER_SIZE_IN_SECOND', 5);
-          av.setBufferingParam('PLAYER_BUFFER_FOR_RESUME', 'PLAYER_BUFFER_SIZE_IN_SECOND', 10);
+          // Live: back on 2 s of video after a freeze, a rough picture beats a stopped one.
+          av.setBufferingParam('PLAYER_BUFFER_FOR_PLAY', 'PLAYER_BUFFER_SIZE_IN_SECOND', this.keepLive ? 3 : 5);
+          av.setBufferingParam('PLAYER_BUFFER_FOR_RESUME', 'PLAYER_BUFFER_SIZE_IN_SECOND', this.keepLive ? 2 : 10);
         } catch (e) {}
         try { av.setTimeoutForBuffering(20); } catch (e) {}
         try { av.setStreamingProperty('ADAPTIVE_INFO', 'STARTBITRATE=LOWEST'); } catch (e) {}

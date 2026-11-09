@@ -50,7 +50,8 @@
     enableWorker: true, lowLatencyMode: false, backBufferLength: 30,
     liveSyncDurationCount: 6, liveMaxLatencyDurationCount: 15, maxLiveSyncPlaybackRate: 1,
     maxBufferLength: live ? 60 : 120, maxMaxBufferLength: 120, maxBufferSize: 120e6,
-    fragLoadingMaxRetry: 8, fragLoadingRetryDelay: 500, manifestLoadingMaxRetry: 8, levelLoadingMaxRetry: 8,
+    fragLoadingMaxRetry: live ? 30 : 8, fragLoadingRetryDelay: 500, manifestLoadingMaxRetry: live ? 30 : 8, levelLoadingMaxRetry: live ? 30 : 8,
+    ...(live ? { fragLoadingMaxRetryTimeout: 1500, manifestLoadingMaxRetryTimeout: 1500, levelLoadingMaxRetryTimeout: 1500 } : {}),
     fragLoadingTimeOut: 20000, nudgeMaxRetry: 10, startLevel: -1, capLevelToPlayerSize: true,
   });
 
@@ -91,7 +92,12 @@
       this.el.querySelector('[data-act="settings"]').addEventListener('click', () => { this.close(); App.openSettings(); });
       this.el.addEventListener('mousemove', () => this.poke());
       this.el.addEventListener('click', () => this.poke());
-      this.video.addEventListener('playing', () => { this.setState('playing'); });
+      this.video.addEventListener('playing', () => {
+        this.setState('playing');
+        const it = this.item;
+        if (it && it.kind === 'live' && !appleTouch && this.liveOk !== it.title) { this.liveOk = it.title; this.liveGood = Date.now(); }
+      });
+      setInterval(() => this.guardLive(), 2000);
       this.video.addEventListener('waiting', () => { const was = this.el.dataset.state; this.setState('loading'); if (was === 'playing') this.onFreeze(); });
       this.video.addEventListener('error', () => this.fail());
       this.video.addEventListener('ended', () => this.ended());
@@ -213,7 +219,10 @@
 
     play(item) {
       this.destroy();
+      const quiet = item.quiet; // a reconnect: nothing on screen changes
+      delete item.quiet;
       this.item = item;
+      if (this.video.isAV) this.video.keepLive = item.kind === 'live';
       this.freezes = [];
       this.recovers = 0;
       // item.url: a direct link — a free or extra M3U playlist, or a catch-up replay (relay: true,
@@ -238,12 +247,12 @@
       this.el.querySelector('.p-sub').textContent = item.subtitle || '';
       this.el.querySelector('.p-zap').classList.toggle('hidden', !item.list);
       this.el.querySelector('.p-epg').innerHTML = '';
-      if (this.sched) this.hidePanels();
+      if (this.sched && !quiet) this.hidePanels();
       this.renderVersions(item);
       if (item.kind === 'live') App.pushRecent(this.gkey());
       this.paintFav();
       this.setState('loading');
-      this.poke();
+      if (!quiet) this.poke();
 
       const v = this.video;
       v.removeAttribute('src');
@@ -279,7 +288,7 @@
       }
       if (item.resumeAt > 5 && !item.convert) v.addEventListener('loadedmetadata', () => { v.currentTime = item.resumeAt; }, { once: true });
       clearTimeout(this.watchdog);
-      this.watchdog = setTimeout(() => { if (this.item === item && this.el.dataset.state === 'loading') this.fail('timeout'); }, 15000);
+      this.watchdog = setTimeout(() => { if (this.item === item && this.el.dataset.state === 'loading') this.fail('timeout'); }, quiet ? 30000 : 15000);
       const p = v.play();
       if (p && p.catch) p.catch(e => {
         // iPhone/iPad refuse to start sound without a fresh tap: wait for one instead of failing.
@@ -725,26 +734,63 @@
       return true;
     },
 
-    // A channel that plays is kept: a freeze is waited out. Only when it goes back to loading
-    // more than 3 times within 15 s does it move to another copy of the channel.
+    // Live never stops: once a channel has played, nothing ends it but the viewer. Lost data shows
+    // as a rough picture or a short jump. Any error, or 20 s with no progress, reopens the channel
+    // at the live position, for as long as it takes; only 90 s without a picture tries another copy.
+    keeps() {
+      const it = this.item;
+      return !!it && it.kind === 'live' && !appleTouch && this.liveOk === it.title && this.isOpen();
+    },
+
+    keepLive(why) {
+      if (this.liveTimer) return;
+      const it = this.item;
+      this.liveTries = (this.liveTries || 0) + 1;
+      this.liveLast = Date.now();
+      console.warn('[live] reopening', this.liveTries, why || '');
+      this.liveTimer = setTimeout(() => {
+        this.liveTimer = 0;
+        if (this.item !== it || !this.isOpen()) return;
+        const now = Date.now();
+        if (now - this.liveGood >= 90000 && now - (this.liveRoute || 0) >= 90000) {
+          this.liveRoute = now;
+          if (this.retry()) return;
+          it.tried = null;
+        }
+        this.play({ ...it, quiet: true });
+      }, Math.min(5000, 500 * this.liveTries));
+    },
+
+    guardLive() {
+      const now = Date.now(), state = this.el.dataset.state;
+      if (!this.keeps() || document.hidden || state === 'paused' || (state === 'playing' && this.video.paused)) { this.liveGood = now; return; }
+      const hls = this.hls;
+      if (this.liveLow && hls && now - (this.lastFreeze || 0) > 300000) { this.liveLow = false; hls.loadLevel = -1; }
+      const t = this.video.currentTime, moved = t !== this.liveSeen;
+      this.liveSeen = t;
+      if (moved && state === 'playing') {
+        this.liveGood = now;
+        if (now - (this.liveLast || 0) > 30000) this.liveTries = 0;
+      } else if (now - this.liveGood >= 20000 && now - (this.liveLast || 0) >= 20000) this.keepLive('no progress');
+    },
+
+    // Freezing again and again drops to the lowest quality the stream offers.
     onFreeze() {
       const it = this.item, now = Date.now();
       // Safari's own HLS player (iPhone/iPad) pauses to buffer several times as it starts: that is
       // not a frozen channel, and switching copies drops a stream the provider allows only once.
       if (!it || it.kind !== 'live' || appleTouch) return;
-      this.freezes = (this.freezes || []).filter(t => now - t < 15000).concat(now);
-      if (this.freezes.length <= 3) return;
-      this.freezes = [];
-      it.tried = it.tried || new Set();
-      it.tried.add(`${it.id}:${it.fmt}`);
-      const next = ((it.version && it.version.versions) || []).find(v => !it.tried.has(`${v.stream_id}:${it.fmt}`));
-      if (!next) return;
-      App.toast(`Keeps stopping · trying another copy (${next.quality || 'SD'})…`);
-      this.play({ ...it, id: next.stream_id, version: next, tried: it.tried });
+      this.lastFreeze = now;
+      this.freezes = (this.freezes || []).filter(t => now - t < 60000).concat(now);
+      if (this.freezes.length >= 3 && !this.liveLow && this.hls && this.hls.levels && this.hls.levels.length > 1) {
+        this.liveLow = true;
+        this.hls.loadLevel = 0;
+      }
     },
 
     fail(detail) {
       if (!this.item) return;
+      if (this.keeps()) return this.keepLive(detail);
       const mixed = (!this.item.url || this.item.relay) && webPage() && !helperOn && !Settings.relay;
       if (!mixed && this.retry()) { if (detail) console.warn('[player] retrying after', detail); return; }
       // Windows app: connect the free VPN once and try again, like the Android app.
@@ -924,6 +970,9 @@
       this.destroy();
       const it = this.item;
       this.item = null;
+      this.liveOk = null;
+      this.liveTries = 0;
+      this.liveLow = false;
       this.side.classList.add('hidden');
       this.hidePanels();
       if (it && it.kind === 'live') App.afterLive(it.groupKey, it.version && it.version.gkey);
