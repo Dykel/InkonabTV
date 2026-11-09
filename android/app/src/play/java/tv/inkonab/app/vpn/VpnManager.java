@@ -44,5 +44,7 @@ public final class VpnManager {
     public Intent consentIntent(Context c) { return null; }
     public void connect(Done done) { if (done != null) done.done(false, "VPN not available"); }
     public void switchServer(Done done) { if (done != null) done.done(false, "VPN not available"); }
+    public void switchTo(String id, Done done) { if (done != null) done.done(false, "VPN not available"); }
+    public String serverId() { return ""; }
     public void disconnect() {}
 }

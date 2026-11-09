@@ -136,6 +136,7 @@ public final class VpnManager {
     public String detail() { return detail; }
     public boolean isUp() { return state == State.CONNECTED; }
     public String serverLabel() { return current == null ? "" : current.label(); }
+    public String serverId() { return current == null ? "" : current.id(); }
     public boolean busy() { return state == State.CONNECTED || state == State.CONNECTING; }
     public boolean autoStarted() { return autoStarted; }
     public long speedKbps() { return state == State.CONNECTED ? speedKbps : 0; }
@@ -370,6 +371,21 @@ public final class VpnManager {
             newSearch();
             set(State.CONNECTING, "Trying another server…");
             failCurrent("channel failed");
+        });
+    }
+
+    /** Back to a server that already proved itself: no speed test, and no search unless it's gone. */
+    public void switchTo(String id, Done done) {
+        main.post(() -> {
+            VpnGate.Server pick = null;
+            if (servers != null) for (VpnGate.Server s : servers) if (s.id().equals(id)) { pick = s; break; }
+            if (pick == null || state != State.CONNECTED) { switchServer(done); return; }
+            if (done != null) pending.add(done);
+            tries = 0;
+            newSearch();
+            settling = true;
+            bad.remove(id);
+            start(pick, "Connecting to VPN · ");
         });
     }
 

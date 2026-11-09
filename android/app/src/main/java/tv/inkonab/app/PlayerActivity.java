@@ -572,8 +572,16 @@ public class PlayerActivity extends AppCompatActivity {
     // server and carry on from the same spot (up to MAX_COUNTRIES servers). Opening a film
     // (reading the file's index) takes a while, so before it plays only a film that hasn't
     // started after 45 s moves.
+    // When every try is used, the film doesn't stay on whichever server came last: it goes back to
+    // the one that brought it fastest, at most once per FILM_RETRY.
     // Live channels have their own rules (onFreeze).
 
+    private static final double FILM_SLOW = 0.8;       // nearly keeping up is better than losing 30 s to a move
+    private static final double FILM_HOPELESS = 0.5;   // no better server known: only this slow is worth another look
+    private static final long FILM_RETRY = 120000;
+    private final Map<String, double[]> filmRates = new HashMap<>(); // server → [sum of speeds, windows]
+    private long filmLastMove;
+    private double filmRate;
     private static final long FILM_WINDOW = 15000;     // loading time judged on each server
     private static final long FILM_AHEAD_OK = 30000;   // this much film ready: no need to move
     private static final long FILM_START_MAX = 45000;  // not playing after this: move
@@ -620,21 +628,47 @@ public class PlayerActivity extends AppCompatActivity {
         long ahead = to - player.getCurrentPosition();
         filmGot = filmSpent = 0;
         Log.i("InkonabPlayer", String.format(Locale.US, "Film via %s: %.2fx, %d s ready", vpn.serverLabel(), rate, ahead / 1000));
-        filmSlow = rate < 1 && ahead <= FILM_AHEAD_OK ? filmSlow + 1 : 0;
+        filmRate = rate;
+        double[] seen = filmRates.get(vpn.serverId());
+        if (seen == null) filmRates.put(vpn.serverId(), seen = new double[2]);
+        seen[0] += rate;
+        seen[1]++;
+        filmSlow = rate < FILM_SLOW && ahead <= FILM_AHEAD_OK ? filmSlow + 1 : 0;
         if (filmSlow < 2) return; // one slow patch can happen on any server
         nextFilmServer(String.format(Locale.US,
             "The film loads slower than it plays through %s (%.1f×)\nTrying a faster VPN server…", vpn.serverLabel(), rate));
     }
 
     private void nextFilmServer(String why) {
-        if (vpnAttempts >= MAX_COUNTRIES) return; // keep the last one rather than stop the film
+        VpnManager vpn = VpnManager.get();
+        String best = null;
+        if (vpnAttempts >= MAX_COUNTRIES) {
+            if (SystemClock.elapsedRealtime() - filmLastMove < FILM_RETRY) return;
+            best = fastestFilmServer(vpn.serverId());
+            if (best == null && filmRate >= FILM_HOPELESS) return; // already on the best one, and it's watchable
+            if (best != null) why = "This server is slow for this film\nGoing back to the fastest one…";
+        }
+        filmLastMove = SystemClock.elapsedRealtime();
         filmSwitching = true;
         vpnTried = true;
         vpnAttempts++;
         vpnWatch = true;
         Log.i("InkonabPlayer", why.replace('\n', ' '));
         showInfo(why);
-        VpnManager.get().switchServer(this::afterVpn);
+        if (best != null) vpn.switchTo(best, this::afterVpn);
+        else vpn.switchServer(this::afterVpn);
+    }
+
+    /** The server that brought this film clearly faster than the current one, or null. */
+    private String fastestFilmServer(String now) {
+        double[] cur = filmRates.get(now);
+        double top = cur == null ? 0 : cur[0] / cur[1] * 1.3;
+        String best = null;
+        for (Map.Entry<String, double[]> e : filmRates.entrySet()) {
+            double avg = e.getValue()[0] / e.getValue()[1];
+            if (!e.getKey().equals(now) && avg > top) { top = avg; best = e.getKey(); }
+        }
+        return best;
     }
 
     // Live VPN status in the top bar; while connecting for this channel, also in the message.

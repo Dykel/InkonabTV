@@ -119,6 +119,14 @@
     // codecs browsers can't, so no relay is used. Live sends every group (deduplicated channels +
     // group index lists) so the native channel list matches the app.
     async openNative(item) {
+      // OK pressed twice, or Play again while the player opens: one player, not two playing at once.
+      if (this.nativeOpen) return;
+      this.nativeOpen = true;
+      try { return await this.openNativeNow(item); }
+      catch (e) { this.nativeOpen = false; throw e; }
+    },
+
+    async openNativeNow(item) {
       const label = v => [v.quality || (v.url ? '' : 'SD'), ...(v.tags || [])].filter(Boolean).join(' · ');
       let payload, groups = [];
       if (item.kind === 'live') {
@@ -180,12 +188,11 @@
       }
       const back = document.activeElement;
       let r = {};
-      this.nativeOpen = true;
       try {
         await Native.player.stage({ payload: JSON.stringify(payload) });
         r = await Native.player.play({ staged: true });
       } catch (e) { App.toast('Can’t open the player'); console.warn('[native player]', e); }
-      this.nativeOpen = false;
+      this.nativeOpen = false; // before onEnded below, which may open the next film
       if (item.kind !== 'live') {
         const at = r.index || 0; // the episode the viewer stopped on
         for (const i of r.done || []) if (item.onFinished) item.onFinished(i);
