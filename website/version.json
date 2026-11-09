@@ -1,7 +1,7 @@
 {
-  "versionCode": 21,
-  "versionName": "1.0.20",
-  "sha256": "a0d469194ee210c050573faeee1bb52d4cf6cc485db29cdf27dc315765f82984",
-  "size": 17984380,
-  "notes": "Live TV on the VPN no longer jumps between servers: it stays on one and keeps playing\nLive keeps downloading and the device stays awake while a channel plays\nConnection and VPN messages are now small notes, so you can keep using the app\nA notice when your subscription is about to end"
+  "versionCode": 22,
+  "versionName": "1.0.21",
+  "sha256": "5cb2ff25b6ee88119eac5caed4f9548b61a83ba7718b319701d4a448220459a4",
+  "size": 17985220,
+  "notes": "Films and series no longer get stuck on a slow VPN server\nFewer VPN server changes during a film\nPressing Play twice no longer opens two players"
 }
