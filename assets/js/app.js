@@ -149,6 +149,116 @@
     ['faith', 'Religion', /\bquran\b|\bcoran\b|\bislam|\bcatholi|\bchristian|\bgospel\b|\bbible\b/],
   ].map(([key, name, re]) => ({ key, name, re }));
 
+  // ---------- search ranking ----------
+  // As the big search engines do it (Algolia, Elasticsearch, Netflix…), offline on the device:
+  // - names are folded (accents, case, punctuation) and noise words dropped ("FR:", "4K", "the");
+  // - one word index per playlist, so a search scans the distinct words, not every title;
+  // - typos allowed by word length: none under 4 letters, 1 up to 7, 2 from 8 (a swap counts as 1);
+  // - sound-alike spellings (ph/f, qu/k, eau/o, silent endings) count as 1 typo;
+  // - the last word typed matches as a beginning (search as you type); "spiderman" = "spider man";
+  // - ranking in tiers: more words matched, fewer typos, exact words, title starts with the
+  //   search, then popularity and what the viewer watches.
+  const NOISE = new Set(['fr', 'en', 'vf', 'vff', 'vfq', 'vo', 'vost', 'vostfr', 'multi', 'sd', 'hd', 'fhd', 'uhd', 'hdr', '4k', '8k', '1080p', '720p', 'hevc',
+    'the', 'a', 'an', 'of', 'and', 'le', 'la', 'les', 'l', 'un', 'une', 'de', 'du', 'des', 'd', 'et', 'el', 'los', 'las', 'il', 'lo', 'der', 'die', 'das']);
+  // CANAL+ = canal plus; 9-1-1, 9/11 = 911.
+  const toks = s => words(String(s || '').replace(/\+/g, ' plus ').replace(/(\d)[-/.](?=\d)/g, '$1')).split(' ').filter(t => t && !NOISE.has(t));
+  const typoBudget = n => (n < 4 ? 0 : n < 8 ? 1 : 2);
+  // Optimal string alignment distance (Damerau-Levenshtein with adjacent swaps); stops early
+  // and returns max + 1 once the distance must be above `max`.
+  function editDistance(a, b, max) {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+    let prev2 = null, prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      let low = i;
+      for (let j = 1; j <= b.length; j++) {
+        let v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        if (prev2 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, prev2[j - 2] + 1);
+        cur.push(v);
+        if (v < low) low = v;
+      }
+      if (low > max) return max + 1;
+      prev2 = prev; prev = cur;
+    }
+    return prev[b.length];
+  }
+  // A rough French/English sound key: words spelled differently but said alike get the same key.
+  const soundKey = t => t.replace(/ph/g, 'f').replace(/gh/g, '').replace(/eau|au/g, 'o').replace(/ou/g, 'u').replace(/[ae]i/g, 'e').replace(/qu|ck|c(?![eiy])/g, 'k')
+    .replace(/c/g, 's').replace(/y/g, 'i').replace(/z/g, 's').replace(/w/g, 'v').replace(/h/g, '').replace(/(.)\1+/g, '$1')
+    .replace(/(er|ez|et)$/, 'e').replace(/(.{3,})[estxd]$/, '$1');
+  // Word index of a list: built once per list (the lists are kept while the playlist is the same).
+  const searchIndexes = new WeakMap();
+  function searchIndex(list, nameOf) {
+    let ix = searchIndexes.get(list);
+    if (ix) return ix;
+    const byWord = new Map(), compact = [], first = [];
+    list.forEach((item, n) => {
+      const t = toks(nameOf(item));
+      compact.push(t.join(''));
+      first.push(t[0] || '');
+      for (const w of new Set(t)) { let set = byWord.get(w); if (!set) byWord.set(w, set = []); set.push(n); }
+    });
+    const vocab = [...byWord.keys()];
+    ix = { list, byWord, vocab, sounds: vocab.map(soundKey), compact, first };
+    searchIndexes.set(list, ix);
+    return ix;
+  }
+  // [{ item, score, full }] best first; full: every word typed matched (else one was left out). boost(item) adds up to ~60 (popularity, favourites, watched).
+  function rankSearch(ix, term, boost = () => 0) {
+    let q = toks(term);
+    if (!q.length) q = words(term).split(' ').filter(Boolean);
+    if (!q.length) return [];
+    const per = new Map(); // item index → { words: [{typos, exact}] }
+    q.forEach((w, k) => {
+      const last = k === q.length - 1;
+      // Numbers must match as typed (911 is not 91), as on the big search engines.
+      const num = /\d/.test(w);
+      const budget = num ? 0 : typoBudget(w.length), sw = !num && w.length >= 3 ? soundKey(w) : null;
+      ix.vocab.forEach((v, vi) => {
+        let typos = -1, exact = false;
+        if (v === w) { typos = 0; exact = true; }
+        else if (v.startsWith(w) && (last || w.length >= 3)) typos = 0;
+        else if (budget) {
+          let d = editDistance(w, v, budget);
+          // Still typing the last word, with a typo in it: compare with the word's beginning.
+          if (d > budget && last && v.length > w.length) d = editDistance(w, v.slice(0, w.length), budget);
+          if (d <= budget) typos = d;
+        }
+        if (typos < 0 && sw && sw === ix.sounds[vi]) typos = 1;
+        if (typos < 0) return;
+        for (const n of ix.byWord.get(v)) {
+          let e = per.get(n);
+          if (!e) per.set(n, e = { words: [] });
+          const old = e.words[k];
+          if (!old || typos < old.typos || (typos === old.typos && exact && !old.exact)) e.words[k] = { typos, exact };
+        }
+      });
+    });
+    // Words typed joined or apart: "spiderman" / "spider man".
+    const joined = q.join(''), jb = /\d/.test(joined) ? 0 : typoBudget(joined.length);
+    if (joined.length >= 5) ix.compact.forEach((c, n) => {
+      if (per.has(n) && per.get(n).words.filter(Boolean).length === q.length) return;
+      const d = c.startsWith(joined) ? 0 : editDistance(joined, c.slice(0, joined.length), jb);
+      if (d <= jb) per.set(n, { words: q.map(() => ({ typos: d, exact: false })) });
+    });
+    const need = q.length >= 3 ? q.length - 1 : q.length;
+    const out = [];
+    for (const [n, e] of per) {
+      const hit = e.words.filter(Boolean);
+      if (hit.length < need) continue;
+      const typos = hit.reduce((a, h) => a + h.typos, 0), exact = hit.filter(h => h.exact).length;
+      const item = ix.list[n];
+      const starts = e.words[0] && ix.first[n] && (ix.first[n] === q[0] || ix.first[n].startsWith(q[0])) ? 1 : 0;
+      out.push({ item, full: hit.length === q.length, score: hit.length * 1000 - typos * 120 + exact * 25 + starts * 40 + boost(item) - ix.compact[n].length * 0.2 });
+    }
+    return out.sort((a, b) => b.score - a.score);
+  }
+  // Every word typed is in the person's name (typos allowed as above): "brad pit" = Brad Pitt.
+  function nameMatches(name, term) {
+    const q = toks(term), n = toks(name);
+    return q.length > 0 && q.every((w, k) => n.some(v => v === w || (k === q.length - 1 && v.startsWith(w)) || editDistance(w, v, typoBudget(w.length)) <= typoBudget(w.length)));
+  }
+
   // Keep one entry per title (versions are grouped by TMDB id, see App.group).
   const uniq = list => { const seen = new Set(); return list.filter(i => !seen.has(i.gkey) && seen.add(i.gkey)); };
 
@@ -2571,6 +2681,14 @@
     },
 
     // ---------- search ----------
+    // Personal and popularity signals for ranking (each a small nudge inside a relevance tier).
+    searchBoost() {
+      const fav = new Set([...this.favs('movie'), ...this.favs('series'), ...this.favs('live')]);
+      const recent = new Set(this.recentLive());
+      const watched = new Set(this.cw().flatMap(e => [e.title, e.seriesName, e.series].filter(Boolean).map(t => words(t))));
+      return i => (fav.has(i.gkey) ? 40 : 0) + (recent.has(i.gkey) ? 30 : 0) + (watched.has(words(i.name)) ? 20 : 0)
+        + Math.min(15, Number(i.rating) || 0) + (i.added ? Math.max(0, 10 - (Date.now() / 1000 - i.added) / 864000) : 0);
+    },
     openSearch() {
       const m = this.openModal(`${this.closeBtn()}
         <div class="search-box"><input class="field big" id="q" type="search" placeholder="Search movies, series and channels" autocomplete="off"></div>
@@ -2598,14 +2716,32 @@
           ...inKind(uniq(this.allowed(vod)), 'movie', 'Movies'), ...inKind(uniq(series), 'series', 'Series'),
           ...liveCat.genres.filter(isGenre).map(g => genreBtn('live:' + g.genre, g.name, 'Live TV')),
         ];
-        const match = list => list.filter(i => i.key.includes(term)).slice(0, limit);
-        const mv = match(uniq(this.allowed(vod))), sv = match(uniq(series)), lv = match(uniq([...free, ...this.allowed(live)])).slice(0, samsung ? 12 : 24);
-        byId = new Map([...mv, ...sv].map(i => [i.kind + i.id, i]));
-        res.innerHTML = (mv.length || sv.length || lv.length || genreBtns.length) ? [
+        // Ranked as typed (typos and sound-alikes allowed), then titles TMDB knows under the words
+        // typed in any language ("Other Mommy" finds "Malfaisante"), added when TMDB answers.
+        const raw = q.value.trim();
+        const boost = this.searchBoost();
+        const ranked = (list, nameOf) => rankSearch(searchIndex(list, nameOf), raw, boost);
+        const pick = (hits, allow) => uniq(hits.map(h => h.item).filter(allow));
+        const okFilm = new Set(this.allowed(vod)), okLive = new Set(this.allowed(live));
+        let mvHits = ranked(vod, i => i.name), svHits = ranked(series, i => i.name);
+        let lvHits = ranked(live, c => c.label || c.name), frHits = ranked(free, c => c.label || c.name);
+        // A word may be left out only when nothing anywhere matches all of them.
+        if ([mvHits, svHits, lvHits, frHits].some(l => l.some(h => h.full))) [mvHits, svHits, lvHits, frHits] = [mvHits, svHits, lvHits, frHits].map(l => l.filter(h => h.full));
+        const lv = pick(lvHits, c => okLive.has(c)).concat(pick(frHits, () => true)).slice(0, samsung ? 12 : 24);
+        // people: [{ name, items }] — an actor's (or director's) films and series in the playlist.
+        const render = (mvRank, svRank, people = []) => {
+        const mv = pick(mvRank, i => okFilm.has(i)).slice(0, limit), sv = pick(svRank, () => true).slice(0, limit);
+        byId = new Map([...mv, ...sv, ...people.flatMap(p => p.items)].map(i => [i.kind + i.id, i]));
+        // The person first when the search is their name and no title matches it as well.
+        const strongTitle = [...mvRank, ...svRank].some(h => h.full && h.score >= toks(raw).length * 1000);
+        const peopleHtml = people.map(p => `<h3>${esc(p.name)}</h3><div class="grid">${p.items.map(i => this.card(i)).join('')}</div>`).join('');
+        res.innerHTML = (mv.length || sv.length || lv.length || genreBtns.length || people.length) ? [
           genreBtns.length && `<h3>Genres</h3><div class="seasons">${genreBtns.join('')}</div>`,
+          !strongTitle && peopleHtml,
           lv.length && `<h3>Channels</h3><div class="ch-grid">${lv.map((c, i) => `<button class="ch" data-live="${i}"><span class="ch-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}</span><span class="ch-name">${esc(c.label)}</span><span class="ch-q">${(c.url ? (c.radio ? ['Radio'] : []) : [...new Set(c.versions.map(v => v.quality || 'SD'))]).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</span></button>`).join('')}</div>`,
           mv.length && `<h3>Movies</h3><div class="grid">${mv.map(i => this.card(i)).join('')}</div>`,
           sv.length && `<h3>Series</h3><div class="grid">${sv.map(i => this.card(i)).join('')}</div>`,
+          strongTitle && peopleHtml,
         ].filter(Boolean).join('') : '<p class="muted center">No results.</p>';
         res.onclick = e => {
           const go = e.target.closest('[data-go-genre]');
@@ -2621,6 +2757,38 @@
           if (ch) this.playChannel(lv, Number(ch.dataset.live), { key: '@now:search', name: 'Search' });
         };
         if (samsung) $$('img', res).forEach(img => { img.decoding = 'async'; });
+        };
+        render(mvHits, svHits);
+        // Other-language titles from TMDB: a title it finds joins the results as if every word
+        // matched with one typo, so exact matches in the playlist's own names stay first.
+        if (raw.length >= 3) TMDB.search(raw).then(found => {
+          if (!found.length || fold(q.value.trim()) !== term) return;
+          const add = (hits, list, type) => {
+            const have = new Set(hits.map(h => h.item));
+            const nWords = Math.max(1, toks(raw).length);
+            const extra = [];
+            found.forEach((f, r) => {
+              if (f.type !== type) return;
+              for (const item of list) if (item.tmdb === f.id && !have.has(item)) { have.add(item); extra.push({ item, full: true, score: nWords * 1000 - 120 - r * 5 + boost(item) }); }
+            });
+            return extra.length ? [...hits, ...extra].sort((a, b) => b.score - a.score) : null;
+          };
+          const m2 = add(mvHits, vod, 'movie'), s2 = add(svHits, series, 'tv');
+          if (m2 || s2) render(m2 || mvHits, s2 || svHits);
+          // Actors and directors: their films and series in the playlist, best known first.
+          const persons = found.filter(f => f.type === 'person' && nameMatches(f.name, raw)).slice(0, 2);
+          if (!persons.length) return;
+          const byTmdb = new Map();
+          for (const i of uniq(this.allowed(vod))) if (i.tmdb) byTmdb.set('movie:' + i.tmdb, i);
+          for (const i of uniq(series)) if (i.tmdb) byTmdb.set('tv:' + i.tmdb, i);
+          Promise.all(persons.map(p => TMDB.credits(p.id).then(cr => ({
+            name: p.name + ' · ' + T(p.job === 'Directing' ? 'Director' : 'Actor'),
+            items: [...new Set(cr.map(c => byTmdb.get(c.type + ':' + c.id)).filter(Boolean))].slice(0, limit),
+          })))).then(people => {
+            people = people.filter(p => p.items.length);
+            if (people.length && fold(q.value.trim()) === term) render(m2 || mvHits, s2 || svHits, people);
+          });
+        });
       };
       const run = debounce(search, samsung ? 1000 : 250);
       q.addEventListener('input', () => run());
@@ -2970,6 +3138,7 @@
   };
 
   window.App = App;
+  App.rankSearch = (list, term, nameOf = i => i.name) => rankSearch(searchIndex(list, nameOf), term).map(h => h.item); // for tests
   document.addEventListener('DOMContentLoaded', () => App.boot());
 
   // Windows and Mac apps: the VPN badge in the top bar, as on Android (native.js).

@@ -626,6 +626,56 @@
       if (map.size) Store.set(cacheKey, { t: Date.now(), list: [...map] });
       return map;
     },
+    // Titles TMDB knows under the words typed, in any language (original, English, French…),
+    // and people (actors, directors): [{ type: 'movie' | 'tv' | 'person', id, name }], best first.
+    // Cached for the session.
+    search(term) {
+      if (!CFG.tmdbKey) return Promise.resolve([]);
+      const key = 'search:' + Settings.tmdbLang + ':' + term.toLowerCase();
+      if (this.cache.has(key)) return this.cache.get(key);
+      const u = new URL('https://api.themoviedb.org/3/search/multi');
+      u.searchParams.set('api_key', CFG.tmdbKey);
+      u.searchParams.set('query', term);
+      u.searchParams.set('language', Settings.tmdbLang);
+      u.searchParams.set('include_adult', 'false');
+      const p = fetch(u).then(r => (r.ok ? r.json() : {})).catch(() => ({}))
+        .then(d => (d.results || []).filter(r => /^(movie|tv|person)$/.test(r.media_type)).slice(0, 20)
+          .map(r => ({ type: r.media_type, id: String(r.id), name: r.name || r.title || '', job: r.known_for_department || '', pop: r.popularity || 0 })));
+      this.cache.set(key, p);
+      if (this.cache.size > 500) this.cache.delete(this.cache.keys().next().value);
+      return p;
+    },
+    // What a person played in or directed: [{ type: 'movie' | 'tv', id, pop, role }], most
+    // popular first. Cached for the session.
+    credits(personId) {
+      if (!CFG.tmdbKey) return Promise.resolve([]);
+      const key = 'credits:' + personId;
+      if (this.cache.has(key)) return this.cache.get(key);
+      const u = new URL(`https://api.themoviedb.org/3/person/${personId}/combined_credits`);
+      u.searchParams.set('api_key', CFG.tmdbKey);
+      const p = fetch(u).then(r => (r.ok ? r.json() : {})).catch(() => ({})).then(d => {
+        const seen = new Set(), out = [];
+        const take = (r, role) => {
+          const k = r.media_type + r.id;
+          if (seen.has(k) || !/^(movie|tv)$/.test(r.media_type)) return;
+          // Talk shows and award nights list everyone as "Self": not what people look for.
+          if (/^(self|himself|herself|themselves)\b/i.test(r.character || '')) return;
+          seen.add(k);
+          // Best known and biggest parts first: lasting fame (votes) over this week's trend, a lead
+          // over a small part, a regular over a guest appearance in a series.
+          const fame = Math.log10(1 + (r.vote_count || 0)) * 10 + Math.min(r.popularity || 0, 50) * 0.2;
+          const part = role === 'director' ? 1
+            : r.media_type === 'tv' ? ((r.episode_count || 0) >= 5 ? 1 : (r.episode_count || 0) >= 2 ? 0.4 : 0.15)
+            : r.order == null ? 0.6 : r.order <= 3 ? 1 : r.order <= 10 ? 0.6 : 0.3;
+          out.push({ type: r.media_type, id: String(r.id), pop: fame * part, role });
+        };
+        (d.cast || []).forEach(r => take(r, 'cast'));
+        (d.crew || []).filter(r => r.job === 'Director' || r.job === 'Creator').forEach(r => take(r, 'director'));
+        return out.sort((a, b) => b.pop - a.pop);
+      });
+      this.cache.set(key, p);
+      return p;
+    },
     // TMDB's own genre names in a language: { id: name }. Saved for 30 days.
     async genreNames(lang) {
       if (!CFG.tmdbKey) return {};
