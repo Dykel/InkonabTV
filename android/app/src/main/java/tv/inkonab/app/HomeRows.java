@@ -28,11 +28,11 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Android TV home screen: one InkonabTV+ row (films and episodes to resume, recent live
- * channels, then new movies and series) and the system's Play Next row (to resume).
- * One row only: Android adds an app's first row by itself, and asks the viewer for any other.
- * Each tile opens the app on that channel, film or series through an inkonabtv:// link
- * (MainActivity → app.js openLink). Google TV shows Play Next only.
+ * Android TV home screen: the app's own rows (Live TV, Movies, Series) and the system's
+ * Play Next row (films and episodes to resume). Each tile opens the app on that channel,
+ * film or series through an inkonabtv:// link (MainActivity → app.js openLink).
+ * Android adds the app's first row (Live TV) by itself and asks the viewer once for each other
+ * row, one question at a time. Google TV shows Play Next only.
  *
  * rows: { live: [tile], movies: [tile], series: [tile], resume: [tile] }
  * tile: { id, title, sub, img, link, pos (ms), dur (ms), at (last watched, ms), episode }
@@ -40,9 +40,8 @@ import java.util.Set;
 final class HomeRows {
     private static final String TAG = "InkonabHome";
     private static final String PREFS = "homeRows";
-    private static final String ROW = "main";
+    private static final String[][] ROWS = { { "live", "Live TV" }, { "movies", "Movies" }, { "series", "Series" } };
     private static final int MAX_TILES = 25;
-    private static final int RESUME = 8, LIVE = 8, NEW = 12; // per kind, in that order on the row
 
     private HomeRows() {}
 
@@ -50,70 +49,60 @@ final class HomeRows {
         return Build.VERSION.SDK_INT >= 26 && c.getPackageManager().hasSystemFeature("android.software.leanback");
     }
 
-    /** Writes the row and Play Next; returns { supported, ask: [] } (empty unless Android didn't add the row by itself). */
+    /** Writes every row; returns { supported, ask: [the channel id the viewer is asked to add] }. */
     static synchronized JSONObject update(Context c, JSONObject rows) throws JSONException {
         JSONObject out = new JSONObject();
         out.put("supported", supported(c));
-        out.put("ask", new JSONArray());
+        JSONArray ask = new JSONArray();
+        out.put("ask", ask);
         if (!supported(c)) return out;
         SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        dropOldRows(c, p);
-        JSONArray tiles = new JSONArray();
-        add(tiles, rows.optJSONArray("resume"), RESUME, "resume");
-        add(tiles, rows.optJSONArray("live"), LIVE, "live");
-        // New movies and series in turn, so both show near the front.
-        JSONArray m = rows.optJSONArray("movies"), se = rows.optJSONArray("series");
-        for (int i = 0, n = 0; n < NEW && ((m != null && i < m.length()) || (se != null && i < se.length())); i++) {
-            if (m != null && i < m.length() && n < NEW) { put(tiles, m.optJSONObject(i), "movie"); n++; }
-            if (se != null && i < se.length() && n < NEW) { put(tiles, se.optJSONObject(i), "series"); n++; }
-        }
-        if (tiles.length() > 0) {
-            long id = channel(c, p, ROW, "InkonabTV+");
-            if (id >= 0) {
-                fill(c, id, tiles);
-                try { TvContractCompat.requestChannelBrowsable(c, id); } catch (Exception ignored) {}
-                // Not the app's first row (an older version made others): Android asks, once.
-                if (!browsable(c, id) && !p.getBoolean("asked." + ROW, false)) {
-                    out.getJSONArray("ask").put(id);
-                    p.edit().putBoolean("asked." + ROW, true).apply();
-                }
+        fromOneRow(c, p);
+        for (int i = 0; i < ROWS.length; i++) {
+            String key = ROWS[i][0];
+            JSONArray tiles = rows.optJSONArray(key);
+            if (tiles == null || tiles.length() == 0) {
+                // Nothing to show (or turned off in Settings): the row is emptied, which hides it,
+                // and keeps its place for when it comes back.
+                long old = p.getLong(key, -1);
+                if (old >= 0) try { c.getContentResolver().delete(TvContractCompat.buildPreviewProgramsUriForChannel(old), null, null); } catch (Exception ignored) {}
+                continue;
+            }
+            long id = channel(c, p, key, ROWS[i][1]);
+            if (id < 0) continue;
+            fill(c, id, key, tiles);
+            try { TvContractCompat.requestChannelBrowsable(c, id); } catch (Exception ignored) {}
+            // Not shown yet (any row after the first): Android asks the viewer, once per row and
+            // one row per update, so the questions don't pile up.
+            // At least a minute apart: two updates close together would stack two questions, and
+            // the one underneath would close unanswered.
+            long now = System.currentTimeMillis();
+            if (ask.length() == 0 && !p.getBoolean("asked." + key, false) && now - p.getLong("askedAt", 0) > 60000 && !browsable(c, id)) {
+                ask.put(id);
+                p.edit().putBoolean("asked." + key, true).putLong("askedAt", now).apply();
             }
         }
         watchNext(c, rows.optJSONArray("resume"));
         return out;
     }
 
-    private static void add(JSONArray to, JSONArray from, int max, String kind) throws JSONException {
-        for (int i = 0; from != null && i < from.length() && i < max; i++) put(to, from.optJSONObject(i), kind);
-    }
-
-    private static void put(JSONArray to, JSONObject t, String kind) throws JSONException {
-        if (t == null) return;
-        String id = t.optString("id");
-        for (int i = 0; i < to.length(); i++) if (id.equals(to.getJSONObject(i).optString("id"))) return; // resumed and new: once
-        to.put(new JSONObject(t.toString()).put("kind", kind));
-    }
-
-    /** Earlier versions had three rows (live, movies, series): the first becomes the one row
-     *  (it keeps its place on the home screen), the others go. */
-    private static void dropOldRows(Context c, SharedPreferences p) {
+    /** 1.0.25 had one InkonabTV+ row: it becomes the Live TV row (it keeps its place on the home screen). */
+    private static void fromOneRow(Context c, SharedPreferences p) {
+        long id = p.getLong("main", -1);
+        if (id < 0) return;
         ContentResolver r = c.getContentResolver();
-        for (String key : new String[] { "live", "movies", "series" }) {
-            long id = p.getLong(key, -1);
-            if (id < 0) continue;
-            if (p.getLong(ROW, -1) < 0 && exists(r, id)) {
-                try {
-                    android.content.ContentValues v = new android.content.ContentValues();
-                    v.put(TvContractCompat.Channels.COLUMN_DISPLAY_NAME, "InkonabTV+");
-                    v.put(TvContractCompat.Channels.COLUMN_APP_LINK_INTENT_URI, "inkonabtv://open");
-                    r.update(TvContractCompat.buildChannelUri(id), v, null, null);
-                    p.edit().putLong(ROW, id).remove(key).remove("asked." + key).apply();
-                    continue;
-                } catch (Exception e) { Log.w(TAG, "keep row: " + e); }
-            }
-            try { r.delete(TvContractCompat.buildChannelUri(id), null, null); } catch (Exception ignored) {}
-            p.edit().remove(key).remove("asked." + key).apply();
+        if (p.getLong("live", -1) < 0 && exists(r, id)) {
+            try {
+                android.content.ContentValues v = new android.content.ContentValues();
+                v.put(TvContractCompat.Channels.COLUMN_DISPLAY_NAME, "Live TV");
+                v.put(TvContractCompat.Channels.COLUMN_APP_LINK_INTENT_URI, "inkonabtv://open?row=live");
+                r.update(TvContractCompat.buildChannelUri(id), v, null, null);
+                p.edit().putLong("live", id).putBoolean("asked.live", true).remove("main").remove("asked.main").apply();
+                return;
+            } catch (Exception e) { Log.w(TAG, "keep row: " + e); }
         }
+        try { r.delete(TvContractCompat.buildChannelUri(id), null, null); } catch (Exception ignored) {}
+        p.edit().remove("main").remove("asked.main").apply();
     }
 
     private static boolean browsable(Context c, long id) {
@@ -123,7 +112,7 @@ final class HomeRows {
         } catch (Exception e) { return true; } // can't tell: don't ask
     }
 
-    // ---------- the app's row ----------
+    // ---------- the app's rows ----------
 
     private static long channel(Context c, SharedPreferences p, String key, String name) {
         ContentResolver r = c.getContentResolver();
@@ -132,7 +121,7 @@ final class HomeRows {
         Channel ch = new Channel.Builder()
                 .setType(TvContractCompat.Channels.TYPE_PREVIEW)
                 .setDisplayName(name)
-                .setAppLinkIntentUri(Uri.parse("inkonabtv://open"))
+                .setAppLinkIntentUri(Uri.parse("inkonabtv://open?row=" + key))
                 .build();
         try {
             Uri uri = r.insert(TvContractCompat.Channels.CONTENT_URI, ch.toContentValues());
@@ -140,10 +129,10 @@ final class HomeRows {
             id = ContentUris.parseId(uri);
             Bitmap logo = appIcon(c);
             if (logo != null) ChannelLogoUtils.storeChannelLogo(c, id, logo);
-            p.edit().putLong(key, id).apply();
+            p.edit().putLong(key, id).putBoolean("asked." + key, false).apply();
             return id;
         } catch (Exception e) {
-            Log.w(TAG, "row: " + e);
+            Log.w(TAG, "row " + key + ": " + e);
             return -1;
         }
     }
@@ -154,24 +143,22 @@ final class HomeRows {
         } catch (Exception e) { return false; }
     }
 
-    private static void fill(Context c, long channelId, JSONArray tiles) {
+    private static void fill(Context c, long channelId, String key, JSONArray tiles) {
         ContentResolver r = c.getContentResolver();
-        try { r.delete(TvContractCompat.buildPreviewProgramsUriForChannel(channelId), null, null); } catch (Exception e) { Log.w(TAG, "clear: " + e); }
+        try { r.delete(TvContractCompat.buildPreviewProgramsUriForChannel(channelId), null, null); } catch (Exception e) { Log.w(TAG, "clear " + key + ": " + e); }
+        boolean live = "live".equals(key);
         for (int i = 0; i < tiles.length() && i < MAX_TILES; i++) {
             JSONObject t = tiles.optJSONObject(i);
             if (t == null) continue;
-            String kind = t.optString("kind");
-            boolean live = "live".equals(kind);
-            boolean episode = t.optBoolean("episode");
             PreviewProgram.Builder b = new PreviewProgram.Builder();
             b.setChannelId(channelId)
                     .setType(live ? TvContractCompat.PreviewPrograms.TYPE_CHANNEL
-                            : episode ? TvContractCompat.PreviewPrograms.TYPE_TV_EPISODE
-                            : "series".equals(kind) ? TvContractCompat.PreviewPrograms.TYPE_TV_SERIES : TvContractCompat.PreviewPrograms.TYPE_MOVIE)
+                            : t.optBoolean("episode") ? TvContractCompat.PreviewPrograms.TYPE_TV_EPISODE
+                            : "series".equals(key) ? TvContractCompat.PreviewPrograms.TYPE_TV_SERIES : TvContractCompat.PreviewPrograms.TYPE_MOVIE)
                     .setTitle(t.optString("title"))
                     .setDescription(t.optString("sub"))
                     .setIntentUri(Uri.parse(t.optString("link")))
-                    .setInternalProviderId(kind + ":" + t.optString("id"))
+                    .setInternalProviderId(t.optString("id"))
                     .setWeight(MAX_TILES - i)
                     .setPosterArtAspectRatio(live ? TvContractCompat.PreviewPrograms.ASPECT_RATIO_16_9 : TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3);
             String img = t.optString("img");
@@ -182,7 +169,7 @@ final class HomeRows {
                 b.setDurationMillis((int) Math.min(Integer.MAX_VALUE, t.optLong("dur")));
             }
             try { r.insert(TvContractCompat.PreviewPrograms.CONTENT_URI, b.build().toContentValues()); }
-            catch (Exception e) { Log.w(TAG, "tile: " + e); }
+            catch (Exception e) { Log.w(TAG, "tile " + key + ": " + e); }
         }
     }
 

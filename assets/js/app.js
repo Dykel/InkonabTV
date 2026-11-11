@@ -914,9 +914,26 @@
     // Android TV (the app's rows and Play Next) and Samsung Smart Hub Preview: channels watched
     // lately, films and episodes to resume, and what was added lately. A tile opens the app on
     // it. Adult categories never go there, whatever the setting.
-    homeRowsOn() {
+    // The TV can show them (Android TV or Samsung); Settings → TV home screen turns them off.
+    homeRowsAvail() {
       return !CFG.hotel && document.documentElement.classList.contains('tv')
         && !!((window.Native && Native.player.homeRows) || window.TizenHome);
+    },
+    homeRowsOn() { return this.homeRowsAvail() && !Settings.noHomeRows; },
+    // Off: the rows are emptied (the TV hides empty rows) and Play Next is cleared. On again: they
+    // come back where they were, with no new question to add them.
+    async setHomeRows(on) {
+      Settings.noHomeRows = !on;
+      Settings.save();
+      this.homeSent = null;
+      clearTimeout(this.homeTimer);
+      this.homeTimer = 0;
+      if (on) return this.homeRowsLater(500);
+      const none = { live: [], resume: [], movies: [], series: [] };
+      try {
+        if (window.Native && Native.player.homeRows) await Native.player.homeRows({ rows: JSON.stringify(none) });
+        else if (window.TizenHome) TizenHome.set(none);
+      } catch (e) { console.warn('[home rows]', e); }
     },
     // Updates within `ms`, or sooner if one is already planned (progress saved every few seconds
     // while playing must not keep pushing it back).
@@ -976,6 +993,10 @@
       try { q = new URL(url); } catch (e) { return; }
       if (q.protocol !== 'inkonabtv:') return;
       if (!this.api || $('#app').classList.contains('hidden')) { this.pendingLink = url; return; }
+      // Android can hand over the same link twice (launch link and new-link event): once is enough.
+      if (this.lastLink === url && Date.now() - this.lastLinkAt < 5000) return;
+      this.lastLink = url;
+      this.lastLinkAt = Date.now();
       const row = q.searchParams.get('row');
       if (row) { this.closeModal(); location.hash = ['live', 'movies', 'series'].includes(row) ? row : 'home'; return; }
       if (!q.searchParams.get('a')) return; // the row itself: just open the app
@@ -2794,6 +2815,7 @@
             <select class="field" id="setLang">${langs.map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join('')}</select></label>
           <label class="set"${this.api.isM3U ? ' hidden' : ''}><span>Catch-up time correction<small>If replays start at the wrong time, shift them here.</small></span>
             <select class="field" id="setShift">${[-2, -1, 0, 1, 2].map(h => `<option value="${h}">${h === 0 ? 'None (server time)' : (h > 0 ? '+' : '−') + Math.abs(h) + ' hour' + (Math.abs(h) > 1 ? 's' : '')}</option>`).join('')}</select></label>
+          ${this.homeRowsAvail() ? `<label class="set toggle"><span>Show on the TV's home screen<small>Live channels, movies and series to resume and the newest ones, as rows on the TV's home screen. One click opens them.</small></span><input type="checkbox" id="setHomeRows"></label>` : ''}
           <label class="set toggle"><span>Show adult categories<small>Protected by your parental PIN. Hidden again each time the app starts.</small></span><input type="checkbox" id="setAdult"></label>
           <div class="kv"><span>Parental PIN</span><b id="pinState">${Settings.adultPin ? 'Set' : 'Not set'}</b></div>
           ${Settings.adultPin ? '<div class="set-row vpn-actions"><button class="btn ghost" id="pinChange">Change PIN</button></div>' : ''}
@@ -2881,6 +2903,14 @@
         resetPicks();
         this.route();
       });
+      const homeBox = $('#setHomeRows', m);
+      if (homeBox) {
+        homeBox.checked = !Settings.noHomeRows;
+        homeBox.addEventListener('change', e => {
+          this.setHomeRows(e.target.checked);
+          this.toast(e.target.checked ? 'Shown on the TV home screen' : 'Removed from the TV home screen');
+        });
+      }
       const builtinBox = $('#setBuiltin', m);
       if (builtinBox) {
         builtinBox.checked = !Settings.hideBuiltin;

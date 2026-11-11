@@ -40,7 +40,7 @@ public class NativePlayerPlugin extends Plugin {
      */
     /**
      * TV home screen rows (Android TV channels and Play Next), written off the main thread.
-     * One InkonabTV+ row, the app's first, which Android adds without asking.
+     * Live TV, Movies and Series rows: Android adds the first by itself and asks once for each other.
      */
     @PluginMethod
     public void homeRows(PluginCall call) {
