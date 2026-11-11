@@ -36,9 +36,9 @@
     sb.addEventListener('error', no, { once: true });
   });
 
-  // Plays `src` (the provider's address) in `video` from `at` seconds; onFail(reason).
-  // Returns stop().
-  window.ConvertedPlayback = function (video, base, src, at, onFail) {
+  // Plays `src` (the provider's address) in `video` from `at` seconds, with audio track `track`
+  // (0 = the first); onFail(reason). Returns stop().
+  window.ConvertedPlayback = function (video, base, src, at, onFail, track) {
     const ms = new MediaSource();
     let sb = null, ctrl = null, stopped = false, durationSet = false;
     video.src = URL.createObjectURL(ms);
@@ -51,7 +51,7 @@
           if (sb.updating) { sb.abort(); }
           if (sb.buffered.length) { sb.remove(0, Infinity); await done(sb); }
         }
-        const r = await fetch(`${base}/convert?u=${encodeURIComponent(src)}&ss=${t.toFixed(2)}`, { signal: my.signal });
+        const r = await fetch(`${base}/convert?u=${encodeURIComponent(src)}&ss=${t.toFixed(2)}&a=${track || 0}`, { signal: my.signal });
         if (!r.ok) throw new Error('convert ' + r.status);
         const dur = Number(r.headers.get('X-Duration'));
         const reader = r.body.getReader();

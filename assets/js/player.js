@@ -283,7 +283,7 @@
       }
       if (item.convert) {
         this.stopConv = ConvertedPlayback(v, item.convert, item.rawUrl, item.resumeAt || 0,
-          r => { if (this.item === item) this.fail('sound: ' + r); });
+          r => { if (this.item === item) this.fail('sound: ' + r); }, item.audioIdx || 0);
       } else if (v.isAV || nativeHls) {
         v.src = url; // AVPlay / Safari handle HLS themselves
       } else if (ext === 'm3u8' && window.Hls && Hls.isSupported()) {
@@ -331,6 +331,8 @@
         };
         v.addEventListener('timeupdate', check);
       }
+
+      if (window.Desktop && Desktop.media && item.kind !== 'live' && !item.radio) this.desktopTracks(item);
 
       if (item.kind !== 'live') {
         this.saveTimer = setInterval(() => this.saveProgress(), 5000);
@@ -673,14 +675,18 @@
     },
 
     // ---------- audio language (films and series that carry several) ----------
-    // Samsung: AVPlay's tracks (tizen.js). Browsers and the Windows/Mac app: hls.js audio
-    // groups, or the video's own audio tracks where the engine lists them.
+    // Samsung: AVPlay's tracks (tizen.js). Browsers: hls.js audio groups, or the video's own
+    // audio tracks where the engine lists them. Windows/Mac app: the film's tracks as the app's
+    // converter reads them (desktop/media.js); another language plays through the converter.
     audioList() {
       const v = this.video;
+      const item = this.item;
       try {
         if (v.isAV && v.audioList) return v.audioList();
         const h = this.hls;
         if (h && h.audioTracks && h.audioTracks.length > 1) return h.audioTracks.map((t, i) => ({ id: i, lang: t.lang || t.name || '', on: i === h.audioTrack }));
+        if (item && item.audioTracks && item.audioFor === item.rawUrl && item.audioTracks.length > 1)
+          return item.audioTracks.map((t, i) => ({ id: i, lang: t.lang, on: i === (item.audioIdx || 0) }));
         const at = v.audioTracks;
         if (at && at.length > 1) return [...at].map((t, i) => ({ id: i, lang: t.language || t.label || '', on: t.enabled }));
       } catch (e) {}
@@ -689,9 +695,36 @@
 
     setAudio(id) {
       const v = this.video;
+      const item = this.item;
       if (v.isAV && v.setAudio) v.setAudio(id);
       else if (this.hls && this.hls.audioTracks && this.hls.audioTracks.length > 1) this.hls.audioTrack = id;
+      else if (item && item.audioTracks && item.audioFor === item.rawUrl) {
+        if ((item.audioIdx || 0) === id) return;
+        // Same point, the converter with that track (the video engine plays the first one only).
+        Desktop.media.base().then(base => {
+          if (this.item !== item || !base) return;
+          item.audioIdx = id;
+          item.convert = base;
+          item.resumeAt = v.currentTime;
+          this.play(item);
+        });
+      }
       else if (v.audioTracks) [...v.audioTracks].forEach((t, i) => { t.enabled = i === id; });
+    },
+
+    // Windows/Mac app: asks the converter which audio tracks the film has (once per file).
+    desktopTracks(item) {
+      if (item.audioFor === item.rawUrl) return;
+      item.audioFor = item.rawUrl;
+      item.audioTracks = null;
+      item.audioIdx = 0;
+      Desktop.media.base().then(base => base && fetch(`${base}/tracks?u=${encodeURIComponent(item.rawUrl)}`))
+        .then(r => r && r.ok ? r.json() : [])
+        .then(list => {
+          if (this.item !== item || item.audioFor !== item.rawUrl) return;
+          item.audioTracks = Array.isArray(list) ? list : [];
+          this.renderAudio();
+        }).catch(() => {});
     },
 
     renderAudio() {
