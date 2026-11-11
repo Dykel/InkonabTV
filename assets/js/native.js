@@ -99,6 +99,10 @@
   if (pill) pill.addEventListener('click', () => window.App && App.openSettings());
 
   // Remote / phone Back: same as Escape in the web app (close dialog, go Home); exit from Home or sign-in.
+  // TV home screen tiles (HomeRows.java): inkonabtv:// links, at launch or while open.
+  AppPlugin.addListener('appUrlOpen', d => { if (window.App && d && d.url) App.openLink(d.url); });
+  if (AppPlugin.getLaunchUrl) AppPlugin.getLaunchUrl().then(d => { if (window.App && d && d.url) App.openLink(d.url); }).catch(() => {});
+
   AppPlugin.addListener('backButton', () => {
     const target = document.activeElement || document.body;
     const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });

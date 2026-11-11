@@ -122,11 +122,27 @@ writeFileSync(join(out, 'config.xml'), `<?xml version="1.0" encoding="UTF-8"?>
     <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
     <tizen:privilege name="http://developer.samsung.com/privilege/network.public"/>
     <tizen:privilege name="http://developer.samsung.com/privilege/avplay"/>
+    <tizen:privilege name="http://tizen.org/privilege/application.launch"/>
+    <!-- Smart Hub Preview: rows under the app's tile (tizen/preview-service.js); a tile reopens the app with its link. -->
+    <tizen:metadata key="http://samsung.com/tv/metadata/use.preview" value="bg_service"/>
+    <tizen:app-control>
+        <tizen:src name="index.html" reload="disable"/>
+        <tizen:operation name="http://samsung.com/appcontrol/operation/eden_resume"/>
+    </tizen:app-control>
+    <tizen:service id="InkonabTV1.Preview" auto-restart="false" on-boot="false">
+        <tizen:content src="service/preview-service.js"/>
+        <tizen:name>InkonabTVPreview</tizen:name>
+        <tizen:icon src="icon.png"/>
+        <tizen:description>Smart Hub Preview rows</tizen:description>
+        <tizen:category name="http://tizen.org/category/service"/>
+    </tizen:service>
     <tizen:setting screen-orientation="landscape" context-menu="disable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
     <access origin="*" subdomains="true"/>
 </widget>
 `);
 copyFileSync(join(root, 'store/samsung/icon_512x423.png'), join(out, 'icon.png')); // Samsung: 512 × 423
+mkdirSync(join(out, 'service'), { recursive: true });
+copyFileSync(join(root, 'tizen/preview-service.js'), join(out, 'service/preview-service.js'));
 console.log('Samsung TV app built in build/tizen');
 
 // ---------- package (.wgt) ----------

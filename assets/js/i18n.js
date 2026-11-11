@@ -320,6 +320,8 @@
     'Help': ['Aide', 'Ayuda', 'Hilfe', 'Aiuto', 'Ajuda'],
     'See how to get around the app, with the remote or by touch.': ['Découvrez comment utiliser l’app, avec la télécommande ou au toucher.', 'Mira cómo moverte por la app, con el mando o con el dedo.', 'So bedienst du die App, mit der Fernbedienung oder per Touch.', 'Scopri come muoverti nell’app, con il telecomando o al tocco.', 'Veja como navegar na app, com o comando ou por toque.'],
     'Show the tour': ['Revoir la présentation', 'Ver la presentación', 'Einführung ansehen', 'Rivedi la presentazione', 'Ver a apresentação'],
+    'This channel is no longer in your playlist': ['Cette chaîne n’est plus dans votre playlist', 'Este canal ya no está en tu lista', 'Dieser Sender ist nicht mehr in deiner Playlist', 'Questo canale non è più nella tua playlist', 'Este canal já não está na sua lista'],
+    'This title is no longer in your playlist': ['Ce titre n’est plus dans votre playlist', 'Este título ya no está en tu lista', 'Dieser Titel ist nicht mehr in deiner Playlist', 'Questo titolo non è più nella tua playlist', 'Este título já não está na sua lista'],
     'Not saved yet': ['Pas encore enregistrée', 'Aún no guardada', 'Noch nicht gespeichert', 'Non ancora salvata', 'Ainda não guardada'],
     'Just now': ['À l’instant', 'Ahora mismo', 'Gerade eben', 'Proprio ora', 'Agora mesmo'],
     'Extra playlists': ['Playlists supplémentaires', 'Listas adicionales', 'Weitere Playlists', 'Playlist aggiuntive', 'Listas adicionais'],

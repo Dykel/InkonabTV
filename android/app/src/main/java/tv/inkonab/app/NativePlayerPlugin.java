@@ -38,6 +38,34 @@ public class NativePlayerPlugin extends Plugin {
      * a call waiting for an activity result into the activity's saved state, and a full channel
      * list there crashes the app (TransactionTooLargeException) as soon as the player opens.
      */
+    /**
+     * TV home screen rows (Android TV channels and Play Next), written off the main thread.
+     * One InkonabTV+ row, the app's first, which Android adds without asking.
+     */
+    @PluginMethod
+    public void homeRows(PluginCall call) {
+        String json = call.getString("rows", "{}");
+        android.app.Activity a = getActivity();
+        Context c = getContext().getApplicationContext();
+        new Thread(() -> {
+            try {
+                org.json.JSONObject r = HomeRows.update(c, new org.json.JSONObject(json));
+                org.json.JSONArray ask = r.optJSONArray("ask");
+                if (ask != null && ask.length() > 0 && a != null) a.runOnUiThread(() -> {
+                    for (int i = 0; i < ask.length(); i++) {
+                        Intent in = new Intent(androidx.tvprovider.media.tv.TvContractCompat.ACTION_REQUEST_CHANNEL_BROWSABLE)
+                                .putExtra(androidx.tvprovider.media.tv.TvContractCompat.EXTRA_CHANNEL_ID, ask.optLong(i));
+                        // For a result: the launcher checks which app is asking.
+                        try { a.startActivityForResult(in, 7301 + i); } catch (Exception ignored) {}
+                    }
+                });
+                call.resolve(JSObject.fromJSONObject(r));
+            } catch (Exception e) {
+                call.reject(String.valueOf(e.getMessage()));
+            }
+        }).start();
+    }
+
     @PluginMethod
     public void stage(PluginCall call) {
         PlayerActivity.pending = call.getString("payload");

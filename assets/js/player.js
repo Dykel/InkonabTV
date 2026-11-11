@@ -55,6 +55,18 @@
     fragLoadingTimeOut: 20000, nudgeMaxRetry: 10, startLevel: -1, capLevelToPlayerSize: true,
   });
 
+  // Audio track names: the language's own name for the common ones, else its code.
+  const LANG_NAMES = { fr: 'Français', fre: 'Français', fra: 'Français', en: 'English', eng: 'English', es: 'Español', spa: 'Español',
+    de: 'Deutsch', ger: 'Deutsch', deu: 'Deutsch', it: 'Italiano', ita: 'Italiano', pt: 'Português', por: 'Português', ar: 'العربية', ara: 'العربية',
+    tr: 'Türkçe', tur: 'Türkçe', nl: 'Nederlands', dut: 'Nederlands', nld: 'Nederlands', ru: 'Русский', rus: 'Русский', pl: 'Polski', pol: 'Polski',
+    ja: '日本語', jpn: '日本語', ko: '한국어', kor: '한국어', zh: '中文', chi: '中文', zho: '中文', hi: 'हिन्दी', hin: 'हिन्दी' };
+  const langName = (code, i) => {
+    const c = String(code || '').trim();
+    if (c.length > 3 && !/[-_]/.test(c)) return c; // already a name ("Français", "English 5.1")
+    const k = c.toLowerCase().split(/[-_]/)[0];
+    return LANG_NAMES[k] || (k && k !== 'und' ? k.toUpperCase() : 'Track ' + (i + 1));
+  };
+
   const Player = {
     item: null,
     hls: null,
@@ -94,6 +106,7 @@
       this.el.addEventListener('click', () => this.poke());
       this.video.addEventListener('playing', () => {
         this.setState('playing');
+        this.renderAudio();
         const it = this.item;
         if (it && it.kind === 'live' && !appleTouch && this.liveOk !== it.title) { this.liveOk = it.title; this.liveGood = Date.now(); }
       });
@@ -185,8 +198,11 @@
         }
       } else {
         // A series sends the episodes after this one too: the player goes on to the next by itself.
+        // Its other versions (language, quality) follow: the player tries them before the VPN.
+        const alts = it => (it.url ? [] : it.alts || []);
         const film = it => ({ title: it.title || '', subtitle: it.subtitle || '', img: it.img || '',
-          versions: [{ url: it.url || App.api.streamUrl(it.kind, it.id, it.ext || 'mp4'), label: it.kind === 'catchup' ? 'Replay' : '' }] });
+          versions: [{ url: it.url || App.api.streamUrl(it.kind, it.id, it.ext || 'mp4'), label: it.kind === 'catchup' ? 'Replay' : alts(it).length ? it.label || '' : '' },
+            ...alts(it).map(a => ({ url: App.api.streamUrl(it.kind, a.id, a.ext || 'mp4'), label: a.label || '' }))] });
         payload = {
           live: false, group: 0, index: 0, version: 0, startAt: item.resumeAt > 5 ? item.resumeAt : 0,
           channels: [item, ...(item.queue || [])].map(film),
@@ -656,6 +672,59 @@
       box.querySelectorAll('.p-ver').forEach(b => b.addEventListener('click', () => this.switchVersion(versions[b.dataset.v])));
     },
 
+    // ---------- audio language (films and series that carry several) ----------
+    // Samsung: AVPlay's tracks (tizen.js). Browsers and the Windows/Mac app: hls.js audio
+    // groups, or the video's own audio tracks where the engine lists them.
+    audioList() {
+      const v = this.video;
+      try {
+        if (v.isAV && v.audioList) return v.audioList();
+        const h = this.hls;
+        if (h && h.audioTracks && h.audioTracks.length > 1) return h.audioTracks.map((t, i) => ({ id: i, lang: t.lang || t.name || '', on: i === h.audioTrack }));
+        const at = v.audioTracks;
+        if (at && at.length > 1) return [...at].map((t, i) => ({ id: i, lang: t.language || t.label || '', on: t.enabled }));
+      } catch (e) {}
+      return [];
+    },
+
+    setAudio(id) {
+      const v = this.video;
+      if (v.isAV && v.setAudio) v.setAudio(id);
+      else if (this.hls && this.hls.audioTracks && this.hls.audioTracks.length > 1) this.hls.audioTrack = id;
+      else if (v.audioTracks) [...v.audioTracks].forEach((t, i) => { t.enabled = i === id; });
+    },
+
+    renderAudio() {
+      const box = this.el.querySelector('.p-vers');
+      let b = box.querySelector('.p-aud');
+      const list = this.audioList();
+      if (list.length < 2) { if (b) b.remove(); return; }
+      const at = Math.max(0, list.findIndex(t => t.on));
+      if (!b) {
+        b = document.createElement('button');
+        b.className = 'p-ver p-aud';
+        b.addEventListener('click', () => {
+          const l = this.audioList();
+          if (l.length < 2) return;
+          const i = (Math.max(0, l.findIndex(t => t.on)) + 1) % l.length;
+          this.setAudio(l[i].id);
+          App.toast('Audio: ' + langName(l[i].lang, i));
+          setTimeout(() => this.renderAudio(), 500);
+        });
+        box.appendChild(b);
+      }
+      b.textContent = `Audio · ${langName(list[at].lang, at)}  ${at + 1}/${list.length}`;
+    },
+
+    // Films and series on a TV: ▲ goes up to the top bar (audio language, versions).
+    focusBar() {
+      const b = this.el.querySelector('.p-aud') || this.el.querySelector('.p-ver.on') || this.el.querySelector('.p-top button');
+      if (!b || !b.offsetParent) return false;
+      this.poke();
+      b.focus({ preventScroll: true });
+      return true;
+    },
+
     switchVersion(v) {
       const it = this.item;
       if (!it || !v || v === it.version) return;
@@ -702,6 +771,17 @@
     // stream format, before giving up.
     retry() {
       const it = this.item;
+      // A film or episode: its other versions (language, quality), from where it was.
+      if (it && (it.kind === 'movie' || it.kind === 'episode') && it.alts && it.alts.length) {
+        it.tried = it.tried || new Set();
+        it.tried.add(String(it.id));
+        const next = it.alts.find(a => !it.tried.has(String(a.id)));
+        if (!next) return false;
+        App.toast(`Trying another version (${next.label})…`);
+        const at = this.video.currentTime > 5 ? this.video.currentTime : it.resumeAt;
+        this.play({ ...it, id: next.id, ext: next.ext, tried: it.tried, resumeAt: at, convert: null });
+        return true;
+      }
       if (!it || it.kind !== 'live' || (it.url && !it.relay)) return false;
       it.tried = it.tried || new Set();
       it.tried.add(`${it.id}:${it.fmt}`);
@@ -924,7 +1004,8 @@
         case 'PageDown': case 'ChannelUp':
           if (live) { e.preventDefault(); e.stopPropagation(); this.zap(1); } break;
         case 'ArrowUp':
-          if (live) { e.preventDefault(); e.stopPropagation(); this.openStrip(); } break;
+          if (live) { e.preventDefault(); e.stopPropagation(); this.openStrip(); }
+          else if (tv && this.focusBar()) { e.preventDefault(); e.stopPropagation(); } break;
         case 'ArrowDown':
           if (live) { e.preventDefault(); e.stopPropagation(); this.openInfo(); } break;
         case 'ArrowLeft':

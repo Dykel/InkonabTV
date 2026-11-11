@@ -38,6 +38,10 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.media3.common.C;
+import androidx.media3.common.Format;
+import androidx.media3.common.TrackSelectionOverride;
+import androidx.media3.common.TrackSelectionParameters;
+import androidx.media3.common.Tracks;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
@@ -128,6 +132,8 @@ public class PlayerActivity extends AppCompatActivity {
 
     private View topBar;
     private TextView titleView, subView, qualityView, favChip, errorView, numView;
+    private TextView audioView;          // audio language, shown when the file has more than one
+    private long filmStartMs;            // where a film or episode was asked to start (resume)
     private ImageView radioArt;
     private LinearLayout side;
     private ListView groupList, chanList;
@@ -161,6 +167,7 @@ public class PlayerActivity extends AppCompatActivity {
             index = p.optInt("index", 0);
             version = p.optInt("version", 0);
             startAtMs = (long) (p.optDouble("startAt", 0) * 1000);
+            filmStartMs = startAtMs;
             JSONArray gs = p.optJSONArray("groups");
             if (gs != null) {
                 for (int i = 0; i < gs.length(); i++) {
@@ -221,6 +228,9 @@ public class PlayerActivity extends AppCompatActivity {
         }
         view.setPlayer(player);
         player.addListener(new Player.Listener() {
+            @Override
+            public void onTracksChanged(Tracks tracks) { updateAudio(tracks); }
+
             @Override
             public void onPlaybackStateChanged(int state) {
                 if (state == Player.STATE_BUFFERING && readyOnce) onFreeze();
@@ -426,12 +436,13 @@ public class PlayerActivity extends AppCompatActivity {
 
     private static final long LIVE_START = 15000, LIVE_START_VPN = 45000;
     // A stream that never starts in that time counts as failed.
-    private final Runnable watchdog = () -> { if (player != null && !readyOnce && live) onFail("timeout"); };
+    private static final long FILM_START = 30000, FILM_START_VPN = 60000;
+    private final Runnable watchdog = () -> { if (player != null && !readyOnce) onFail("timeout"); };
 
     private void onFail(String why) {
         main.removeCallbacks(watchdog);
         if (live && replayUrl == null && livePlayed) { keepLive(why); return; }
-        if (live && autoRetry()) return;
+        if (autoRetry()) return; // other copies of a channel, other versions of a film or episode
         if (tryVpn()) return;
         showError(live
             ? "Can't play this channel (tried every copy and format" + (vpnTried ? ", and VPN servers in " + vpnAttempts + " countries" : "") + ").\n▲ ▼ change channel · ◀ channel list"
@@ -448,12 +459,14 @@ public class PlayerActivity extends AppCompatActivity {
         for (int i = 0; i < vs.length(); i++) {
             if (!tried.contains(flat + ":" + i + ":" + altFormat)) {
                 version = i;
-                Toast.makeText(this, "Trying another copy (" + vs.optJSONObject(i).optString("label", "") + ")…", Toast.LENGTH_SHORT).show();
-                load(0);
+                String label = vs.optJSONObject(i).optString("label", "");
+                Toast.makeText(this, (live ? "Trying another copy (" : "Trying another version (") + label + ")…", Toast.LENGTH_SHORT).show();
+                // A film carries on where it was (or where it was asked to resume).
+                load(live ? 0 : Math.max(player != null ? player.getCurrentPosition() : 0, filmStartMs));
                 return true;
             }
         }
-        if (!altFormat && vs.optJSONObject(0).optString("url", "").isEmpty()) {
+        if (live && !altFormat && vs.optJSONObject(0).optString("url", "").isEmpty()) {
             altFormat = true;
             version = 0;
             Toast.makeText(this, "Trying another stream format…", Toast.LENGTH_SHORT).show();
@@ -844,6 +857,10 @@ public class PlayerActivity extends AppCompatActivity {
         qualityView = chip("", true);
         qualityView.setOnClickListener(v -> switchVersion(1));
         bar.addView(qualityView);
+        audioView = chip("", false);
+        audioView.setVisibility(View.GONE);
+        audioView.setOnClickListener(v -> nextAudio());
+        bar.addView(audioView);
         vpnChip = chip("VPN off", false);
         vpnChip.setFocusable(false);
         bar.addView(vpnChip);
@@ -962,11 +979,13 @@ public class PlayerActivity extends AppCompatActivity {
     private final Runnable hideTopBar = () -> { if (!controlsShown && !barActive) topBar.setVisibility(View.GONE); };
 
     /** OK menu: show the top bar and put the focus on ★ Favorite; ◀/▶ move, OK presses, ▼/Back close. */
-    private void showBar() {
+    private void showBar() { showBar(favChip); }
+
+    private void showBar(View focus) {
         barActive = true;
         view.hideController();
         topBar.setVisibility(View.VISIBLE);
-        favChip.requestFocus();
+        focus.requestFocus();
         main.removeCallbacks(barTimeout);
         main.postDelayed(barTimeout, 8000);
     }
@@ -1631,7 +1650,8 @@ public class PlayerActivity extends AppCompatActivity {
             readyOnce = false;
             main.removeCallbacks(watchdog);
             // Through the free VPN a provider can take 20 s just to answer: don't give up on a good server.
-            main.postDelayed(watchdog, VpnManager.get().isUp() ? LIVE_START_VPN : LIVE_START);
+            boolean viaVpn = VpnManager.get().isUp();
+            main.postDelayed(watchdog, live ? (viaVpn ? LIVE_START_VPN : LIVE_START) : (viaVpn ? FILM_START_VPN : FILM_START));
             if (hasNext() && replayUrl == null) {
                 // The next episode follows in the same player, which loads it while the credits run.
                 List<MediaItem> list = new ArrayList<>();
@@ -1675,6 +1695,86 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean hasVersions() {
         JSONArray vs = current().optJSONArray("versions");
         return vs != null && vs.length() > 1;
+    }
+
+    private static boolean inside(View v, View parent) {
+        for (View x = v; x != null; x = x.getParent() instanceof View ? (View) x.getParent() : null) if (x == parent) return true;
+        return false;
+    }
+
+    private View filmChip() {
+        if (audioView != null && audioView.getVisibility() == View.VISIBLE) return audioView;
+        if (qualityView != null && qualityView.getVisibility() == View.VISIBLE && qualityView.length() > 0) return qualityView;
+        return null;
+    }
+
+    private boolean filmKey(int code) {
+        View f = getCurrentFocus();
+        boolean inBar = f != null && inside(f, topBar);
+        if (inBar && barActive) { main.removeCallbacks(barTimeout); main.postDelayed(barTimeout, 8000); }
+        if (code == KeyEvent.KEYCODE_DPAD_UP && !inBar) {
+            View chip = filmChip();
+            if (chip == null) return false;
+            // Leave ▲ to the controls while it still moves inside them (e.g. to the time bar).
+            View up = f != null && f != view ? f.focusSearch(View.FOCUS_UP) : null;
+            if (up != null && up != f && inside(up, view)) return false;
+            showBar(chip);
+            return true;
+        }
+        if (code == KeyEvent.KEYCODE_DPAD_DOWN && inBar && barActive) { hideBar(); view.showController(); return true; }
+        return false;
+    }
+
+    // ---------- audio language ----------
+    // Films and series often carry several languages. The chip shows the one playing; OK (or a
+    // tap) moves to the next. The choice also becomes the preferred language, so the following
+    // episodes start in it.
+
+    private static List<Tracks.Group> audioGroups(Tracks tracks) {
+        List<Tracks.Group> out = new ArrayList<>();
+        for (Tracks.Group g : tracks.getGroups()) if (g.getType() == C.TRACK_TYPE_AUDIO && g.isSupported()) out.add(g);
+        return out;
+    }
+
+    private static int selectedAudio(List<Tracks.Group> gs) {
+        for (int i = 0; i < gs.size(); i++) if (gs.get(i).isSelected()) return i;
+        return 0;
+    }
+
+    private static String audioName(Format f, int i) {
+        String name = f.label;
+        String lang = f.language;
+        if ((name == null || name.isEmpty()) && lang != null && !lang.isEmpty() && !"und".equals(lang)) {
+            Locale l = Locale.forLanguageTag(lang);
+            String d = l.getDisplayLanguage(l);
+            name = d.isEmpty() || d.equalsIgnoreCase(lang) ? lang.toUpperCase(Locale.ROOT) : Character.toUpperCase(d.charAt(0)) + d.substring(1);
+        }
+        if (name == null || name.isEmpty()) name = "Track " + (i + 1);
+        if (f.channelCount >= 6 && !name.contains("5.1")) name += " 5.1";
+        return name;
+    }
+
+    private void updateAudio(Tracks tracks) {
+        if (audioView == null) return;
+        List<Tracks.Group> gs = audioGroups(tracks);
+        if (gs.size() < 2) { audioView.setVisibility(View.GONE); return; }
+        int sel = selectedAudio(gs);
+        audioView.setText("Audio · " + audioName(gs.get(sel).getTrackFormat(0), sel) + "  " + (sel + 1) + "/" + gs.size());
+        audioView.setVisibility(View.VISIBLE);
+    }
+
+    private void nextAudio() {
+        if (player == null) return;
+        List<Tracks.Group> gs = audioGroups(player.getCurrentTracks());
+        if (gs.size() < 2) return;
+        int next = (selectedAudio(gs) + 1) % gs.size();
+        Tracks.Group g = gs.get(next);
+        Format f = g.getTrackFormat(0);
+        TrackSelectionParameters.Builder b = player.getTrackSelectionParameters().buildUpon()
+                .setOverrideForType(new TrackSelectionOverride(g.getMediaTrackGroup(), 0));
+        if (f.language != null && !"und".equals(f.language)) b.setPreferredAudioLanguage(f.language);
+        player.setTrackSelectionParameters(b.build());
+        Toast.makeText(this, "Audio: " + audioName(f, next), Toast.LENGTH_SHORT).show();
     }
 
     private void switchVersion(int step) {
@@ -1729,6 +1829,9 @@ public class PlayerActivity extends AppCompatActivity {
         // The OK press that opened the list must not also "click" the first channel.
         if (center && !down && swallowCenterUp) { swallowCenterUp = false; return true; }
         if (center && down && upNextShown()) { playNextNow(); return true; }
+        // Films and series: ▲ goes up to the top bar (audio language, version), ◀ ▶ move along
+        // it, OK changes, ▼ or Back comes back to the playback controls.
+        if (!live && down && filmKey(code)) return true;
         if (!live || replayUrl != null) return super.dispatchKeyEvent(e);
         if (down && panelShown()) { main.removeCallbacks(panelTimeout); main.postDelayed(panelTimeout, 10000); }
 

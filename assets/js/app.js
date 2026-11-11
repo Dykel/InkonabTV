@@ -787,6 +787,7 @@
     // changed sections, forget what the provider removed, and redraw the page if it shows one of
     // them (later, if a dialog or the player is open).
     async onCatalogRefreshed(e) {
+      this.homeRowsLater(30000);
       const d = (e && e.detail) || { sections: { live: true, movie: true, series: true } };
       const drop = { live: ['live', 'liveCats', 'liveCatalog'], movie: ['vod', 'movieCats', 'moviePicks'], series: ['series', 'seriesCats', 'seriesPicks'] };
       for (const s of Object.keys(d.sections)) for (const k of drop[s] || []) delete this.data[k];
@@ -861,6 +862,9 @@
       }
       this.route();
       this.checkServer();
+      this.homeRowsLater(20000);
+      // Opened from a TV home screen tile before the app was ready: go there now.
+      if (this.pendingLink) { const u = this.pendingLink; this.pendingLink = null; setTimeout(() => this.openLink(u), 600); }
     },
 
     bindChrome() {
@@ -904,6 +908,98 @@
       this.menuReturn = from && from.closest('#view') ? { el: from, view: this.view } : null;
       const tab = $(`.topbar [data-view="${this.view}"]`) || $('.topbar .home-btn');
       if (tab) tab.focus({ preventScroll: true });
+    },
+
+    // ---------- TV home screen ----------
+    // Android TV (the app's rows and Play Next) and Samsung Smart Hub Preview: channels watched
+    // lately, films and episodes to resume, and what was added lately. A tile opens the app on
+    // it. Adult categories never go there, whatever the setting.
+    homeRowsOn() {
+      return !CFG.hotel && document.documentElement.classList.contains('tv')
+        && !!((window.Native && Native.player.homeRows) || window.TizenHome);
+    },
+    // Updates within `ms`, or sooner if one is already planned (progress saved every few seconds
+    // while playing must not keep pushing it back).
+    homeRowsLater(ms = 8000) {
+      if (!this.homeRowsOn() || !this.api) return;
+      const due = Date.now() + ms;
+      if (this.homeTimer && this.homeDue <= due) return;
+      clearTimeout(this.homeTimer);
+      this.homeDue = due;
+      this.homeTimer = setTimeout(() => { this.homeTimer = 0; this.pushHomeRows().catch(e => console.warn('[home rows]', e)); }, ms);
+    },
+    homeLink(a) { return 'inkonabtv://open?a=' + encodeURIComponent(JSON.stringify(a)); },
+    async homeRowsData() {
+      const cat = await this.liveCatalog();
+      const byKey = new Map();
+      for (const g of cat.groups) {
+        if (ADULT.test(g.name || '')) continue;
+        for (const c of g.channels) if (c.gkey && !byKey.has(c.gkey)) byKey.set(c.gkey, { c, g });
+      }
+      // Watched lately first, then favorites, then the rest of the group watched last.
+      const recent = this.recentLive();
+      const keys = [...recent, ...this.favs('live')];
+      const lastGroup = byKey.get(recent[0]);
+      if (lastGroup) keys.push(...lastGroup.g.channels.map(c => c.gkey));
+      else keys.push(...cat.groups.filter(g => !ADULT.test(g.name || '')).slice(0, 1).flatMap(g => g.channels.map(c => c.gkey)));
+      const live = [...new Set(keys)].map(k => byKey.get(k)).filter(Boolean).slice(0, 20).map(({ c, g }) => ({
+        id: 'live:' + c.gkey, title: c.label, sub: g.name || '', img: c.stream_icon || '', link: this.homeLink({ t: 'live', g: c.gkey }),
+      }));
+      const resume = this.cw().filter(e => e.dur > 0 && e.pos > 0).slice(0, 15).map(e => ({
+        id: e.key, title: e.title || '', sub: e.subtitle || '', img: e.img || '', link: this.homeLink({ t: 'cw', k: e.key }),
+        pos: Math.round(e.pos * 1000), dur: Math.round(e.dur * 1000), at: e.t || Date.now(), episode: e.kind === 'episode', kind: e.kind,
+      }));
+      const latest = async kind => {
+        const [all, cats] = await Promise.all([kind === 'movie' ? this.loadVod() : this.loadSeries(), this.loadCats(kind)]);
+        const bad = new Set(cats.filter(c => ADULT.test(c.category_name || '')).map(c => String(c.category_id)));
+        return uniq(all.filter(i => !i.adult && !bad.has(String(i.cat)))).sort((a, b) => b.added - a.added).slice(0, 20);
+      };
+      const [films, shows] = await Promise.all([latest('movie').catch(() => []), latest('series').catch(() => [])]);
+      const tile = (i, t) => ({ id: t + ':' + i.id, title: i.name, sub: [i.year, i.lang].filter(Boolean).join(' · '), img: i.img || '', link: this.homeLink({ t, id: i.id }) });
+      return {
+        live, resume,
+        movies: [...resume.filter(r => r.kind === 'movie'), ...films.map(i => tile(i, 'movie'))],
+        series: [...resume.filter(r => r.kind === 'episode'), ...shows.map(i => tile(i, 'series'))],
+      };
+    },
+    async pushHomeRows() {
+      const rows = await this.homeRowsData();
+      const json = JSON.stringify(rows);
+      if (json === this.homeSent) return; // nothing changed
+      this.homeSent = json;
+      if (window.Native && Native.player.homeRows) await Native.player.homeRows({ rows: json });
+      else if (window.TizenHome) TizenHome.set(rows);
+    },
+    // inkonabtv://open?a={"t":"live"|"cw"|"movie"|"series", …} or ?row=live|movies|series, or nothing (the home row: just open)
+    async openLink(url) {
+      let q;
+      try { q = new URL(url); } catch (e) { return; }
+      if (q.protocol !== 'inkonabtv:') return;
+      if (!this.api || $('#app').classList.contains('hidden')) { this.pendingLink = url; return; }
+      const row = q.searchParams.get('row');
+      if (row) { this.closeModal(); location.hash = ['live', 'movies', 'series'].includes(row) ? row : 'home'; return; }
+      if (!q.searchParams.get('a')) return; // the row itself: just open the app
+      let a;
+      try { a = JSON.parse(q.searchParams.get('a') || '{}'); } catch (e) { return; }
+      this.closeModal();
+      if (a.t === 'live') {
+        const cat = await this.liveCatalog();
+        for (const g of cat.groups) {
+          const i = g.channels.findIndex(c => c.gkey === a.g);
+          if (i >= 0) return this.playChannel(g.channels, i, g);
+        }
+        return this.toast('This channel is no longer in your playlist');
+      }
+      if (a.t === 'cw') {
+        const e = this.cwGet(a.k);
+        if (e) return this.playEntry(e);
+      }
+      if (a.t === 'movie' || a.t === 'series') {
+        const all = a.t === 'movie' ? await this.loadVod() : await this.loadSeries();
+        const it = all.find(i => String(i.id) === String(a.id));
+        if (it) return a.t === 'movie' ? this.openMovie(it, true) : this.openSeries(it);
+      }
+      this.toast('This title is no longer in your playlist');
     },
 
     // ---------- first-run tour ----------
@@ -1352,6 +1448,7 @@
     toggleFav(kind, key, name) {
       const on = !this.isFav(kind, key);
       this.setFav(kind, key, on);
+      this.homeRowsLater();
       this.toast(on ? `★ ${name || 'Added'} — added to ${kind === 'live' ? 'Favorites' : 'My List'}` : `Removed from ${kind === 'live' ? 'Favorites' : 'My List'}`);
       return on;
     },
@@ -1359,6 +1456,7 @@
     pushRecent(gkey) {
       if (!gkey) return;
       Store.set('recentLive', [gkey, ...this.recentLive().filter(k => k !== gkey)].slice(0, 30));
+      this.homeRowsLater();
     },
 
     // Remote number keys: find a channel by its number, preferring the group being watched.
@@ -1380,16 +1478,38 @@
       let list = this.cw().filter(e => e.key !== entry.key);
       if (pos / dur < 0.95) list.unshift({ ...entry, pos, dur, t: Date.now() });
       Store.set('cw', list.slice(0, 30));
+      this.homeRowsLater(60000); // progress is saved often while playing: once a minute is plenty
     },
-    cwRemove(key) { Store.set('cw', this.cw().filter(e => e.key !== key)); },
+    cwRemove(key) { Store.set('cw', this.cw().filter(e => e.key !== key)); this.homeRowsLater(); },
+
+    // A film's other versions (other language or quality), for the player to try when this one
+    // won't play, before the VPN.
+    versionLabel(v) { return [v.lang, v.quality, ...(v.tags || [])].filter(Boolean).join(' · ') || 'Other version'; },
+    altVersions(item) {
+      const alts = (item.versions || []).filter(v => String(v.id) !== String(item.id))
+        .map(v => ({ id: v.id, ext: v.ext || 'mp4', label: this.versionLabel(v) }));
+      return alts.length ? { label: this.versionLabel(item), alts } : {};
+    },
+    // The same episode (season and number) in the series' other versions. Slow answers (4 s) are
+    // left out; the provider's answers are cached, so it costs nothing the next time.
+    async episodeAlts(item) {
+      const others = (item.versions || []).filter(v => String(v.id) !== String(item.id));
+      if (!others.length || !this.api) return () => [];
+      const cut = p => Promise.race([p, new Promise(r => setTimeout(() => r(null), 4000))]);
+      const infos = await Promise.all(others.map(v => cut(this.api.seriesInfo(v.id).catch(() => null)).then(d => ({ v, d }))));
+      return ep => infos.flatMap(({ v, d }) => {
+        const hit = asArray(d && d.episodes && d.episodes[ep.season]).find(e => String(e.episode_num) === String(ep.episode_num));
+        return hit ? [{ id: hit.id, ext: hit.container_extension || 'mp4', label: this.versionLabel(v) }] : [];
+      });
+    },
 
     // queue: the episodes after this one. at: which of [entry, ...queue] the progress is for.
     playEntry(entry, resume = true, queue = []) {
       const all = [entry, ...queue];
       Player.open({
         kind: entry.kind, id: entry.id, ext: entry.ext, title: entry.title, subtitle: entry.subtitle,
-        resumeAt: resume ? entry.pos : 0,
-        queue: queue.map(e => ({ kind: e.kind, id: e.id, ext: e.ext, title: e.title, subtitle: e.subtitle })),
+        resumeAt: resume ? entry.pos : 0, label: entry.label, alts: entry.alts,
+        queue: queue.map(e => ({ kind: e.kind, id: e.id, ext: e.ext, title: e.title, subtitle: e.subtitle, label: e.label, alts: e.alts })),
         onProgress: (pos, dur, at = 0) => all[at] && this.cwSave(all[at], pos, dur),
         onFinished: at => all[at] && this.cwRemove(all[at].key),
         onEnded: entry.onEnded,
@@ -2285,6 +2405,7 @@
         key: 'movie:' + item.id, kind: 'movie', id: item.id, ext: md.container_extension || item.ext,
         title: (t2 && t2.title) || item.name, subtitle: [item.year, item.lang].filter(Boolean).join(' · ') || 'Movie',
         img: (t2 && t2.poster) || item.img, backdrop: extra.backdrop,
+        ...this.altVersions(item),
       };
       const actions = $('.detail-actions', m);
       // Drawn again when the player closes, so it offers Resume at the new position.
@@ -2353,10 +2474,14 @@
         return (m ? m[1] || '' : s).trim();
       };
       const flat = seasons.flatMap(s => asArray(eps[s]).map(e => ({ ...e, season: s, title: epName(e.title) })));
+      const alts = this.episodeAlts(item); // started now: ready by the time Play is pressed
+      let altOf = () => [];
+      alts.then(f => { altOf = f; });
       const epEntry = ep => ({
         key: 'episode:' + ep.id, kind: 'episode', id: ep.id, ext: ep.container_extension || 'mp4', title,
         subtitle: `S${ep.season} · E${ep.episode_num}${ep.title ? ' — ' + ep.title : ''}`,
         img: item.img, backdrop: (ep.info && ep.info.movie_image) || extra.backdrop, seriesId: item.id,
+        label: this.versionLabel(item), alts: altOf(ep),
       });
       const playEp = (ep, resume) => {
         const entry = epEntry(ep);

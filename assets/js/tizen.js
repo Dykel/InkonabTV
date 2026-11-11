@@ -217,6 +217,19 @@
       } catch (e) {}
     },
     play() { try { av.play(); this.isPaused = false; screenSaver(false); } catch (e) {} return Promise.resolve(); },
+    // Audio languages of the file (films and series often carry several).
+    audioList() {
+      try {
+        let cur = -1;
+        try { const a = (av.getCurrentStreamInfo() || []).filter(t => t.type === 'AUDIO')[0]; if (a) cur = Number(a.index); } catch (e) {}
+        return (av.getTotalTrackInfo() || []).filter(t => t.type === 'AUDIO').map(t => {
+          let x = {};
+          try { x = JSON.parse(t.extra_info || '{}'); } catch (e) {}
+          return { id: Number(t.index), lang: x.language || '', on: Number(t.index) === cur };
+        });
+      } catch (e) { return []; }
+    },
+    setAudio(id) { try { av.setSelectTrack('AUDIO', id); } catch (e) {} },
     pause() { try { av.pause(); this.isPaused = true; screenSaver(true); } catch (e) {} },
     get paused() { return this.isPaused; },
     get duration() { return this.dur; },
@@ -311,4 +324,37 @@
     }
     setInterval(paint, 500);
   });
+
+  // ---------- Smart Hub Preview: the app's rows on the TV's home bar ----------
+  // app.js builds the rows (homeRowsData); the preview service (tizen/preview-service.js) sets
+  // them. A tile reopens the app with its inkonabtv:// link (eden_resume, PAYLOAD).
+  const PREVIEW_SERVICE = 'InkonabTV1.Preview';
+  window.TizenHome = {
+    set(rows) {
+      try {
+        const tiles = (list, ratio) => (list || []).filter(t => /^https?:/.test(t.img || '')).slice(0, 12)
+          .map(t => ({ title: t.title, subtitle: t.sub || '', image_ratio: ratio, image_url: t.img, action_data: t.link, is_playable: true }));
+        const sections = [
+          { title: 'Continue watching', tiles: tiles(rows.resume, '2by3') },
+          { title: 'Live TV', tiles: tiles(rows.live, '16by9') },
+          { title: 'Movies', tiles: tiles((rows.movies || []).filter(t => !t.pos), '2by3') },
+          { title: 'Series', tiles: tiles((rows.series || []).filter(t => !t.pos), '2by3') },
+        ].filter(x => x.tiles.length);
+        const ctl = new tizen.ApplicationControl('http://tizen.org/appcontrol/operation/pick', null, null, null,
+          [new tizen.ApplicationControlData('preview', [JSON.stringify({ sections })])]);
+        tizen.application.launchAppControl(ctl, PREVIEW_SERVICE, () => {}, e => console.warn('[preview]', e && e.message));
+      } catch (e) { console.warn('[preview]', e); }
+    },
+  };
+  const previewLink = () => {
+    try {
+      const req = tizen.application.getCurrentApplication().getRequestedAppControl();
+      const d = req && (req.appControl.data || []).filter(x => x.key === 'PAYLOAD')[0];
+      if (!d) return;
+      const link = JSON.parse(d.value[0]).values;
+      if (link && window.App) App.openLink(link);
+    } catch (e) {}
+  };
+  window.addEventListener('appcontrol', previewLink);
+  document.addEventListener('DOMContentLoaded', () => setTimeout(previewLink, 0));
 })();
