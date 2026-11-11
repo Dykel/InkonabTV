@@ -1042,7 +1042,7 @@
       const none = { live: [], resume: [], movies: [], series: [] };
       try {
         if (window.Native && Native.player.homeRows) await Native.player.homeRows({ rows: JSON.stringify(none) });
-        else if (window.TizenHome) TizenHome.set(none);
+        else if (window.TizenHome) this.tizenPreview(none);
       } catch (e) { console.warn('[home rows]', e); }
     },
     // Updates within `ms`, or sooner if one is already planned (progress saved every few seconds
@@ -1095,7 +1095,18 @@
       if (json === this.homeSent) return; // nothing changed
       this.homeSent = json;
       if (window.Native && Native.player.homeRows) await Native.player.homeRows({ rows: json });
-      else if (window.TizenHome) TizenHome.set(rows);
+      else if (window.TizenHome) this.tizenPreview(rows);
+    },
+    // Samsung allows a preview update at most every 10 minutes: a newer one waits its turn.
+    tizenPreview(rows) {
+      const gap = 10 * 60e3, last = Number(Store.get('previewAt', 0)) || 0, wait = last + gap - Date.now();
+      this.previewRows = rows;
+      if (wait > 0) {
+        if (!this.previewTimer) this.previewTimer = setTimeout(() => { this.previewTimer = 0; this.tizenPreview(this.previewRows); }, wait);
+        return;
+      }
+      Store.set('previewAt', Date.now());
+      TizenHome.set(rows);
     },
     // inkonabtv://open?a={"t":"live"|"cw"|"movie"|"series", …} or ?row=live|movies|series, or nothing (the home row: just open)
     async openLink(url) {
@@ -3036,6 +3047,7 @@
           <h3>Help</h3>
           <p class="muted small-note">See how to get around the app, with the remote or by touch.</p>
           <div class="set-row vpn-actions"><button class="btn ghost" id="tourAgain">Show the tour</button></div>
+          ${CFG.tmdbKey ? '<p class="muted small-note">Posters, summaries, cast and search in other languages: this product uses the TMDB API but is not endorsed or certified by TMDB.</p>' : ''}
         </section>
         <section class="set-group">
           <h3>Playlist links</h3>

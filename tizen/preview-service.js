@@ -10,8 +10,10 @@ module.exports.onRequest = function () {
     var req = app.getRequestedAppControl();
     (req.appControl.data || []).forEach(function (d) { if (d.key === 'preview') rows = d.value[0]; });
   } catch (e) {}
-  if (!rows) return;
   var done = function () { try { app.exit(); } catch (e) {} };
+  // Started by Smart Hub with nothing new (it does so every 10 minutes): close at once, as
+  // Samsung asks; the rows set last stay on the TV.
+  if (!rows) { done(); return; }
   try {
     webapis.preview.setPreviewData(rows, function () { console.log('[preview] rows set'); done(); },
       function (e) { console.log('[preview] not set: ' + (e && e.message)); done(); });
