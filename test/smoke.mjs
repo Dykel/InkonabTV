@@ -146,14 +146,27 @@ const state = () => page.evaluate(() => ({ panel: Player.panel(), side: Player.s
 
 console.log('InkonabTV smoke test');
 
-await check('first screen with no internet, under 3 s', async () => {
+await check('first launch: tour, then sign-in (no internet, under 3 s)', async () => {
   const t0 = Date.now();
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => localStorage.clear());
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
-  await shown('#loginUser');
+  await shown('#tourNext');
   const s = (Date.now() - t0) / 1000;
   assert(s < 3, `took ${s} s`);
+  const slide = () => page.evaluate(() => [...document.querySelectorAll('.tour-slide')].findIndex(e => e.classList.contains('on')));
+  assert(await page.evaluate(() => document.activeElement.id) === 'tourNext', 'focus starts on Next');
+  await page.keyboard.press('Enter'); await wait(300);
+  assert(await slide() === 1, 'OK on Next moves on');
+  await page.click('#tourPrev'); await wait(300);
+  assert(await slide() === 0, 'Previous goes back');
+  for (let i = 0; i < 4; i++) { await page.click('#tourNext'); await wait(150); }
+  assert(await slide() === 4 && await page.evaluate(() => document.getElementById('tourNext').textContent) === 'Get started', 'last screen says Get started');
+  await page.keyboard.press('Escape'); // Back skips it
+  await shown('#loginUser');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await shown('#loginUser');
+  assert(!(await page.$('.modal.tour')), 'the tour shows only once');
   return `${s.toFixed(2)} s`;
 });
 
@@ -177,7 +190,7 @@ await check('provider down: starts from the saved playlist', async () => {
 });
 
 await check('failed sign-in retries by itself until the provider answers', async () => {
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem('itv.tourSeen', '1'); });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await shown('#loginUser');
   providerDown = true;

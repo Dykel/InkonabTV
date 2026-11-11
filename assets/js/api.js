@@ -598,6 +598,7 @@
       u.searchParams.set('include_video_language', `${base},en`);
       const p = fetch(u).then(r => (r.ok ? r.json() : null)).then(d => d && TMDB.normalize(d, base)).catch(() => null);
       this.cache.set(key, p);
+      if (this.cache.size > 500) this.cache.delete(this.cache.keys().next().value); // a TV left on for weeks
       return p;
     },
     // Titles TMDB ranks highest right now (trending, popular, top rated, in theaters / on air),

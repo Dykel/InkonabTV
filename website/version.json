@@ -1,7 +1,7 @@
 {
-  "versionCode": 23,
-  "versionName": "1.0.22",
-  "sha256": "dfa7fe58d9de5500f67b80c3db1a70d9d1144e38b18d9290be08dcda45bc2d39",
-  "size": 17988320,
-  "notes": "Live keeps playing through network problems: it reconnects by itself, as long as it takes\nThe picture comes back faster after a freeze, even if it looks rough at first\nLive no longer stops on an error screen once a channel has played"
+  "versionCode": 25,
+  "versionName": "1.0.24",
+  "sha256": "98ff1496eeb54f87b35e934998e6dddcd6cf624d6fddf4e4cb73c86795d7d8c7",
+  "size": 17995660,
+  "notes": "Back on the remote now jumps to the menu, where Search and Settings are, and ▼ takes you back to where you were\nOn Movies and Series, the remote moves along the menu again instead of falling into the banner\nA short tour the first time the app opens: replay it any time from Settings → Help"
 }

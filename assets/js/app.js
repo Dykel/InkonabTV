@@ -191,7 +191,10 @@
       this.watchNetwork();
 
       const creds = Store.get('creds');
-      if (!creds) return this.showLogin();
+      // The tour shows the first time the app opens, before signing in; people already
+      // signed in have used the app, so it is marked as seen (Settings → Help replays it).
+      if (creds && !Store.get('tourSeen')) Store.set('tourSeen', 1);
+      if (!creds) return Store.get('tourSeen') || CFG.hotel ? this.showLogin() : this.showTour(() => this.showLogin());
       this.showSplash(true);
       try {
         // Signed in before: open at once with the saved playlist; the server is checked after.
@@ -881,14 +884,117 @@
         if (t.tagName === 'IMG' && !t.dataset.failed) { t.dataset.failed = '1'; t.classList.add('broken'); }
       }, true);
 
+      document.addEventListener('keydown', e => this.backFromMenu(e), true); // before nav.js
       document.addEventListener('keydown', e => {
         if (Player.isOpen()) return;
         const back = e.key === 'Escape' || e.key === 'BrowserBack' || e.key === 'GoBack' ||
           (e.key === 'Backspace' && !e.target.matches('input, textarea'));
         if (!back) return;
         if (!$('#modal').classList.contains('hidden')) { e.preventDefault(); this.closeModal(); }
+        // Inside a screen, Back first goes up to the menu (this screen's tab), where Search and
+        // Settings are; the list keeps its place, so ▼ goes straight back to it. From the menu,
+        // Back goes Home, and on Home to the exit warning.
+        else if (this.api && !$('#app').classList.contains('hidden') && !e.target.closest('.topbar')) { e.preventDefault(); this.focusMenu(); }
         else if (this.api && this.view !== 'home') { e.preventDefault(); location.hash = 'home'; }
       });
+    },
+
+    focusMenu() {
+      const from = document.activeElement;
+      this.menuReturn = from && from.closest('#view') ? { el: from, view: this.view } : null;
+      const tab = $(`.topbar [data-view="${this.view}"]`) || $('.topbar .home-btn');
+      if (tab) tab.focus({ preventScroll: true });
+    },
+
+    // ---------- first-run tour ----------
+    // Five short screens, worded for the device: TV remote, touch screen, or mouse and keyboard.
+    // No catalogue pictures: drawings only. `next` runs when it closes (Get started, Skip or Back).
+    showTour(next) {
+      const html = document.documentElement;
+      const how = html.classList.contains('tv') ? 'tv' : window.Desktop || !matchMedia('(pointer: coarse)').matches ? 'desk' : 'touch';
+      const vpn = (window.Native || window.Desktop && /^(win32|darwin)$/.test(Desktop.platform)) && CFG.vpn !== false && !CFG.hotel;
+      const key = (k, t) => `<li><kbd>${k}</kbd><span>${t}</span></li>`;
+      const backKey = '<svg viewBox="0 0 24 24" aria-label="Back"><path d="M9 7 4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      // Drawn, not font symbols: older TV fonts have no ▦ or ↻.
+      const gridKey = '<svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" fill="currentColor"/></svg>';
+      const againKey = '<svg viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      const art = {
+        remote: `<svg viewBox="0 0 120 150"><rect x="30" y="4" width="60" height="142" rx="26" fill="var(--glass-strong)" stroke="var(--line-strong)" stroke-width="2"/>
+          <circle cx="60" cy="52" r="24" fill="none" stroke="var(--text)" stroke-width="2" opacity=".5"/>
+          <path d="M60 33l-5 6h10zM60 71l-5-6h10zM41 52l6-5v10zM79 52l-6-5v10z" fill="var(--text)"/>
+          <circle cx="60" cy="52" r="10" fill="var(--accent)"/><text x="60" y="56" font-size="9" font-weight="700" text-anchor="middle" fill="var(--accent-ink)">OK</text>
+          <circle cx="44" cy="96" r="9" fill="var(--accent)"/><path d="M47 93h-5l2-2m-2 2 2 2m-2-2h4a3 3 0 0 1 0 6" fill="none" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="76" cy="96" r="9" fill="none" stroke="var(--line-strong)" stroke-width="2"/><rect x="48" y="118" width="24" height="5" rx="2.5" fill="var(--line-strong)"/></svg>`,
+        screen: `<svg viewBox="0 0 160 120"><rect x="6" y="10" width="148" height="92" rx="12" fill="var(--glass-strong)" stroke="var(--line-strong)" stroke-width="2"/>
+          <rect x="16" y="20" width="128" height="14" rx="7" fill="var(--tab)"/><rect x="20" y="24" width="22" height="6" rx="3" fill="var(--accent)"/><circle cx="128" cy="27" r="4" fill="var(--text)" opacity=".6"/><circle cx="138" cy="27" r="4" fill="var(--text)" opacity=".6"/>
+          <rect x="16" y="44" width="34" height="48" rx="6" fill="var(--line-strong)"/><rect x="56" y="44" width="34" height="48" rx="6" fill="var(--line-strong)"/><rect x="96" y="44" width="34" height="48" rx="6" fill="var(--line-strong)"/>
+          <rect x="62" y="104" width="36" height="8" rx="2" fill="var(--line-strong)"/></svg>`,
+        live: `<svg viewBox="0 0 160 120"><rect x="6" y="12" width="148" height="90" rx="12" fill="var(--glass-strong)" stroke="var(--line-strong)" stroke-width="2"/>
+          <path d="m60 4 20 10 20-10" fill="none" stroke="var(--text)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".7"/>
+          <rect x="16" y="22" width="40" height="70" rx="6" fill="var(--tab)"/><rect x="22" y="30" width="28" height="6" rx="3" fill="var(--accent)"/><rect x="22" y="44" width="28" height="5" rx="2.5" fill="var(--line-strong)"/><rect x="22" y="56" width="28" height="5" rx="2.5" fill="var(--line-strong)"/><rect x="22" y="68" width="28" height="5" rx="2.5" fill="var(--line-strong)"/>
+          <path d="M98 44v24l20-12z" fill="var(--accent)"/><circle cx="140" cy="26" r="4" fill="var(--danger)"/></svg>`,
+        films: `<svg viewBox="0 0 160 120"><rect x="14" y="22" width="40" height="60" rx="7" fill="var(--tab)" transform="rotate(-8 34 52)"/><rect x="60" y="14" width="40" height="60" rx="7" fill="var(--line-strong)"/><rect x="106" y="22" width="40" height="60" rx="7" fill="var(--tab)" transform="rotate(8 126 52)"/>
+          <path d="m80 34 3 6.2 6.8 1-4.9 4.8 1.2 6.8L80 49.6l-6.1 3.2 1.2-6.8-4.9-4.8 6.8-1z" fill="var(--accent)"/>
+          <rect x="30" y="94" width="100" height="8" rx="4" fill="var(--tab)"/><rect x="30" y="94" width="62" height="8" rx="4" fill="var(--accent)"/></svg>`,
+        safe: `<svg viewBox="0 0 160 120"><path d="M80 8 120 22v30c0 28-17 46-40 58-23-12-40-30-40-58V22z" fill="var(--glass-strong)" stroke="var(--line-strong)" stroke-width="2"/>
+          <rect x="64" y="52" width="32" height="26" rx="5" fill="var(--accent)"/><path d="M70 52v-7a10 10 0 0 1 20 0v7" fill="none" stroke="var(--accent)" stroke-width="4"/><circle cx="80" cy="64" r="3.5" fill="var(--accent-ink)"/></svg>`,
+      };
+      const ways = {
+        tv: [key('▲ ▼ ◀ ▶', 'Move around'), key('OK', 'Open or play'), key(backKey, 'Jump to the menu at the top: Search and Settings are there')],
+        touch: [key('☰', 'Use the menu at the top to switch between Live TV, TV Guide, Movies and Series'), key('⚙', 'Search and Settings are at the top right'), key('↔', 'Swipe a row sideways to see more')],
+        desk: [key('☰', 'Use the menu at the top to switch between Live TV, TV Guide, Movies and Series'), key('⚙', 'Search and Settings are at the top right'), key('Esc', 'Esc closes a page')],
+      }[how];
+      const live = how === 'tv'
+        ? [key('◀', 'Channel list'), key('▲', 'Other channels in this group'), key('▶', 'Programmes and replays'), key('OK', 'What’s on now'), key('CH + −', 'Next or previous channel')]
+        : [key('▶', 'Tap a channel to watch it'), key(gridKey, 'The TV Guide shows what’s on now and next'), key('★', 'Add channels to Favorites to find them first')];
+      const slides = [
+        { art: `<img src="${esc(CFG.logo)}" alt="">`, title: 'Welcome', text: 'Live TV, the TV guide, movies and series from your own playlist, all in one app.' },
+        { art: how === 'tv' ? art.remote : art.screen, title: 'Getting around', list: ways },
+        { art: art.live, title: 'Live TV', list: live },
+        { art: art.films, title: 'Movies and series', list: [key(gridKey, 'Browse by category or genre'), key('★', 'My List keeps the titles you want to watch'), key('▶', 'Continue Watching on Home picks up where you stopped')] },
+        { art: art.safe, title: 'Private and reliable', list: [key('1234', 'Your login details stay hidden in Settings until you enter your code: 1234, until you change it'),
+          key(againKey, 'Live TV reconnects by itself after a network problem'), ...(vpn ? [key('VPN', 'If a channel won’t play, the free VPN finds another route by itself')] : [])] },
+      ];
+      const m = this.openModal(`
+        <div class="tour-slides">${slides.map((s, i) => `<section class="tour-slide${i ? '' : ' on'}" aria-hidden="${i ? 'true' : 'false'}">
+          <div class="tour-art${i ? '' : ' logo'}">${s.art}</div>
+          <h2>${s.title}</h2>${s.text ? `<p>${s.text}</p>` : ''}${s.list ? `<ul class="tour-list">${s.list.join('')}</ul>` : ''}</section>`).join('')}</div>
+        <div class="tour-foot">
+          <button class="btn ghost" id="tourSkip">Skip</button>
+          <div class="tour-dots" aria-hidden="true">${slides.map((_, i) => `<i${i ? '' : ' class="on"'}></i>`).join('')}</div>
+          <div class="tour-nav"><button class="btn ghost" id="tourPrev" hidden>Previous</button><button class="btn primary" id="tourNext">Next</button></div>
+        </div>`, 'tour');
+      this.modalOnClose = () => { Store.set('tourSeen', 1); if (next) next(); };
+      let at = 0;
+      const els = $$('.tour-slide', m), dots = $$('.tour-dots i', m), prev = $('#tourPrev', m), nextBtn = $('#tourNext', m);
+      const go = k => {
+        if (k >= slides.length) return this.closeModal();
+        at = Math.max(0, k);
+        els.forEach((el, i) => { el.classList.toggle('on', i === at); el.setAttribute('aria-hidden', i === at ? 'false' : 'true'); });
+        dots.forEach((d, i) => d.classList.toggle('on', i === at));
+        prev.hidden = at === 0;
+        nextBtn.textContent = at === slides.length - 1 ? 'Get started' : 'Next';
+        if (document.activeElement === prev && prev.hidden) nextBtn.focus({ preventScroll: true });
+      };
+      nextBtn.addEventListener('click', () => go(at + 1));
+      prev.addEventListener('click', () => go(at - 1));
+      $('#tourSkip', m).addEventListener('click', () => this.closeModal());
+      let x0 = null;
+      m.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+      m.addEventListener('touchend', e => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 60) go(at + (dx < 0 ? 1 : -1)); });
+      nextBtn.focus({ preventScroll: true });
+    },
+
+    // ▼ from the menu after Back: straight back to the item the viewer left (still on screen).
+    backFromMenu(e) {
+      const r = this.menuReturn;
+      if (e.key !== 'ArrowDown' || !r || Player.isOpen() || !document.activeElement.closest('.topbar')) return;
+      this.menuReturn = null;
+      if (r.view !== this.view || !r.el.isConnected || !$('#modal').classList.contains('hidden')) return;
+      const box = r.el.getBoundingClientRect();
+      if (!box.width || box.bottom < 0 || box.top > innerHeight) return;
+      e.preventDefault();
+      r.el.focus({ preventScroll: true });
     },
 
     tickDate() {
@@ -1599,7 +1705,7 @@
       if (!slides.length) { host.remove(); return; }
       host.innerHTML = `
         <div class="slides">${slides.map(({ item, t }, k) => `
-          <div class="slide${k === 0 ? ' on' : ''}"${k === 0 ? '' : ' inert'} style="background-image:url('${esc(t.backdrop.replace('/w1280/', '/original/'))}')">
+          <div class="slide${k === 0 ? ' on' : ''}"${k === 0 ? '' : ' inert'} data-bg="${esc(t.backdrop.replace('/w1280/', '/original/'))}">
             <div class="slide-info">
               <div class="slide-kicker">${esc(t.genres.slice(0, 2).join(', ') || (kind === 'movie' ? 'Movie' : 'Series'))}</div>
               <h2 class="slide-title">${t.logo ? `<img src="${esc(t.logo)}" alt="${esc(t.title)}">` : esc(t.title || item.name)}</h2>
@@ -1620,8 +1726,17 @@
 
       let at = 0;
       const els = $$('.slide', host), dots = $$('.dot', host);
+      // Full-size pictures: only the slide on screen and its two neighbours stay in memory.
+      const paint = () => els.forEach((el, i) => {
+        const d = (i - at + els.length) % els.length;
+        const want = d <= 1 || d === els.length - 1;
+        if (want && !el.style.backgroundImage) el.style.backgroundImage = `url('${el.dataset.bg}')`;
+        else if (!want && el.style.backgroundImage) el.style.backgroundImage = '';
+      });
+      paint();
       const go = k => {
         at = (k + slides.length) % slides.length;
+        paint();
         // The attribute (not the property): 2018–2021 TVs don't know `inert`, and nav.js skips [inert].
         els.forEach((el, i) => { el.classList.toggle('on', i === at); if (i === at) el.removeAttribute('inert'); else el.setAttribute('inert', ''); });
         dots.forEach((d, i) => d.classList.toggle('on', i === at));
@@ -1639,7 +1754,7 @@
       });
       const timer = setInterval(() => {
         if (!host.isConnected) return clearInterval(timer);
-        if (document.hidden || host.matches(':hover') || host.contains(document.activeElement) || !$('#modal').classList.contains('hidden')) return;
+        if (document.hidden || Player.isOpen() || host.matches(':hover') || host.contains(document.activeElement) || !$('#modal').classList.contains('hidden')) return;
         go(at + 1);
       }, 7000);
     },
@@ -1815,7 +1930,9 @@
       const hit = cache.get(v.stream_id);
       if (hit && Date.now() - hit.t < 20 * 60e3) return hit.p;
       const p = this.epgLimit(() => this.api.epgTable(v.stream_id)).catch(() => []);
+      cache.delete(v.stream_id); // keeps the newest last; the oldest goes first below
       cache.set(v.stream_id, { t: Date.now(), p });
+      if (cache.size > 400) cache.delete(cache.keys().next().value);
       return p;
     },
 
@@ -2029,6 +2146,7 @@
       // Switching from one details page to another keeps the original focus target.
       if (!m.contains(document.activeElement)) this.modalReturn = document.activeElement;
       this.detailRefresh = null;
+      this.modalOnClose = null;
       m.className = 'modal ' + cls;
       m.innerHTML = `<div class="sheet">${html}</div>`;
       m.scrollTop = 0;
@@ -2046,6 +2164,9 @@
       if (this.modalReturn && this.modalReturn.isConnected) this.modalReturn.focus({ preventScroll: true });
       if ($('#login').classList.contains('hidden')) this.stopPair();
       if (this.redrawLater && !Player.isOpen()) this.redraw();
+      const after = this.modalOnClose;
+      this.modalOnClose = null;
+      if (after) after();
     },
     closeBtn: () => `<button class="round-btn close" data-close aria-label="Close">${ICONS.close}</button>`,
 
@@ -2597,6 +2718,11 @@
           </div>
         </section>
         <section class="set-group">
+          <h3>Help</h3>
+          <p class="muted small-note">See how to get around the app, with the remote or by touch.</p>
+          <div class="set-row vpn-actions"><button class="btn ghost" id="tourAgain">Show the tour</button></div>
+        </section>
+        <section class="set-group">
           <h3>Playlist links</h3>
           <div class="kv link"><span>M3U</span><code data-secret="m3u">${dots}</code><button class="round-btn sm" data-copy="m3u" aria-label="Copy M3U link" hidden>${ICONS.copy}</button></div>
           ${secrets.epg ? `<div class="kv link"><span>EPG</span><code data-secret="epg">${dots}</code><button class="round-btn sm" data-copy="epg" aria-label="Copy EPG link" hidden>${ICONS.copy}</button></div>` : ''}
@@ -2656,16 +2782,18 @@
           this.toast(d && d.user_info ? 'Relay works ✓' : 'Relay answered, but not with your account');
         } catch { this.toast('Relay not reachable'); }
       });
-      $$('[data-copy]', m).forEach(b => b.addEventListener('click', () => { navigator.clipboard && navigator.clipboard.writeText(secrets[b.dataset.copy]); this.toast('Copied'); }));
+      $$('[data-copy]', m).forEach(b => b.addEventListener('click', () => { if (b.hidden) return; navigator.clipboard && navigator.clipboard.writeText(secrets[b.dataset.copy]); this.toast('Copied'); }));
       $('#clearCw', m).addEventListener('click', () => { Store.set('cw', []); this.toast('Cleared'); this.renderContinue(); });
       $('#logout', m).addEventListener('click', () => this.logout());
+      $('#tourAgain', m).addEventListener('click', () => this.showTour());
       $('#plRefresh', m).addEventListener('click', async e => {
         const b = e.currentTarget;
         b.disabled = true; b.textContent = 'Updating…';
         const changed = await this.api.refreshAll();
         b.disabled = false; b.textContent = 'Refresh now';
         $('#plUpdated', m).textContent = this.ago(this.api.savedAt());
-        if (!changed) this.toast('Couldn’t reach the server — keeping the saved playlist');
+        if (this.api.refreshFailed) this.toast('Couldn’t reach the server — keeping the saved playlist');
+        else if (!changed) this.toast('Your playlist is up to date');
         else if (this.view !== 'home') this.route();
       });
       const langChange = $('#langChange', m);

@@ -95,6 +95,7 @@ select.field option { background: #191c23; }
 .round-btn:hover { background: rgba(60,90,100,.7); }
 .round-btn:focus-visible { outline: 3px solid #fff; outline-offset: 2px; transform: scale(1.06); }
 .round-btn.sm { width: 38px; height: 38px; }
+.round-btn[hidden] { display: none; }
 .round-btn.sm svg { width: 18px; height: 18px; }
 
 .chip { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: .78rem; font-weight: 600; letter-spacing: .03em; color: #c6cbd3; background: rgba(255,255,255,.08); }
@@ -1149,3 +1150,34 @@ img.broken { visibility: hidden; }
   .detail-body { padding-top: 120px; }
   .guide-page { height: calc(100vh - 82px); }
 }
+
+/* First-run tour (no flex gap: 2018 Samsung TVs) */
+.modal.tour .sheet { width: min(720px, 100%); padding: 34px clamp(20px, 4vw, 48px) 24px; text-align: center; }
+.tour-slide { display: none; }
+.tour-slide.on { display: block; animation: tourIn .35s ease; }
+@keyframes tourIn { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
+.tour-art { height: 150px; display: flex; align-items: center; justify-content: center; margin-bottom: 18px; }
+.tour-art svg { height: 140px; width: auto; max-width: 100%; }
+.tour-art.logo img { height: 92px; width: auto; }
+.tour-slide h2 { margin: 0 0 12px; font: 600 2rem var(--font-display); }
+.tour-slide > p { margin: 0 auto; max-width: 520px; color: var(--muted); font-size: 1.12rem; line-height: 1.55; }
+.tour-list { list-style: none; margin: 4px auto 0; padding: 0; max-width: 560px; text-align: left; }
+.tour-list li { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); line-height: 1.4; }
+.tour-list li:last-child { border-bottom: 0; }
+.tour-list kbd { flex: none; min-width: 74px; margin-right: 16px; padding: 6px 10px; border-radius: 9px; text-align: center;
+  background: var(--tab); border: 1px solid var(--line-strong); color: var(--text); font: 600 .95rem/1.2 var(--font-display); white-space: nowrap; }
+.tour-list kbd svg { width: 20px; height: 20px; vertical-align: middle; }
+.tour-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 26px; }
+.tour-foot [hidden] { display: none; }
+.tour-nav .btn + .btn { margin-left: 10px; }
+.tour-dots { display: flex; align-items: center; }
+.tour-dots i { width: 8px; height: 8px; margin: 0 4px; border-radius: 4px; background: var(--line-strong); transition: width .25s, background .25s; }
+.tour-dots i.on { width: 24px; background: var(--accent); }
+@media (max-width: 600px) {
+  .modal.tour .sheet { padding: calc(26px + env(safe-area-inset-top)) var(--gutter) 22px; }
+  .tour-art { height: 112px; margin-bottom: 12px; } .tour-art svg { height: 104px; } .tour-art.logo img { height: 70px; }
+  .tour-slide h2 { font-size: 1.6rem; }
+  .tour-list kbd { min-width: 54px; margin-right: 12px; }
+  .tour-dots { display: none; }
+}
+@media (max-width: 360px) { .tour-nav #tourPrev { display: none; } } /* tiny phones: swipe back instead */

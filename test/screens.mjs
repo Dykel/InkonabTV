@@ -148,6 +148,10 @@ for (const size of SIZES) {
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => localStorage.clear());
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  // First launch: the tour, each screen checked for overflow, then Skip to sign in.
+  await page.waitForSelector('#tourNext', { visible: true });
+  for (let i = 1; i <= 5; i++) await shot('tour-' + i, async () => { if (i > 1) await page.click('#tourNext'); });
+  await page.click('#tourSkip');
   await page.waitForSelector('#loginUser', { visible: true });
   await shot('signin', async () => {});
   await page.evaluate((u, p) => {

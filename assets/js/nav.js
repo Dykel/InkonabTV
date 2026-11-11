@@ -22,7 +22,9 @@
 
   function find(from, dir) {
     const root = scope();
-    const all = [...root.querySelectorAll(FOCUSABLE)].filter(el => el !== from && visible(el));
+    // ◀ ▶ on the menu stay on the menu (the Movies / Series banner sits under it and took the focus).
+    const bar = (dir === 'left' || dir === 'right') && from && from.closest && from.closest('.topbar');
+    const all = [...(bar || root).querySelectorAll(FOCUSABLE)].filter(el => el !== from && visible(el));
     if (!from || from === document.body || !root.contains(from)) return all[0];
     const a = from.getBoundingClientRect();
     const ax = a.left + a.width / 2, ay = a.top + a.height / 2;
@@ -39,7 +41,10 @@
       const overlap = dir === 'up' || dir === 'down'
         ? Math.min(a.right, b.right) - Math.max(a.left, b.left)
         : Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-      const score = Math.max(main, 0) + cross * (overlap > 0 ? 0.3 : 2.5);
+      // Settings is a form: ▲ ▼ go row by row, or a control at the other side of a row gets skipped.
+      const score = (dir === 'up' || dir === 'down') && root.matches('.modal.settings')
+        ? Math.max(main, 0) + cross * 0.02
+        : Math.max(main, 0) + cross * (overlap > 0 ? 0.3 : 2.5);
       if (score < bestScore) { bestScore = score; best = el; }
     }
     return best;
