@@ -741,6 +741,10 @@ img.broken { visibility: hidden; }
 }
 .prog b { font-weight: 600; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prog small { color: var(--muted); font-size: .75rem; white-space: nowrap; }
+/* A programme that started before the visible hours (or "No guide information", which spans the whole
+   day) keeps its title in sight, just right of the channel column, instead of far off to the left. */
+.prog { overflow: visible; }
+.prog > b, .prog > small { position: sticky; left: calc(var(--cell) + 10px); align-self: flex-start; max-width: 100%; }
 .prog.past { opacity: .5; }
 .prog.past.replay { opacity: .9; box-shadow: inset 3px 0 0 var(--accent); }
 .prog.past.replay b { color: #ffe08a; }

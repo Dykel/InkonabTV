@@ -836,6 +836,10 @@ public class PlayerActivity extends AppCompatActivity {
         view.setControllerShowTimeoutMs(3500);
         view.setKeepContentOnPlayerReset(false);
         if (live) {
+            // Live: the controls no longer pop up by themselves at each channel start (◀ ▶ ▲ ▼ then moved
+            // between buttons instead of opening the channel list, programmes, strip and info). The
+            // channel's name still shows at each change (flashTopBar); OK or a key brings the rest.
+            view.setControllerAutoShow(false);
             view.setShowFastForwardButton(false);
             view.setShowRewindButton(false);
             view.setShowNextButton(false);
@@ -1742,8 +1746,19 @@ public class PlayerActivity extends AppCompatActivity {
         startPlayback(startAtMs);
     }
 
+    // Live TV has no timeline to show (it read -00:39 · 01:00 on a moving live window); a catch-up
+    // replay or a paused-then-resumed programme does.
+    private void syncTimeBar() {
+        int vis = live && replayUrl == null ? View.GONE : View.VISIBLE;
+        for (int id : new int[]{ androidx.media3.ui.R.id.exo_time, androidx.media3.ui.R.id.exo_progress }) {
+            View v = view.findViewById(id);
+            if (v != null) v.setVisibility(vis);
+        }
+    }
+
     private void startPlayback(long startAtMs) {
         if (player == null) return; // the player was closed while a retry or the VPN was on its way
+        syncTimeBar();
         try {
             JSONObject ch = current();
             JSONArray versions = ch.getJSONArray("versions");
@@ -2122,6 +2137,12 @@ public class PlayerActivity extends AppCompatActivity {
         if (!live || replayUrl != null) return super.dispatchKeyEvent(e);
         if (down && panelShown()) { main.removeCallbacks(panelTimeout); main.postDelayed(panelTimeout, 10000); }
 
+        // Today's programmes still loading or empty: OK would reach the hidden pause button behind the
+        // panel and freeze the channel. OK closes the panel; ▲ ▼ do nothing.
+        if (schedShown() && schedRows.isEmpty() && (center || code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN)) {
+            if (down && center) { hidePanels(); swallowCenterUp = true; }
+            return true;
+        }
         if (infoShown() || stripShown() || schedShown()) {
             if (down) {
                 if (infoShown() && code == KeyEvent.KEYCODE_DPAD_UP) { hidePanels(); return true; }

@@ -74,7 +74,8 @@
     const hms = m ? +m[1] * 3600 + +m[2] * 60 + +m[3] : 0;
     return hms || Number(info && info.duration_secs) || 0;
   };
-  const fmtDur = secs => { secs = Math.round(secs); const h = Math.floor(secs / 3600), m = Math.round((secs % 3600) / 60); return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m} min`; };
+  // Rounded to the minute first: 1h 59m 40s is "2h 00m", not "1h 60m".
+  const fmtDur = secs => { const t = Math.round(Math.max(0, secs) / 60), h = Math.floor(t / 60), m = t % 60; return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m} min`; };
 
   // Tags the provider puts in names, e.g. "FR - Title (2026) (VOSTFR) [4K-Q]".
   const TAG_NAMES = [
@@ -97,6 +98,7 @@
     const m = s.match(/^([A-Z]{2,4}(?:-[A-Z]{2})?)\s*[-|:]\s+/);
     if (m) { lang = m[1]; s = s.slice(m[0].length); }
     s = s.replace(/\[([^\]]*)(?:\]|$)/g, (_, t) => { t.split(/[/|,]/).map(tagName).forEach(x => x && tags.push(x)); return ''; });
+    s = s.replace(/^\s*[-|:–]\s+/, ''); // "[4K-Q] - WAR": the tag went, its dash too
     s = s.replace(/\(([^)]*)\)/g, (all, t) => {
       if (/^\d{4}$/.test(t)) { year = year || t; return ''; }
       const tag = tagName(t);
@@ -114,6 +116,7 @@
     const tags = [];
     s = s.replace(/\[([^\]]*)(?:\]|$)/g, (_, t) => { t.split(/[/|,]/).map(tagName).forEach(x => x && tags.push(x)); return ''; });
     s = s.replace(/(^|\s)(H\.?265|HEVC|LQ|4K|UHD|FHD)(?=\s|$)/gi, (_, sp, w) => { tags.push(tagName(w)); return sp; });
+    s = s.replace(/^\s*[-|:–]\s+/, '');
     const label = s.replace(/\s{2,}/g, ' ').trim() || String(raw || '');
     const quality = tags.find(t => t in QUALITY_RANK) || '';
     return { label, quality, tags: [...new Set(tags.filter(t => t && t !== quality))] };
@@ -1316,17 +1319,37 @@
 
     // ---------- data ----------
     loadVod() {
-      return this.data.vod || (this.data.vod = this.api.vodStreams().then(list => this.group(list.map(fromVod).sort((a, b) => b.added - a.added))));
+      return this.data.vod || (this.data.vod = Promise.all([this.api.vodStreams(), this.catLangs('movie')])
+        .then(([list, langs]) => this.group(this.fillLang(list.map(fromVod), langs).sort((a, b) => b.added - a.added))));
     },
     loadSeries() {
-      return this.data.series || (this.data.series = this.api.seriesList().then(list => this.group(list.map(fromSeries).sort((a, b) => b.added - a.added))));
+      return this.data.series || (this.data.series = Promise.all([this.api.seriesList(), this.catLangs('series')])
+        .then(([list, langs]) => this.group(this.fillLang(list.map(fromSeries), langs).sort((a, b) => b.added - a.added))));
+    },
+    // Category → its language code ("FR: [4K-Q] SERIES" → FR), for titles whose own name has none
+    // ("[4K-Q] - YAGA" showed as "— Original" next to its French copy).
+    async catLangs(kind) {
+      try {
+        await this.loadCats(kind);
+        const out = {};
+        for (const c of await this.data[kind + 'Cats']) {
+          const m = /^\s*([A-Za-z]{2,5})\s*[:|]/.exec(c.category_name || '');
+          if (m && PLAYLIST_LANGS[m[1].toUpperCase()]) out[String(c.category_id)] = m[1].toUpperCase();
+        }
+        return out;
+      } catch { return {}; }
+    },
+    fillLang(list, langs) {
+      for (const i of list) if (!i.lang && langs[i.cat]) { i.lang = langs[i.cat]; i.catLang = true; }
+      return list;
     },
 
     // Link every copy of the same title (other languages, 4K, MKV/MP4…) through item.versions,
     // best first: info language, French, English, then by resolution.
     group(list) {
       const order = [Settings.tmdbLang.split('-')[0].toUpperCase(), 'FR', 'QFR', 'EN', ''];
-      const langRank = i => { const r = order.indexOf(i.lang); return r < 0 ? order.length : r; };
+      // A language taken from the category doesn't move a copy up: which copy plays first stays as it was.
+      const langRank = i => { const r = order.indexOf(i.catLang ? '' : i.lang); return r < 0 ? order.length : r; };
       const rank = i => langRank(i) * 10 + (QUALITY_RANK[i.quality] ?? 5) + (i.tags.includes('Low quality') || i.tags.includes('CAM') ? 5 : 0);
       const groups = new Map();
       for (const i of list) {
