@@ -107,6 +107,7 @@
       this.video.addEventListener('playing', () => {
         this.setState('playing');
         this.renderAudio();
+        this.renderSubs();
         const it = this.item;
         if (it && it.kind === 'live' && !appleTouch && this.liveOk !== it.title) { this.liveOk = it.title; this.liveGood = Date.now(); }
       });
@@ -158,9 +159,13 @@
         // Guide read from the provider's XMLTV file (its guide calls answer nothing): handed to the
         // native player, a day back to a day ahead, as [title, start, end].
         const x = App.api && App.api.guideApiOff && App.api.xmltvReady, now = Date.now();
+        // The viewer's own guide link (Settings) first, for the channels it covers.
+        const own = Settings.epgUrl && App.api && await OwnGuide.load(App.api).catch(() => null);
         const xmltvProgs = ch => {
+          const cut = list => list.filter(p => p[1] > now - 864e5 && p[0] < now + 864e5).map(p => [p[2], p[0], p[1]]);
+          if (own && ch.versions) for (const v of ch.versions) { const id = own.byStream.get(String(v.stream_id)); if (id && own.progs[id]) return cut(own.progs[id]); }
           const v = x && ch.versions && App.epgStream(ch), id = v && x.byStream.get(String(v.stream_id));
-          return id && x.progs[id] ? x.progs[id].filter(p => p[1] > now - 864e5 && p[0] < now + 864e5).map(p => [p[2], p[0], p[1]]) : undefined;
+          return id && x.progs[id] ? cut(x.progs[id]) : undefined;
         };
         const add = ch => {
           if (!at.has(ch)) {
@@ -204,7 +209,7 @@
           versions: [{ url: it.url || App.api.streamUrl(it.kind, it.id, it.ext || 'mp4'), label: it.kind === 'catchup' ? 'Replay' : alts(it).length ? it.label || '' : '' },
             ...alts(it).map(a => ({ url: App.api.streamUrl(it.kind, a.id, a.ext || 'mp4'), label: a.label || '' }))] });
         payload = {
-          live: false, group: 0, index: 0, version: 0, startAt: item.resumeAt > 5 ? item.resumeAt : 0,
+          live: false, group: 0, index: 0, version: 0, startAt: item.resumeAt > 5 ? item.resumeAt : 0, audioLang: item.audioLang || '',
           channels: [item, ...(item.queue || [])].map(film),
         };
       }
@@ -223,6 +228,7 @@
         if (r.ended && item.onEnded && !(item.queue && item.queue.length)) return item.onEnded();
       } else {
         for (const [k, on] of Object.entries(r.fav || {})) App.setFav('live', k, on);
+        if (r.remindOpen) setTimeout(() => App.openChannelByKey(r.remindOpen), 300);
         for (const k of r.history || []) App.pushRecent(k);
         const g = payload.groups[r.group] || payload.groups[payload.group];
         const ch = g && payload.channels[g.items[r.index]];
@@ -237,6 +243,14 @@
       this.destroy();
       const quiet = item.quiet; // a reconnect: nothing on screen changes
       delete item.quiet;
+      this.livePausedAt = 0;
+      // The channel watched before this one, for "Previous channel" (a retry is the same channel).
+      if (item.kind === 'live' && !item.replay) {
+        const key = item.url || String(item.id);
+        if (this.liveKey && this.liveKey !== key && this.liveItem) this.prevLive = this.liveItem;
+        this.liveKey = key;
+        this.liveItem = item;
+      }
       this.item = item;
       if (this.video.isAV) this.video.keepLive = item.kind === 'live';
       this.freezes = [];
@@ -290,6 +304,7 @@
         const hls = this.hls = new Hls(hlsConfig(item.kind === 'live'));
         hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal && !this.recover(d)) this.fail(d.details); });
         hls.on(Hls.Events.FRAG_BUFFERED, () => { this.recovers = 0; });
+        hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => { if (this.item === item) this.renderSubs(); });
         this.hls.loadSource(url);
         this.hls.attachMedia(v);
       } else if (ext === 'ts' && window.mpegts && mpegts.isSupported()) {
@@ -499,6 +514,8 @@
           ${versions.length > 1 ? `<button class="btn ghost" data-a="quality">Quality · ${App.esc(it.version.quality || 'SD')}</button>` : ''}
           <button class="btn ghost" data-a="list">☰ Channels</button>
           <button class="btn ghost" data-a="sched">Programmes</button>
+          <button class="btn ghost" data-a="pause">${this.livePausedAt ? '▶ Continue' : '⏸ Pause'}</button>
+          ${this.prevLive ? `<button class="btn ghost" data-a="prev">↺ ${App.esc(this.prevLive.title || 'Previous channel')}</button>` : ''}
         </div>`;
       box.querySelector('.pp-acts .btn').focus({ preventScroll: true });
       const list = await this.programmes();
@@ -523,6 +540,8 @@
       if (a === 'fav') { this.toggleFav(); const b = this.info.querySelector('[data-a="fav"]'); b.textContent = (App.isFav('live', this.gkey()) ? '★' : '☆') + ' Favorite'; return; }
       if (a === 'quality') { this.hidePanels(); this.stepVersion(1); return; }
       if (a === 'list') { this.hidePanels(); this.openSide(); return; }
+      if (a === 'prev') { this.hidePanels(); this.previousChannel(); return; }
+      if (a === 'pause') { this.hidePanels(); if (this.livePausedAt) this.resumeLive(); else this.pauseLive(); return; }
       if (a === 'sched') this.openSched();
     },
 
@@ -576,7 +595,7 @@
       list.innerHTML = rows.length ? rows.map((e, i) => {
         const live = e.start <= now && e.end > now, past = e.end <= now, replay = past && ch && App.canReplay(ch, e);
         return `<button class="p-s${live ? ' now' : ''}${past && !replay ? ' off' : ''}" data-p="${i}">
-          <time>${App.hm(e.start)}</time><span class="p-s-title">${App.esc(e.title)}</span>${live ? '<span class="p-epg-tag">Now</span>' : replay ? '<span class="chip">Replay</span>' : ''}</button>`;
+          <time>${App.hm(e.start)}</time><span class="p-s-title">${App.esc(e.title)}</span>${live ? '<span class="p-epg-tag">Now</span>' : replay ? '<span class="chip">Replay</span>' : !past && ch && App.hasReminder(ch.gkey, e.start) ? '<span class="chip">🔔</span>' : ''}</button>`;
       }).join('') : '<p class="muted">No guide information for this channel.</p>';
       const at = list.querySelector('.p-s.now') || list.querySelector('.p-s:not(.off)') || list.querySelector('.p-s');
       if (at) { at.focus({ preventScroll: true }); at.scrollIntoView({ block: 'center' }); }
@@ -591,7 +610,7 @@
         if (!ch || !App.canReplay(ch, prog)) return App.toast(ch && ch.versions && ch.versions.some(v => Number(v.tv_archive)) ? 'This programme is no longer in the replay archive' : 'Replay isn’t available on this channel');
         return this.replay(ch, prog);
       }
-      App.toast(`${prog.title} starts ${App.dayLabel(prog.start).toLowerCase()} at ${App.hm(prog.start)}`);
+      if (ch) { App.toggleReminder(ch, prog); this.openSched(); }
     },
 
     // Keys while a panel is open. Returns true when the key was used.
@@ -648,6 +667,55 @@
         this.play({ ...this.item, id: v.stream_id, url: v.url, radio: v.radio, img: v.stream_icon, title: ch.label, version: v, tried: null, fmtOverride: null,
           list: hit.list, index: hit.index, ...(hit.group ? { groupKey: hit.group.key, subtitle: hit.group.name } : {}) });
       }, 1300);
+    },
+
+    // ---------- pause live TV ----------
+    // Back within 90 s: it carries on from what's loaded. Later: from where it was paused
+    // through the replay archive when the channel has one, else back to live.
+    pauseLive() {
+      const it = this.item;
+      if (!it || it.kind !== 'live' || this.livePausedAt) return;
+      this.livePausedAt = Date.now();
+      this.video.pause();
+      App.toast(`⏸ ${T('Paused at')} ${App.hm(this.livePausedAt)} · ${T('⏯ or OK to continue')}`);
+    },
+    resumeLive() {
+      const at = this.livePausedAt, it = this.item;
+      if (!at || !it) return;
+      this.livePausedAt = 0;
+      if (Date.now() - at < 90000 || it.kind !== 'live') return this.resume();
+      const ch = this.channel();
+      if (ch && ch.versions && ch.versions.some(v => Number(v.tv_archive))) {
+        App.toast(`${T('Continuing from')} ${App.hm(at)} · ${T('Back for live')}`);
+        return this.replay(ch, { title: '⏸ ' + App.hm(at) + ' · ' + (it.title || ''), start: at - 5000, end: Date.now() + 4 * 3600e3 });
+      }
+      App.toast('Back to live: this channel can’t be paused that long');
+      this.play({ ...it, tried: null, fmtOverride: null });
+    },
+
+    // A reminded programme starts: a banner for 25 s; OK (or a click) opens its channel.
+    remindBanner(r, watch) {
+      let b = this.el.querySelector('.p-remind');
+      if (!b) {
+        b = document.createElement('button');
+        b.className = 'p-remind';
+        this.el.appendChild(b);
+      }
+      const here = this.item && this.item.kind === 'live' && this.channel() && this.channel().gkey === r.gkey;
+      b.textContent = `🔔 ${r.title} — ${T('Starts now on')} ${r.ch}${here ? '' : '  ·  ' + T('OK to watch')}`;
+      b.hidden = false;
+      this.remindWatch = here ? null : watch;
+      b.onclick = () => { b.hidden = true; const w = this.remindWatch; this.remindWatch = null; if (w) w(); };
+      clearTimeout(this.remindTimer);
+      this.remindTimer = setTimeout(() => { b.hidden = true; this.remindWatch = null; }, 25000);
+    },
+
+    // Back to the channel watched before (remote's PRE-CH / last-channel key, or the info panel).
+    previousChannel() {
+      const prev = this.prevLive;
+      if (!prev || !this.item || this.item.kind !== 'live') return App.toast('No previous channel yet');
+      this.play({ ...prev, tried: null, fmtOverride: null, quiet: false });
+      if (prev.onZap && prev.list) prev.onZap(prev.list[prev.index]);
     },
 
     zap(step) {
@@ -723,6 +791,11 @@
         .then(list => {
           if (this.item !== item || item.audioFor !== item.rawUrl) return;
           item.audioTracks = Array.isArray(list) ? list : [];
+          if (item.audioLang && !item.audioApplied) {
+            item.audioApplied = true;
+            const i = item.audioTracks.findIndex(t => App.trackLang(t.lang) === item.audioLang);
+            if (i > 0) return this.setAudio(i);
+          }
           this.renderAudio();
         }).catch(() => {});
     },
@@ -732,6 +805,12 @@
       let b = box.querySelector('.p-aud');
       const list = this.audioList();
       if (list.length < 2) { if (b) b.remove(); return; }
+      // The language chosen for this title (playlist languages): picked once, when the file has it.
+      if (this.item && this.item.audioLang && !this.item.audioApplied) {
+        this.item.audioApplied = true;
+        const want = list.find(t => App.trackLang(t.lang) === this.item.audioLang);
+        if (want && !want.on) { this.setAudio(want.id); setTimeout(() => this.renderAudio(), 500); }
+      }
       const at = Math.max(0, list.findIndex(t => t.on));
       if (!b) {
         b = document.createElement('button');
@@ -749,9 +828,73 @@
       b.textContent = `Audio · ${langName(list[at].lang, at)}  ${at + 1}/${list.length}`;
     },
 
-    // Films and series on a TV: ▲ goes up to the top bar (audio language, versions).
+    // ---------- subtitles (off unless chosen; the choice is kept for the next films) ----------
+    textList() {
+      const v = this.video, h = this.hls;
+      try {
+        if (v.isAV && v.textList) return v.textList();
+        if (h && h.subtitleTracks && h.subtitleTracks.length) return h.subtitleTracks.map((t, i) => ({ id: i, lang: t.lang || t.name || '', on: i === h.subtitleTrack }));
+        const tt = [...(v.textTracks || [])].filter(t => t.kind === 'subtitles' || t.kind === 'captions');
+        return tt.map((t, i) => ({ id: i, lang: t.language || t.label || '', on: t.mode === 'showing' }));
+      } catch (e) { return []; }
+    },
+
+    // id < 0: off.
+    setText(id) {
+      const v = this.video, h = this.hls;
+      if (v.isAV && v.setText) v.setText(id);
+      else if (h && h.subtitleTracks && h.subtitleTracks.length) { h.subtitleDisplay = id >= 0; h.subtitleTrack = id; }
+      else [...(v.textTracks || [])].filter(t => t.kind === 'subtitles' || t.kind === 'captions').forEach((t, i) => { t.mode = i === id ? 'showing' : 'disabled'; });
+    },
+
+    renderSubs() {
+      const box = this.el.querySelector('.p-vers'), it = this.item;
+      let b = box.querySelector('.p-sub');
+      const list = it && it.kind !== 'live' ? this.textList() : [];
+      const overlay = this.el.querySelector('.p-subs');
+      if (this.video.isAV && !this.video.onSubtitle) {
+        this.video.onSubtitle = (text, ms) => {
+          overlay.textContent = text;
+          clearTimeout(this.subsTimer);
+          if (text && ms > 0) this.subsTimer = setTimeout(() => { overlay.textContent = ''; }, ms);
+        };
+      }
+      if (!list.length) { if (b) b.remove(); overlay.textContent = ''; return; }
+      // First time this file's tracks are seen: the language chosen last time, if it has it.
+      if (it && !it.subsApplied) {
+        it.subsApplied = true;
+        const want = Settings.subs || '';
+        const pick = want ? list.find(t => langName(t.lang, 0).toLowerCase() === want || String(t.lang).toLowerCase() === want) : null;
+        if (pick && !pick.on) { this.setText(pick.id); setTimeout(() => this.renderSubs(), 500); }
+        else if (!pick && list.some(t => t.on)) this.setText(-1);
+      }
+      const at = list.findIndex(t => t.on);
+      if (!b) {
+        b = document.createElement('button');
+        b.className = 'p-ver p-sub';
+        b.addEventListener('click', () => {
+          const l = this.textList();
+          if (!l.length) return;
+          const i = l.findIndex(t => t.on) + 1; // off → first → … → off
+          if (i >= l.length) {
+            this.setText(-1);
+            Settings.subs = ''; Settings.save();
+            App.toast('Subtitles off');
+          } else {
+            this.setText(l[i].id);
+            Settings.subs = String(l[i].lang || '').toLowerCase(); Settings.save();
+            App.toast('Subtitles: ' + langName(l[i].lang, i));
+          }
+          setTimeout(() => this.renderSubs(), 500);
+        });
+        box.appendChild(b);
+      }
+      b.textContent = at < 0 ? 'Subtitles · Off' : `Subtitles · ${langName(list[at].lang, at)}  ${at + 1}/${list.length}`;
+    },
+
+    // Films and series on a TV: ▲ goes up to the top bar (audio language, subtitles, versions).
     focusBar() {
-      const b = this.el.querySelector('.p-aud') || this.el.querySelector('.p-ver.on') || this.el.querySelector('.p-top button');
+      const b = this.el.querySelector('.p-aud') || this.el.querySelector('.p-sub') || this.el.querySelector('.p-ver.on') || this.el.querySelector('.p-top button');
       if (!b || !b.offsetParent) return false;
       this.poke();
       b.focus({ preventScroll: true });
@@ -1016,6 +1159,13 @@
         else { this.nextOff = true; this.upNext(); }
         return;
       }
+      // A reminder banner is up: OK opens that channel.
+      if (e.key === 'Enter' && this.remindWatch) {
+        e.preventDefault(); e.stopPropagation();
+        const b = this.el.querySelector('.p-remind');
+        if (b) b.click();
+        return;
+      }
       this.poke();
       if (live && this.sideOpen()) { if (this.sideKey(e)) e.stopPropagation(); return; }
       const panel = this.panel();
@@ -1023,6 +1173,16 @@
       const tv = document.documentElement.classList.contains('tv');
       if (tv && this.barFocused() && this.barKey(e)) { e.preventDefault(); e.stopPropagation(); return; }
       if (live && /^[0-9]$/.test(e.key) && !e.target.matches('input')) { e.preventDefault(); this.digit(e.key); return; }
+      if (live && this.livePausedAt && e.key === 'Enter' && this.mediaFocused()) {
+        e.preventDefault(); e.stopPropagation();
+        this.resumeLive();
+        return;
+      }
+      if (live && ['MediaPlayPause', 'MediaPause', 'MediaPlay'].includes(e.key)) {
+        e.preventDefault(); e.stopPropagation();
+        if (e.key === 'MediaPause' || (e.key === 'MediaPlayPause' && !this.livePausedAt)) this.pauseLive(); else this.resumeLive();
+        return;
+      }
       if (live && e.key === 'Enter' && this.mediaFocused()) {
         e.preventDefault(); e.stopPropagation();
         this.openInfo();
@@ -1036,6 +1196,8 @@
           if (live) { e.preventDefault(); e.stopPropagation(); this.zap(-1); } break;
         case 'PageDown': case 'ChannelUp':
           if (live) { e.preventDefault(); e.stopPropagation(); this.zap(1); } break;
+        case 'PreviousChannel': case 'MediaLast':
+          if (live) { e.preventDefault(); e.stopPropagation(); this.previousChannel(); } break;
         case 'ArrowUp':
           if (live) { e.preventDefault(); e.stopPropagation(); this.openStrip(); }
           else if (tv && this.focusBar()) { e.preventDefault(); e.stopPropagation(); } break;
@@ -1071,6 +1233,8 @@
       if (this.hls) { this.hls.destroy(); this.hls = null; }
       if (this.ts) { try { this.ts.destroy(); } catch {} this.ts = null; }
       if (this.soundCheck) { this.video.removeEventListener('timeupdate', this.soundCheck); this.soundCheck = null; }
+      clearTimeout(this.subsTimer);
+      this.el.querySelector('.p-subs').textContent = '';
       if (this.stopConv) { this.stopConv(); this.stopConv = null; }
       this.video.pause();
       this.video.removeAttribute('src');

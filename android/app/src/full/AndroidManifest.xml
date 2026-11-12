@@ -17,10 +17,45 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="vpn" />
         </service>
+
+        <!-- Recording live channels to a USB drive (InkonabTV+ only). -->
+        <service
+            android:name=".rec.RecordService"
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Records a live TV channel to a USB drive at the time the viewer chose" />
+        </service>
+        <receiver
+            android:name=".rec.RecordAlarm"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="tv.inkonab.app.REC" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- "Open InkonabTV when the TV turns on" (a setting, off by default). -->
+        <receiver
+            android:name=".start.AutoStart"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Updates itself from the InkonabTV download site (the Play version updates through Play). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Opening when the TV turns on (only if the viewer turns that setting on). Android 10+
+         allows it only with "Display over other apps". -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Scheduled recordings start on time (sideload version only, not on Google Play). -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 </manifest>

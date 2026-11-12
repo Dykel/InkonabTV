@@ -27,7 +27,7 @@
   // ---------- remote keys ----------
   // Register the keys the app uses; map their key codes to the names the app listens for.
   const wanted = ['MediaPlayPause', 'MediaPlay', 'MediaPause', 'MediaStop', 'MediaFastForward', 'MediaRewind',
-    'ChannelUp', 'ChannelDown', 'Info', 'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue',
+    'ChannelUp', 'ChannelDown', 'PreviousChannel', 'Info', 'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue',
     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
   const byCode = {};
   try {
@@ -177,6 +177,8 @@
           onstreamcompleted: () => { screenSaver(true); this.emit('ended'); },
           onerror: err => { if (this.url === mine && !this.reconnect()) { this.error = err; this.emit('error'); } },
           onevent: () => {},
+          // Subtitle lines arrive as text; the page draws them (player.js, .p-subs).
+          onsubtitlechange: (duration, text) => { if (this.url === mine && this.onSubtitle) this.onSubtitle(String(text || ''), Number(duration) || 0); },
         });
         av.prepareAsync(() => {
           if (this.url !== mine) return;
@@ -184,6 +186,8 @@
           this.dur = d > 0 ? d / 1000 : Infinity;
           this.emit('loadedmetadata');
           if (this.pendingSeek) { try { av.seekTo(this.pendingSeek * 1000); } catch (e) {} this.pendingSeek = 0; }
+          // Subtitles stay hidden until the viewer picks a language (player.js).
+          try { av.setSilentSubtitle(!this.subsOn); } catch (e) {}
           av.play();
           this.isPaused = false;
           screenSaver(false);
@@ -230,6 +234,27 @@
       } catch (e) { return []; }
     },
     setAudio(id) { try { av.setSelectTrack('AUDIO', id); } catch (e) {} },
+    // Subtitle languages of the file; on: the one shown (none while they're off).
+    textList() {
+      try {
+        let cur = -1;
+        try { const a = (av.getCurrentStreamInfo() || []).filter(t => t.type === 'TEXT')[0]; if (a) cur = Number(a.index); } catch (e) {}
+        return (av.getTotalTrackInfo() || []).filter(t => t.type === 'TEXT').map(t => {
+          let x = {};
+          try { x = JSON.parse(t.extra_info || '{}'); } catch (e) {}
+          return { id: Number(t.index), lang: x.track_lang || x.language || '', on: !!this.subsOn && Number(t.index) === cur };
+        });
+      } catch (e) { return []; }
+    },
+    // id < 0: off.
+    setText(id) {
+      try {
+        if (id < 0) { this.subsOn = false; av.setSilentSubtitle(true); if (this.onSubtitle) this.onSubtitle('', 0); return; }
+        av.setSelectTrack('TEXT', id);
+        av.setSilentSubtitle(false);
+        this.subsOn = true;
+      } catch (e) {}
+    },
     pause() { try { av.pause(); this.isPaused = true; screenSaver(true); } catch (e) {} },
     get paused() { return this.isPaused; },
     get duration() { return this.dur; },

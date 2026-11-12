@@ -1,6 +1,7 @@
 package tv.inkonab.app;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -108,7 +109,10 @@ public class PlayerActivity extends AppCompatActivity {
     private JSONArray channels;
     private final List<Group> groups = new ArrayList<>();
     private String template = "";
+    private String audioLang = "";
     private int group, index, version;
+    // The channel watched before this one (Previous channel), and the one shown now.
+    private int prevGroup = -1, prevIndex = -1, seenGroup = -1, seenIndex = -1;
     private boolean live, ended, controlsShown;
 
     private final ArrayList<String> history = new ArrayList<>();
@@ -133,6 +137,11 @@ public class PlayerActivity extends AppCompatActivity {
     private View topBar;
     private TextView titleView, subView, qualityView, favChip, errorView, numView;
     private TextView audioView;          // audio language, shown when the file has more than one
+    private TextView subsView;           // subtitles: off or a language, shown when the file has some
+    private TextView remindView;         // "programme starts now" banner (reminders)
+    private String remindGkey;           // the channel that banner opens with OK
+    private String remindOpen;           // closing to open that channel in the app (from a film)
+    private long livePausedAt;           // live TV paused (0: playing)
     private long filmStartMs;            // where a film or episode was asked to start (resume)
     private ImageView radioArt;
     private LinearLayout side;
@@ -159,6 +168,7 @@ public class PlayerActivity extends AppCompatActivity {
             channels = p.getJSONArray("channels");
             live = p.optBoolean("live", false);
             template = p.optString("template", "");
+            audioLang = p.optString("audioLang", "");
             epgTpl = p.optString("epg", "");
             cuTpl = p.optString("catchup", "");
             tz = p.optString("tz", "UTC");
@@ -220,6 +230,9 @@ public class PlayerActivity extends AppCompatActivity {
                 }))
             .setLoadControl(buffers)
             .build();
+        if (!live) applySubsPref();
+        // The language chosen for this title (from the playlist languages): ExoPlayer starts with it.
+        if (!live && !audioLang.isEmpty()) player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon().setPreferredAudioLanguage(audioLang).build());
         // Live keeps the CPU and the network awake for as long as the channel plays.
         if (live) {
             player.setWakeMode(C.WAKE_MODE_NETWORK);
@@ -229,7 +242,7 @@ public class PlayerActivity extends AppCompatActivity {
         view.setPlayer(player);
         player.addListener(new Player.Listener() {
             @Override
-            public void onTracksChanged(Tracks tracks) { updateAudio(tracks); }
+            public void onTracksChanged(Tracks tracks) { updateAudio(tracks); updateSubs(tracks); }
 
             @Override
             public void onPlaybackStateChanged(int state) {
@@ -479,6 +492,7 @@ public class PlayerActivity extends AppCompatActivity {
     // A channel or quality chosen by the viewer starts a fresh recovery cycle.
     private void freshStart() {
         livePlayed = false;
+        livePausedAt = 0;
         liveRestartQueued = false;
         liveRestarts = 0;
         liveGen++;
@@ -861,6 +875,10 @@ public class PlayerActivity extends AppCompatActivity {
         audioView.setVisibility(View.GONE);
         audioView.setOnClickListener(v -> nextAudio());
         bar.addView(audioView);
+        subsView = chip("", false);
+        subsView.setVisibility(View.GONE);
+        subsView.setOnClickListener(v -> nextSubs());
+        bar.addView(subsView);
         vpnChip = chip("VPN off", false);
         vpnChip.setFocusable(false);
         bar.addView(vpnChip);
@@ -903,6 +921,13 @@ public class PlayerActivity extends AppCompatActivity {
         upLp.setMargins(0, 0, dp(36), dp(130));
         root.addView(upNext, upLp);
 
+        remindView = text(20, Color.BLACK, true);
+        remindView.setBackground(rounded(0xF2FBC50C, 18));
+        remindView.setPadding(dp(22), dp(12), dp(22), dp(12));
+        remindView.setVisibility(View.GONE);
+        root.addView(remindView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        ((FrameLayout.LayoutParams) remindView.getLayoutParams()).topMargin = dp(28);
+        main.postDelayed(remindCheck, 4000);
         numView = text(56, ACCENT, true);
         numView.setPadding(dp(24), dp(8), dp(24), dp(8));
         numView.setBackground(rounded(0x99000000, 18));
@@ -1221,7 +1246,7 @@ public class PlayerActivity extends AppCompatActivity {
                 boolean on = pr.start <= now && pr.end > now, past = pr.end <= now, replay = past && canReplay(current(), pr);
                 ((TextView) row.getChildAt(0)).setText(hm(pr.start));
                 ((TextView) row.getChildAt(1)).setText(pr.title);
-                ((TextView) row.getChildAt(2)).setText(on ? "NOW" : replay ? "⟲ REPLAY" : "");
+                ((TextView) row.getChildAt(2)).setText(on ? "NOW" : replay ? "⟲ REPLAY" : !past && hasReminder(current().optString("gkey"), pr.start) ? "🔔" : "");
                 row.setBackground(on ? rounded(0x30FBC50C, 12) : null);
                 row.setAlpha(past && !replay ? 0.5f : 1f);
                 return row;
@@ -1295,8 +1320,19 @@ public class PlayerActivity extends AppCompatActivity {
             ((TextView) v).setText(current().optBoolean("fav") ? "★ Favorite" : "☆ Favorite");
         });
         if (hasVersions()) act("Quality · " + current().optJSONArray("versions").optJSONObject(version).optString("label", ""), v -> { hidePanels(); switchVersion(1); });
+        act(livePausedAt > 0 ? "▶ Continue" : "⏸ Pause", v -> { hidePanels(); if (livePausedAt > 0) resumeLive(); else pauseLive(); });
+        if (tv.inkonab.app.rec.Recorder.AVAILABLE) {
+            String recId = recordingNow(ch.optString("title"));
+            act(recId != null ? "⏹ Stop recording" : "⏺ Record", v -> {
+                hidePanels();
+                if (recId != null) { tv.inkonab.app.rec.Recorder.stop(this, recId); Toast.makeText(this, "Recording stopped", Toast.LENGTH_SHORT).show(); return; }
+                recordNow(now[0]);
+            });
+        }
         act("☰ Channels", v -> { hidePanels(); openSide(); });
         act("Programmes", v -> openSched());
+        if (prevGroup >= 0 && prevGroup < groups.size() && prevIndex < groups.get(prevGroup).items.length)
+            act("↺ " + channelAt(groups.get(prevGroup).items[prevIndex]).optString("title"), v -> { hidePanels(); previousChannel(); });
         infoActs.getChildAt(0).requestFocus();
         int flat = flatIndex();
         programmes(ch, list -> {
@@ -1411,7 +1447,102 @@ public class PlayerActivity extends AppCompatActivity {
             else Toast.makeText(this, ch.optString("cu").isEmpty() ? "Replay isn’t available on this channel" : "This programme is no longer in the replay archive", Toast.LENGTH_SHORT).show();
             return;
         }
-        Toast.makeText(this, p.title + " starts at " + hm(p.start), Toast.LENGTH_SHORT).show();
+        toggleReminder(ch, p);
+        if (schedAdapter != null) schedAdapter.notifyDataSetChanged();
+    }
+
+    // ---------- programme reminders ----------
+    // Shared with the app's screens through prefs "player": "reminders" = [{ id, gkey, ch, title,
+    // start, end }] and "remFired" = ids already announced. The player announces what starts
+    // while it's open; the app does it the rest of the time.
+
+    private JSONArray reminders() {
+        try { return new JSONArray(getSharedPreferences("player", MODE_PRIVATE).getString("reminders", "[]")); }
+        catch (Exception e) { return new JSONArray(); }
+    }
+
+    private void saveReminders(JSONArray a) { getSharedPreferences("player", MODE_PRIVATE).edit().putString("reminders", a.toString()).apply(); }
+
+    private boolean hasReminder(String gkey, long start) {
+        JSONArray a = reminders();
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject r = a.optJSONObject(i);
+            if (r != null && gkey.equals(r.optString("gkey")) && r.optLong("start") == start) return true;
+        }
+        return false;
+    }
+
+    private void toggleReminder(JSONObject ch, Prog p) {
+        String gkey = ch.optString("gkey");
+        if (gkey.isEmpty()) return;
+        JSONArray a = reminders(), out = new JSONArray();
+        boolean removed = false;
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject r = a.optJSONObject(i);
+            if (r == null || r.optLong("end") < now) continue;
+            if (gkey.equals(r.optString("gkey")) && r.optLong("start") == p.start) { removed = true; continue; }
+            out.put(r);
+        }
+        if (!removed) {
+            try {
+                out.put(new JSONObject().put("id", gkey + ":" + p.start).put("gkey", gkey).put("ch", ch.optString("title"))
+                        .put("title", p.title).put("start", p.start).put("end", p.end));
+            } catch (Exception ignored) {}
+        }
+        saveReminders(out);
+        Toast.makeText(this, removed ? "Reminder removed" : "🔔 Reminder set: " + p.title + " at " + hm(p.start), Toast.LENGTH_SHORT).show();
+    }
+
+    private final Runnable hideRemind = () -> { if (remindView != null) remindView.setVisibility(View.GONE); remindGkey = null; };
+
+    private final Runnable remindCheck = new Runnable() {
+        @Override public void run() {
+            checkReminders();
+            main.postDelayed(this, 15000);
+        }
+    };
+
+    private void checkReminders() {
+        android.content.SharedPreferences prefs = getSharedPreferences("player", MODE_PRIVATE);
+        JSONArray a = reminders();
+        java.util.Set<String> fired = new java.util.HashSet<>();
+        try { JSONArray f = new JSONArray(prefs.getString("remFired", "[]")); for (int i = 0; i < f.length(); i++) fired.add(f.optString(i)); } catch (Exception ignored) {}
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject r = a.optJSONObject(i);
+            if (r == null) continue;
+            long start = r.optLong("start");
+            String id = r.optString("id");
+            if (start > now + 30000 || start < now - 5 * 60000 || fired.contains(id)) continue;
+            fired.add(id);
+            prefs.edit().putString("remFired", new JSONArray(fired).toString()).apply();
+            String gkey = r.optString("gkey");
+            boolean here = live && gkey.equals(current().optString("gkey"));
+            remindGkey = here ? null : gkey;
+            remindView.setText("🔔 " + r.optString("title") + " starts now on " + r.optString("ch") + (here ? "" : "   ·   OK to watch"));
+            remindView.setVisibility(View.VISIBLE);
+            main.removeCallbacks(hideRemind);
+            main.postDelayed(hideRemind, 25000);
+            return; // one at a time
+        }
+    }
+
+    /** OK on the banner: that channel, here if it's in the player's lists, else back in the app. */
+    private void openReminder() {
+        String gkey = remindGkey;
+        hideRemind.run();
+        if (gkey == null) return;
+        if (live) {
+            for (int g = 0; g < groups.size(); g++) {
+                int[] items = groups.get(g).items;
+                for (int i = 0; i < items.length; i++) {
+                    if (gkey.equals(channelAt(items[i]).optString("gkey"))) { group = g; index = i; version = 0; freshStart(); load(0); return; }
+                }
+            }
+        }
+        remindOpen = gkey;
+        finishWithResult();
     }
 
     // ---------- channel list (groups | channels) ----------
@@ -1636,6 +1767,10 @@ public class PlayerActivity extends AppCompatActivity {
             if (live) {
                 String key = ch.optString("gkey");
                 if (!key.isEmpty() && (history.isEmpty() || !history.get(history.size() - 1).equals(key))) history.add(key);
+                if (replayUrl == null && (group != seenGroup || index != seenIndex)) {
+                    if (seenGroup >= 0) { prevGroup = seenGroup; prevIndex = seenIndex; }
+                    seenGroup = group; seenIndex = index;
+                }
             }
 
             MediaItem.Builder item = new MediaItem.Builder().setUri(Uri.parse(url));
@@ -1683,9 +1818,86 @@ public class PlayerActivity extends AppCompatActivity {
         }).start();
     }
 
+    // ---------- recording (InkonabTV+: to a USB drive) ----------
+
+    /** The id of the recording running on this channel now, or null. */
+    private String recordingNow(String chTitle) {
+        org.json.JSONArray a = tv.inkonab.app.rec.Recorder.list(this);
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject j = a.optJSONObject(i);
+            if (j != null && chTitle.equals(j.optString("ch")) && "recording".equals(j.optString("status"))) return j.optString("id");
+        }
+        return null;
+    }
+
+    /** Records this channel until the programme on now ends (an hour when there's no guide). */
+    private void recordNow(Prog cur) {
+        JSONObject ch = current();
+        JSONArray vs = ch.optJSONArray("versions");
+        if (vs == null || vs.length() == 0) return;
+        String url = urlOf(vs.optJSONObject(Math.min(version, vs.length() - 1)));
+        // The stream as MPEG-TS: one continuous file, which plays anywhere.
+        if (url.endsWith(".m3u8")) url = url.substring(0, url.length() - 5) + ".ts";
+        long now = System.currentTimeMillis();
+        long end = cur != null && cur.end > now ? cur.end + 2 * 60000 : now + 3600000;
+        try {
+            JSONObject job = new JSONObject().put("title", cur != null ? cur.title : ch.optString("title"))
+                    .put("ch", ch.optString("title")).put("url", url).put("start", now).put("end", end);
+            String why = tv.inkonab.app.rec.Recorder.add(this, job);
+            Toast.makeText(this, why.isEmpty() ? "⏺ Recording until " + hm(end) + " on the USB drive" : why, Toast.LENGTH_LONG).show();
+        } catch (Exception ignored) {}
+    }
+
+    // ---------- pause live TV ----------
+    // ⏯ (or ⏸ in the info panel) pauses. Back within 90 s: it carries on from what's loaded
+    // (the live buffer holds 2 minutes). Later: from the moment it was paused through the
+    // channel's replay archive when it has one, else back to live.
+    private static final long PAUSE_BUFFERED = 90000;
+
+    private void pauseLive() {
+        if (!live || player == null || livePausedAt > 0) return;
+        livePausedAt = System.currentTimeMillis();
+        player.pause();
+        showInfo("⏸  Paused at " + hm(livePausedAt) + "\n⏯ or OK to continue");
+    }
+
+    private void resumeLive() {
+        if (livePausedAt == 0 || player == null) return;
+        long at = livePausedAt, gone = System.currentTimeMillis() - at;
+        livePausedAt = 0;
+        errorView.setVisibility(View.GONE);
+        if (gone < PAUSE_BUFFERED || replayUrl != null) { player.play(); return; }
+        String cu = current().optString("cu");
+        if (!cu.isEmpty() && !cuTpl.isEmpty()) {
+            // From where it was paused, through the archive; Back (or ⏹) returns to live.
+            replayUrl = catchupUrl(cu, new Prog("", at - 5000, System.currentTimeMillis() + 4 * 3600000L, true));
+            replayTitle = "⏸ " + hm(at) + " · " + current().optString("title");
+            Toast.makeText(this, "Continuing from " + hm(at) + " · Back for live", Toast.LENGTH_LONG).show();
+            startPlayback(0);
+            return;
+        }
+        Toast.makeText(this, "Back to live: this channel can't be paused that long", Toast.LENGTH_LONG).show();
+        freshStart();
+        load(0);
+    }
+
+    // Back to the channel watched before (remote's last-channel key, or the info panel).
+    private void previousChannel() {
+        if (!live || prevGroup < 0 || prevGroup >= groups.size() || prevIndex >= groups.get(prevGroup).items.length) {
+            Toast.makeText(this, "No previous channel yet", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        group = prevGroup;
+        index = prevIndex;
+        version = 0;
+        freshStart();
+        load(0);
+    }
+
     private void zap(int step) {
         int n = groups.get(group).items.length;
         if (!live || n < 2) return;
+        livePausedAt = 0;
         index = (index + step + n) % n;
         version = 0;
         freshStart();
@@ -1704,6 +1916,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private View filmChip() {
         if (audioView != null && audioView.getVisibility() == View.VISIBLE) return audioView;
+        if (subsView != null && subsView.getVisibility() == View.VISIBLE) return subsView;
         if (qualityView != null && qualityView.getVisibility() == View.VISIBLE && qualityView.length() > 0) return qualityView;
         return null;
     }
@@ -1722,6 +1935,13 @@ public class PlayerActivity extends AppCompatActivity {
             return true;
         }
         if (code == KeyEvent.KEYCODE_DPAD_DOWN && inBar && barActive) { hideBar(); view.showController(); return true; }
+        // ◀ ▶ move between the bar's buttons (Audio, Subtitles, quality…); the video controls
+        // would otherwise take these keys.
+        if ((code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) && inBar && barActive) {
+            View n = f.focusSearch(code == KeyEvent.KEYCODE_DPAD_LEFT ? View.FOCUS_LEFT : View.FOCUS_RIGHT);
+            if (n != null && inside(n, topBar)) n.requestFocus();
+            return true;
+        }
         return false;
     }
 
@@ -1777,6 +1997,68 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, "Audio: " + audioName(f, next), Toast.LENGTH_SHORT).show();
     }
 
+    // ---------- subtitles ----------
+    // Off by default. OK on the chip goes Off → each language → Off. The last choice is kept
+    // (prefs "subs": a language, or "off") and the following films and episodes start with it.
+
+    private static List<Tracks.Group> textGroups(Tracks tracks) {
+        List<Tracks.Group> out = new ArrayList<>();
+        for (Tracks.Group g : tracks.getGroups()) if (g.getType() == C.TRACK_TYPE_TEXT && g.isSupported()) out.add(g);
+        return out;
+    }
+
+    private int selectedText(List<Tracks.Group> gs) {
+        if (player == null || player.getTrackSelectionParameters().disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) return -1;
+        for (int i = 0; i < gs.size(); i++) if (gs.get(i).isSelected()) return i;
+        return -1;
+    }
+
+    private void updateSubs(Tracks tracks) {
+        if (subsView == null) return;
+        List<Tracks.Group> gs = textGroups(tracks);
+        if (gs.isEmpty() || live) { subsView.setVisibility(View.GONE); return; }
+        int sel = selectedText(gs);
+        subsView.setText(sel < 0 ? "Subtitles · Off" : "Subtitles · " + subsName(gs.get(sel).getTrackFormat(0), sel) + "  " + (sel + 1) + "/" + gs.size());
+        subsView.setVisibility(View.VISIBLE);
+    }
+
+    private static String subsName(Format f, int i) {
+        String name = audioName(f, i);
+        return name.replace(" 5.1", "");
+    }
+
+    private void nextSubs() {
+        if (player == null) return;
+        List<Tracks.Group> gs = textGroups(player.getCurrentTracks());
+        if (gs.isEmpty()) return;
+        int next = selectedText(gs) + 1; // -1 (off) → 0, last → off
+        TrackSelectionParameters.Builder b = player.getTrackSelectionParameters().buildUpon();
+        SharedPreferences prefs = getSharedPreferences("player", MODE_PRIVATE);
+        if (next >= gs.size()) {
+            b.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).clearOverridesOfType(C.TRACK_TYPE_TEXT);
+            prefs.edit().putString("subs", "off").apply();
+            Toast.makeText(this, "Subtitles off", Toast.LENGTH_SHORT).show();
+        } else {
+            Tracks.Group g = gs.get(next);
+            Format f = g.getTrackFormat(0);
+            b.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).setOverrideForType(new TrackSelectionOverride(g.getMediaTrackGroup(), 0));
+            if (f.language != null && !"und".equals(f.language)) b.setPreferredTextLanguage(f.language);
+            prefs.edit().putString("subs", f.language != null ? f.language : "und").apply();
+            Toast.makeText(this, "Subtitles: " + subsName(f, next), Toast.LENGTH_SHORT).show();
+        }
+        player.setTrackSelectionParameters(b.build());
+    }
+
+    /** Subtitles as last chosen: a language, or off (the default). */
+    private void applySubsPref() {
+        if (player == null) return;
+        String want = getSharedPreferences("player", MODE_PRIVATE).getString("subs", "off");
+        TrackSelectionParameters.Builder b = player.getTrackSelectionParameters().buildUpon();
+        if ("off".equals(want)) b.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
+        else b.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).setPreferredTextLanguage("und".equals(want) ? null : want).setSelectUndeterminedTextLanguage(true);
+        player.setTrackSelectionParameters(b.build());
+    }
+
     private void switchVersion(int step) {
         JSONArray vs = current().optJSONArray("versions");
         if (vs == null || vs.length() < 2) return;
@@ -1828,6 +2110,11 @@ public class PlayerActivity extends AppCompatActivity {
 
         // The OK press that opened the list must not also "click" the first channel.
         if (center && !down && swallowCenterUp) { swallowCenterUp = false; return true; }
+        // A reminder banner is up: OK opens that channel.
+        if (center && remindGkey != null && remindView != null && remindView.getVisibility() == View.VISIBLE) {
+            if (down) openReminder();
+            return true;
+        }
         if (center && down && upNextShown()) { playNextNow(); return true; }
         // Films and series: ▲ goes up to the top bar (audio language, version), ◀ ▶ move along
         // it, OK changes, ▼ or Back comes back to the playback controls.
@@ -1877,6 +2164,7 @@ public class PlayerActivity extends AppCompatActivity {
                 case KeyEvent.KEYCODE_ENTER:
                 case KeyEvent.KEYCODE_NUMPAD_ENTER:
                 case KeyEvent.KEYCODE_GUIDE:
+                    if (livePausedAt > 0 && code != KeyEvent.KEYCODE_GUIDE && !infoShown()) { if (e.getRepeatCount() == 0) { swallowCenterUp = center; resumeLive(); } return true; }
                     if (controlsShown) break; // OK on a visible player button
                     if (e.getRepeatCount() == 0) {
                         swallowCenterUp = center;
@@ -1896,6 +2184,16 @@ public class PlayerActivity extends AppCompatActivity {
                 case KeyEvent.KEYCODE_CHANNEL_UP:
                 case KeyEvent.KEYCODE_PAGE_DOWN:
                     zap(1); return true;
+                case KeyEvent.KEYCODE_LAST_CHANNEL:
+                    previousChannel(); return true;
+                case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                case KeyEvent.KEYCODE_SPACE:
+                    if (livePausedAt > 0) resumeLive(); else pauseLive();
+                    return true;
+                case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                    pauseLive(); return true;
+                case KeyEvent.KEYCODE_MEDIA_PLAY:
+                    resumeLive(); return true;
                 case KeyEvent.KEYCODE_DPAD_DOWN:
                     if (!controlsShown) { openInfo(); return true; } break;
                 case KeyEvent.KEYCODE_DPAD_UP:
@@ -1926,6 +2224,7 @@ public class PlayerActivity extends AppCompatActivity {
         data.putExtra("version", version);
         data.putExtra("history", new JSONArray(history).toString());
         data.putExtra("fav", favChanges.toString());
+        if (remindOpen != null) data.putExtra("remindOpen", remindOpen);
         setResult(RESULT_OK, data);
         finish();
     }

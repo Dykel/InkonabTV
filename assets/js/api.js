@@ -105,9 +105,23 @@
 
   // Reads an XMLTV guide as it downloads: { channelId: [[start, end, title, description], …] },
   // only for the channels in `want` and from a week back to two days ahead.
-  async function readXmltv(url, want) {
+  // names (a guide from elsewhere, whose channel ids aren't the provider's): Map(name → stream
+  // ids); a <channel> whose display name matches joins `want`, and found gets id → stream ids.
+  // Compressed guides (.xml.gz) are unpacked on the way.
+  async function readXmltv(url, want, names, found) {
     const res = await fetch(url);
     if (!res.ok) throw new Error('Guide ' + res.status);
+    let body = res.body;
+    if (body && body.getReader && window.DecompressionStream) {
+      const r0 = body.getReader();
+      const first = await r0.read();
+      const head = first.value || new Uint8Array(0);
+      const rest = new ReadableStream({
+        start(c) { if (head.length) c.enqueue(head); },
+        async pull(c) { const { done, value } = await r0.read(); if (done) c.close(); else c.enqueue(value); },
+      });
+      body = head[0] === 0x1f && head[1] === 0x8b ? rest.pipeThrough(new DecompressionStream('gzip')) : rest;
+    }
     const from = Date.now() - 8 * 864e5, to = Date.now() + 2 * 864e5;
     const out = {};
     const time = s => {
@@ -118,6 +132,17 @@
     };
     const text = s => (s || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
       .replace(/&(#x?[0-9a-f]+|amp|lt|gt|quot|apos);/gi, (_, e) => e[0] === '#' ? String.fromCharCode(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : +e.slice(1)) : { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[e.toLowerCase()]).trim();
+    const takeChannel = block => {
+      const head = /<channel\b([^>]*)>/.exec(block);
+      const id = head && (/id="([^"]*)"/.exec(head[1]) || [])[1];
+      if (!id) return;
+      const ids = text(id);
+      const re = /<display-name[^>]*>([\s\S]*?)<\/display-name>/g;
+      for (let m; (m = re.exec(block));) {
+        const hit = names.get(guideName(text(m[1])));
+        if (hit) { want.add(ids); found.set(ids, [...new Set([...(found.get(ids) || []), ...hit])]); }
+      }
+    };
     const take = block => {
       const head = /<programme\b([^>]*)>/.exec(block);
       if (!head) return;
@@ -134,6 +159,14 @@
       let i = 0;
       for (;;) {
         const a = buf.indexOf('<programme', i);
+        const c = names ? buf.indexOf('<channel', i) : -1;
+        if (c >= 0 && (a < 0 || c < a)) {
+          const e = buf.indexOf('</channel>', c);
+          if (e < 0) { buf = buf.slice(c); return; }
+          takeChannel(buf.slice(c, e));
+          i = e + 10;
+          continue;
+        }
         if (a < 0) { buf = last ? '' : buf.slice(Math.max(i, buf.length - 20)); return; }
         const b = buf.indexOf('</programme>', a);
         if (b < 0) { buf = buf.slice(a); return; }
@@ -141,8 +174,8 @@
         i = b + 12;
       }
     };
-    if (res.body && res.body.getReader && window.TextDecoder) {
-      const reader = res.body.getReader(), dec = new TextDecoder();
+    if (body && body.getReader && window.TextDecoder) {
+      const reader = body.getReader(), dec = new TextDecoder();
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -150,10 +183,57 @@
         eat(false);
       }
       buf += dec.decode();
-    } else buf = await res.text();
+    } else buf = await (body === res.body ? res.text() : new Response(body).text());
     eat(true);
     for (const k in out) out[k].sort((a, b) => a[0] - b[0]);
     return out;
+  }
+
+  // Channel names as guides and playlists write them differently: "FR: TF1 HD" = "TF1".
+  function guideName(name) {
+    return String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      .replace(/^\s*(\|[a-z]{2,4}\||[a-z]{2,4}\s*[:|-])\s*/, '')
+      .replace(/\b(fhd|uhd|hd|sd|4k|8k|hevc|h\.?26[45]|1080p?|720p?|backup|vip|\(?s\)?)\b/g, '')
+      .replace(/&/g, 'and').replace(/\+/g, 'plus').replace(/[^a-z0-9]+/g, '');
+  }
+
+  // The viewer's own TV guide link (Settings → TV guide link), for both kinds of playlist.
+  // { byStream: Map(stream id → guide channel id), progs } — read once, saved for 12 hours.
+  async function ownGuide(api) {
+    const url = Settings.epgUrl;
+    if (!url) return null;
+    if (api.ownP && api.ownUrl === url) return api.ownP;
+    api.ownUrl = url;
+    api.ownP = (async () => {
+      const live = await api.liveStreams();
+      const want = new Set(), names = new Map(), found = new Map();
+      for (const c of live) {
+        if (c.epg_channel_id) want.add(c.epg_channel_id);
+        const n = guideName(c.name);
+        if (n) names.set(n, [...(names.get(n) || []), String(c.stream_id)]);
+      }
+      const key = 'ownxmltv|' + url + '|' + [...(api.langs || [])].sort().join(',');
+      const hit = await Disk.get(key).catch(() => null);
+      let data = hit && Date.now() - hit.t < 12 * 3600e3 && hit.d;
+      if (!data) {
+        const progs = await readXmltv(url, want, names, found);
+        data = { progs, found: [...found] };
+        Disk.set(key, { t: Date.now(), d: data }).catch(() => {});
+      }
+      const byStream = new Map();
+      for (const c of live) if (c.epg_channel_id && data.progs[c.epg_channel_id]) byStream.set(String(c.stream_id), c.epg_channel_id);
+      for (const [id, streams] of data.found) for (const sid of streams) if (!byStream.has(sid) && data.progs[id]) byStream.set(sid, id);
+      api.ownReady = { byStream, progs: data.progs };
+      return api.ownReady;
+    })();
+    api.ownP.catch(() => { setTimeout(() => { if (api.ownUrl === url) api.ownP = null; }, 5 * 60e3); });
+    return api.ownP;
+  }
+  async function ownGuideFor(api, streamId) {
+    const x = await ownGuide(api).catch(() => null);
+    const id = x && x.byStream.get(String(streamId));
+    const now = Date.now();
+    return ((id && x.progs[id]) || []).map(([start, end, title, description]) => ({ title, description, start, end, startStr: '', archive: end <= now }));
   }
 
   class Xtream {
@@ -369,6 +449,10 @@
     vodInfo(id) { return this.call('get_vod_info', { vod_id: id }); }
     seriesInfo(id) { return this.call('get_series_info', { series_id: id }); }
     async shortEpg(streamId, limit = 8) {
+      if (Settings.epgUrl) {
+        const own = (await ownGuideFor(this, streamId)).filter(e => e.end > Date.now()).slice(0, limit);
+        if (own.length) return own;
+      }
       const list = await this.guideCall(() => this.call('get_short_epg', { stream_id: streamId, limit }, { cache: false }).then(d =>
         asArray(d && d.epg_listings).map(e => ({
           title: b64(e.title), description: b64(e.description),
@@ -384,6 +468,10 @@
     // `archive`: the programme can be replayed (catch-up); `startStr` is the server-local start
     // ("2026-10-26 19:00:00") that catch-up links expect.
     async epgTable(streamId) {
+      if (Settings.epgUrl) {
+        const own = await ownGuideFor(this, streamId);
+        if (own.length) return own;
+      }
       const list = await this.guideCall(() => this.call('get_simple_data_table', { stream_id: streamId }, { cache: false }).then(d =>
         asArray(d && d.epg_listings).map(e => ({
           title: b64(e.title), description: b64(e.description),
@@ -574,12 +662,14 @@
     seriesList(categoryId) { return this.byCat(this.series, categoryId); }
     vodInfo(id) { const v = this.vod.find(x => x.stream_id === String(id)); return Promise.resolve({ info: {}, movie_data: { container_extension: v && v.container_extension } }); }
     seriesInfo(id) { const s = this.series.find(x => x.series_id === String(id)); return Promise.resolve(s ? { info: { name: s.name, cover: s.cover }, episodes: s.episodes } : null); }
-    shortEpg() { return Promise.resolve([]); }
-    epgTable() { return Promise.resolve([]); }
+    async shortEpg(streamId, limit = 8) { return Settings.epgUrl ? (await ownGuideFor(this, streamId)).filter(e => e.end > Date.now()).slice(0, limit) : []; }
+    async epgTable(streamId) { return Settings.epgUrl ? ownGuideFor(this, streamId) : []; }
     streamUrl(kind, id) { return this.urls.get(String(id)) || String(id); }
     m3uUrl() { return this.url; }
     epgUrl() { return ''; }
   }
+
+  window.OwnGuide = { load: api => ownGuide(api), name: guideName };
 
   const TMDB = {
     img: (path, size = 'w780') => (path ? `https://image.tmdb.org/t/p/${size}${path}` : ''),

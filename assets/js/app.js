@@ -33,6 +33,18 @@
     AU: 'r:AU', NZ: 'r:NZ', SO: 'l:so', MU: 'Music', AFRICAN: 'Africa', CG: 'r:ME', LV: 'Latin America', LA: 'Latvia / Latino',
     EU: 'Europe', GLOBAL: 'International', MULTI: 'Multi-language', SPT: 'Sports',
   };
+  // Playlist language code (FR, ESP, UK…) → the audio language it means (ISO 639-1), or ''.
+  const REGION_AUDIO = { UK: 'en', USA: 'en', US: 'en', CAN: 'en', AU: 'en', NZ: 'en', QC: 'fr', BR: 'pt', SE: 'sv', NO: 'no', DK: 'da',
+    FI: 'fi', IS: 'he', ISR: 'he', CZ: 'cs', HR: 'hr', SL: 'sl', AT: 'de', CH: 'de', CY: 'el', MT: 'mt', PK: 'ur', IN: 'hi', PH: 'tl', ID: 'id', LV: 'es' };
+  const audioOf = code => {
+    const c = String(code || '').toUpperCase(), v = PLAYLIST_LANGS[c] || '';
+    return v.startsWith('l:') ? v.slice(2) : REGION_AUDIO[c] || '';
+  };
+  // A track's language (fr, fre, fra, French…) → ISO 639-1.
+  const ISO3 = { fre: 'fr', fra: 'fr', eng: 'en', spa: 'es', ger: 'de', deu: 'de', ita: 'it', por: 'pt', dut: 'nl', nld: 'nl', ara: 'ar',
+    tur: 'tr', rus: 'ru', pol: 'pl', hin: 'hi', gre: 'el', ell: 'el', fin: 'fi', bul: 'bg', alb: 'sq', sqi: 'sq', heb: 'he', swe: 'sv',
+    nor: 'no', dan: 'da', cze: 'cs', ces: 'cs', hrv: 'hr', slv: 'sl', ron: 'ro', rum: 'ro', hun: 'hu', per: 'fa', fas: 'fa', chi: 'zh', zho: 'zh', jpn: 'ja' };
+  const trackLang = l => { const x = String(l || '').toLowerCase().split(/[-_]/)[0]; return ISO3[x] || (x.length === 2 ? x : ''); };
   const namers = {};
   const playlistLang = code => {
     const v = PLAYLIST_LANGS[code];
@@ -973,6 +985,7 @@
       this.route();
       this.checkServer();
       this.homeRowsLater(20000);
+      this.syncReminders().then(() => this.watchReminders());
       // Opened from a TV home screen tile before the app was ready: go there now.
       if (this.pendingLink) { const u = this.pendingLink; this.pendingLink = null; setTimeout(() => this.openLink(u), 600); }
     },
@@ -1118,6 +1131,17 @@
       if (this.lastLink === url && Date.now() - this.lastLinkAt < 5000) return;
       this.lastLink = url;
       this.lastLinkAt = Date.now();
+      // The TV was just turned on (Settings → Open InkonabTV when the TV turns on): last channel.
+      if (q.searchParams.get('resume')) {
+        const last = this.recentLive()[0];
+        if (!last) return;
+        const cat = await this.liveCatalog();
+        for (const g of cat.groups) {
+          const i = g.channels.findIndex(c => c.gkey === last);
+          if (i >= 0) return this.playChannel(g.channels, i, g);
+        }
+        return;
+      }
       const row = q.searchParams.get('row');
       if (row) { this.closeModal(); location.hash = ['live', 'movies', 'series'].includes(row) ? row : 'home'; return; }
       if (!q.searchParams.get('a')) return; // the row itself: just open the app
@@ -1284,6 +1308,7 @@
     },
 
     onPlayerClosed() {
+      this.syncReminders();
       if (this.detailRefresh && !$('#modal').classList.contains('hidden')) this.detailRefresh();
       if (this.redrawLater && $('#modal').classList.contains('hidden')) this.redraw();
       else if (this.view === 'home') this.renderContinue();
@@ -1515,16 +1540,329 @@
       return this.data.liveCatalog;
     },
 
-    // Catalog groups plus the viewer's Favorites and Recently watched, pinned first.
-    async liveGroups() {
+    // Catalog groups plus the viewer's Favorites, own groups and Recently watched, pinned first;
+    // then the viewer's organising (hidden categories and channels, their order) is applied.
+    async liveGroups(all = false) {
       const cat = await this.liveCatalog();
       const pick = keys => keys.map(k => cat.byKey.get(k)).filter(Boolean);
       const fav = pick(this.favs('live')), recent = pick(this.recentLive());
-      return [
+      const mine = this.myGroups().map(m => ({ key: '@my:' + m.id, name: m.name, special: true, mine: true, channels: pick(m.keys) }));
+      const groups = [
         ...(fav.length ? [{ key: '@fav', name: 'Favorites', special: true, channels: fav }] : []),
+        ...mine.filter(g => all || g.channels.length),
         ...(recent.length ? [{ key: '@recent', name: 'Recently watched', special: true, channels: recent }] : []),
         ...cat.groups,
       ];
+      return all ? groups : this.organised(groups, 'live');
+    },
+
+    // Organise screen: kind 'live' | 'movie' | 'series'; groupKey: a Live TV category's channels.
+    // Each row: Hide/Show, ▲, ▼ (+ Channels for Live TV categories, + group for channels).
+    async openOrganise(kind, groupKey = null) {
+      const o = this.org(kind);
+      let rows, title;
+      if (kind === 'live' && groupKey) {
+        const g = (await this.liveGroups(true)).find(x => x.key === groupKey);
+        if (!g) return;
+        title = g.name;
+        const ho = (o.chHidden || {})[groupKey] || [], or = (o.chOrder || {})[groupKey] || [];
+        const shown = this.arrange(g.channels, c => c.gkey, or, []);
+        rows = shown.map(c => ({ key: c.gkey, name: c.label, off: ho.includes(c.gkey), channel: true, mine: g.mine }));
+      } else if (kind === 'live') {
+        title = 'Live TV';
+        const groups = this.arrange(await this.liveGroups(true), g => g.key, o.order, []);
+        rows = groups.map(g => ({ key: g.key, name: (g.key === '@fav' ? '★ ' : '') + g.name, n: g.channels.length, off: (o.hidden || []).includes(g.key), group: true, mine: g.mine }));
+      } else {
+        title = kind === 'movie' ? 'Movies' : 'Series';
+        const [all, cats] = await Promise.all([kind === 'movie' ? this.loadVod() : this.loadSeries(), this.loadCats(kind)]);
+        const n = {};
+        for (const i of this.allowed(all)) n[i.cat] = (n[i.cat] || 0) + 1;
+        rows = this.arrange(cats.filter(c => n[c.category_id]), c => String(c.category_id), o.order, [])
+          .map(c => ({ key: String(c.category_id), name: c.category_name, n: n[c.category_id], off: (o.hidden || []).includes(String(c.category_id)) }));
+      }
+      const back = groupKey ? '<button class="btn ghost" id="orgBack">← Categories</button>' : '';
+      const newGroup = kind === 'live' && !groupKey ? '<button class="btn ghost" id="orgNew">＋ New group</button>' : '';
+      const row = (r, i) => `<div class="org-row${r.off ? ' off' : ''}" data-i="${i}">
+          <span class="org-name">${esc(r.name)}${r.n != null ? ` <small>${r.n}</small>` : ''}</span>
+          ${r.mine && r.channel ? '<button class="btn ghost sm" data-act="remove">Remove</button>' : `<button class="btn ghost sm" data-act="hide">${r.off ? 'Show' : 'Hide'}</button>`}
+          <button class="btn ghost sm" data-act="up" aria-label="Move up">▲</button>
+          <button class="btn ghost sm" data-act="down" aria-label="Move down">▼</button>
+          ${r.group ? '<button class="btn ghost sm" data-act="ch">Channels</button>' : ''}
+          ${r.channel && !r.mine ? '<button class="btn ghost sm" data-act="add">＋ Group</button>' : ''}
+          ${r.group && r.mine ? '<button class="btn ghost sm" data-act="rename">Rename</button><button class="btn ghost sm" data-act="delete">Delete</button>' : ''}
+        </div>`;
+      const m = this.openModal(`${this.closeBtn()}<h2 class="sheet-title">${esc(T('Organise'))} · ${esc(T(title))}</h2>
+        <p class="muted small-note">${groupKey ? 'Hide channels you never watch and put the others in your order.' : 'Hide categories you never use and put the others in your order. Hidden ones come back here.'}</p>
+        <div class="set-row vpn-actions">${back}${newGroup}<button class="btn ghost" id="orgReset">Reset</button></div>
+        <div class="org-list">${rows.map(row).join('')}</div>`, 'settings organise');
+      const list = $('.org-list', m);
+      const save = () => {
+        const keys = rows.map(r => r.key), off = rows.filter(r => r.off).map(r => r.key);
+        const cur = this.org(kind);
+        if (groupKey) {
+          cur.chOrder = { ...(cur.chOrder || {}), [groupKey]: keys };
+          cur.chHidden = { ...(cur.chHidden || {}), [groupKey]: off };
+        } else { cur.order = keys; cur.hidden = off; }
+        this.saveOrg(kind, cur);
+      };
+      const redrawRows = (focusRow, act) => {
+        list.innerHTML = rows.map(row).join('');
+        const r = list.children[focusRow];
+        const b = r && ($(`[data-act="${act}"]`, r) || $('button', r));
+        if (b) { b.focus({ preventScroll: true }); b.scrollIntoView({ block: 'nearest' }); }
+      };
+      list.addEventListener('click', async e => {
+        const b = e.target.closest('[data-act]');
+        if (!b) return;
+        const i = Number(b.closest('.org-row').dataset.i), r = rows[i], act = b.dataset.act;
+        if (act === 'hide') { r.off = !r.off; save(); return redrawRows(i, 'hide'); }
+        if (act === 'up' && i > 0) { [rows[i - 1], rows[i]] = [rows[i], rows[i - 1]]; save(); return redrawRows(i - 1, 'up'); }
+        if (act === 'down' && i < rows.length - 1) { [rows[i + 1], rows[i]] = [rows[i], rows[i + 1]]; save(); return redrawRows(i + 1, 'down'); }
+        if (act === 'ch') return this.openOrganise('live', r.key);
+        if (act === 'add') return this.addToGroup(r.key, () => this.openOrganise(kind, groupKey));
+        if (act === 'remove') {
+          const id = groupKey.slice(4);
+          this.saveMyGroups(this.myGroups().map(g => g.id === id ? { ...g, keys: g.keys.filter(k => k !== r.key) } : g));
+          rows.splice(i, 1);
+          return redrawRows(Math.min(i, rows.length - 1), 'remove');
+        }
+        if (act === 'rename') {
+          const name = await this.askText('Rename group', r.name);
+          if (!name) return this.openOrganise(kind);
+          this.saveMyGroups(this.myGroups().map(g => '@my:' + g.id === r.key ? { ...g, name } : g));
+          return this.openOrganise(kind);
+        }
+        if (act === 'delete') {
+          this.saveMyGroups(this.myGroups().filter(g => '@my:' + g.id !== r.key));
+          rows.splice(i, 1);
+          save();
+          return redrawRows(Math.min(i, rows.length - 1), 'delete');
+        }
+      });
+      // Remote: ▲ ▼ keep to the same button (Hide, ▲, ▼, Channels…) from row to row; ◀ ▶ stay
+      // in the row. ▲ on the first row goes up to the buttons above the list.
+      list.addEventListener('keydown', e => {
+        const b = e.target.closest('.org-row button');
+        if (!b || !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+        const r = b.closest('.org-row'), btns = [...r.querySelectorAll('button')], at = btns.indexOf(b);
+        let to = null;
+        if (e.key === 'ArrowLeft') to = btns[at - 1] || b;
+        else if (e.key === 'ArrowRight') to = btns[at + 1] || b;
+        else {
+          const next = e.key === 'ArrowUp' ? r.previousElementSibling : r.nextElementSibling;
+          if (!next) { if (e.key === 'ArrowUp') to = $('.set-row button', m); else to = b; }
+          else to = $(`[data-act="${b.dataset.act}"]`, next) || $('button', next);
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        if (to) { to.focus({ preventScroll: true }); to.scrollIntoView({ block: 'nearest' }); }
+      });
+      const backBtn = $('#orgBack', m);
+      if (backBtn) backBtn.addEventListener('click', () => this.openOrganise('live'));
+      const nb = $('#orgNew', m);
+      if (nb) nb.addEventListener('click', async () => {
+        const name = await this.askText('New group', '');
+        if (name) this.saveMyGroups([...this.myGroups(), { id: Date.now().toString(36), name, keys: [] }]);
+        this.openOrganise('live');
+      });
+      $('#orgReset', m).addEventListener('click', () => {
+        const cur = this.org(kind);
+        if (groupKey) { if (cur.chOrder) delete cur.chOrder[groupKey]; if (cur.chHidden) delete cur.chHidden[groupKey]; }
+        else { delete cur.order; delete cur.hidden; }
+        this.saveOrg(kind, cur);
+        this.openOrganise(kind, groupKey);
+      });
+      ($('.org-row button', m) || $('button', m)).focus({ preventScroll: true });
+    },
+
+    // Puts a channel in one of the viewer's own groups (or a new one).
+    addToGroup(gkey, after) {
+      const groups = this.myGroups();
+      const m = this.openModal(`${this.closeBtn()}<h2 class="sheet-title">${esc(T('Add to a group'))}</h2>
+        <div class="pick-list">${groups.map((g, i) => `<button class="cat" data-g="${i}">${esc(g.name)} <span>${g.keys.length}</span></button>`).join('')}
+          <button class="cat special" data-g="new">＋ ${esc(T('New group'))}</button></div>`, 'settings');
+      m.querySelector('.pick-list').addEventListener('click', async e => {
+        const b = e.target.closest('[data-g]');
+        if (!b) return;
+        let list = this.myGroups(), g;
+        if (b.dataset.g === 'new') {
+          const name = await this.askText('New group', '');
+          if (!name) return after && after();
+          g = { id: Date.now().toString(36), name, keys: [] };
+          list = [...list, g];
+        } else g = list[Number(b.dataset.g)];
+        if (!g.keys.includes(gkey)) g.keys = [...g.keys, gkey];
+        this.saveMyGroups(list.map(x => x.id === g.id ? g : x));
+        this.toast(T('Added to') + ' ' + g.name);
+        if (after) after(); else this.closeModal();
+      });
+      $('.pick-list button', m).focus();
+    },
+
+    // A one-line question (group names). Resolves with the text, or '' when cancelled.
+    askText(title, value) {
+      return new Promise(resolve => {
+        const m = this.openModal(`${this.closeBtn()}<h2 class="sheet-title">${esc(T(title))}</h2>
+          <form class="ask-text"><input class="field" id="askText" maxlength="40" autocomplete="off" value="${esc(value || '')}">
+          <div class="set-row vpn-actions"><button class="btn" type="submit">Save</button></div></form>`, 'settings');
+        let done = false;
+        this.modalOnClose = () => { if (!done) resolve(''); };
+        $('form', m).addEventListener('submit', e => {
+          e.preventDefault();
+          done = true;
+          resolve($('#askText', m).value.trim());
+        });
+        $('#askText', m).focus();
+      });
+    },
+
+    // ---------- programme reminders ----------
+    // [{ id, gkey, ch, title, start, end }]. On Android the list also lives on the native side,
+    // so the app's own player can announce a programme while it plays.
+    reminders() { return (Store.get('reminders', []) || []).filter(r => r.end > Date.now()); },
+    hasReminder(gkey, start) { return this.reminders().some(r => r.gkey === gkey && r.start === start); },
+    saveReminders(list) {
+      Store.set('reminders', list);
+      if (window.Native && Native.player.reminders) Native.player.reminders({ json: JSON.stringify(list) }).catch(() => {});
+    },
+    // The Android player may have set or removed some while it was open: take its list.
+    async syncReminders() {
+      if (!(window.Native && Native.player.reminders)) return;
+      const r = await Native.player.reminders({}).catch(() => null);
+      if (!r) return;
+      try { Store.set('reminders', JSON.parse(r.json)); Store.set('remFired', JSON.parse(r.fired)); } catch (e) {}
+    },
+    toggleReminder(ch, prog) {
+      const list = this.reminders(), gkey = ch.gkey;
+      const had = list.some(r => r.gkey === gkey && r.start === prog.start);
+      const next = had ? list.filter(r => !(r.gkey === gkey && r.start === prog.start))
+        : [...list, { id: gkey + ':' + prog.start, gkey, ch: ch.label || ch.name || '', title: prog.title, start: prog.start, end: prog.end }];
+      this.saveReminders(next);
+      this.toast(had ? T('Reminder removed') : `🔔 ${T('Reminder set')}: ${prog.title} · ${this.dayLabel(prog.start)} ${hm(prog.start)}`);
+      return !had;
+    },
+    // Every 15 s while the app is open (the Android player does it while it plays).
+    watchReminders() {
+      if (this.remindTimer) return;
+      this.remindTimer = setInterval(() => this.checkReminders(), 15000);
+    },
+    checkReminders() {
+      if (Player.nativeOpen) return;
+      const now = Date.now(), fired = new Set(Store.get('remFired', []) || []);
+      const due = this.reminders().find(r => r.start <= now + 30000 && r.start > now - 5 * 60000 && !fired.has(r.id));
+      if (!due) return;
+      fired.add(due.id);
+      Store.set('remFired', [...fired].slice(-200));
+      if (window.Native && Native.player.reminders) Native.player.reminders({ fired: JSON.stringify([...fired].slice(-200)) }).catch(() => {});
+      const watch = () => this.openChannelByKey(due.gkey);
+      if (Player.isOpen()) return Player.remindBanner(due, watch);
+      const m = this.openModal(`<h2 class="sheet-title">🔔 ${esc(due.title)}</h2>
+        <p class="muted">${esc(T('Starts now on'))} ${esc(due.ch)}</p>
+        <div class="set-row vpn-actions"><button class="btn" id="remWatch">${esc(T('Watch'))}</button><button class="btn ghost" data-close>${esc(T('Later'))}</button></div>`, 'settings');
+      $('[data-close]', m).addEventListener('click', () => this.closeModal());
+      $('#remWatch', m).addEventListener('click', () => { this.closeModal(); watch(); });
+      $('#remWatch', m).focus();
+    },
+    async openChannelByKey(gkey) {
+      const groups = await this.liveGroups();
+      for (const g of groups) {
+        const i = g.channels.findIndex(c => c.gkey === gkey);
+        if (i >= 0) return this.playChannel(g.channels, i, g);
+      }
+      this.toast('This channel is no longer in your playlist');
+    },
+
+    // ---------- backup and restore ----------
+    // Favorites, My List, own groups, organising, Continue watching, recently watched channels,
+    // reminders and settings. Never the sign-in details, the server address or the parental PIN.
+    backupKeys: ['fav', 'cw', 'recentLive', 'myGroups', 'org.live', 'org.movie', 'org.series', 'reminders'],
+    backupData() {
+      const data = {};
+      for (const k of this.backupKeys) { const v = Store.get(k, null); if (v != null) data[k] = v; }
+      const { save, showAdult, adultPin, server, relay, ...settings } = Settings;
+      data.settings = settings;
+      return { app: 'InkonabTV', v: 1, at: new Date().toISOString(), data };
+    },
+    restoreData(b) {
+      if (!b || b.app !== 'InkonabTV' || !b.data) throw new Error('This file isn’t an InkonabTV backup');
+      for (const k of this.backupKeys) if (k in b.data) Store.set(k, b.data[k]);
+      if (b.data.settings) {
+        const { adultPin, server, relay, showAdult, save, ...keep } = b.data.settings;
+        Object.assign(Settings, keep);
+        Settings.save();
+      }
+    },
+    backupName() { return 'inkonabtv-backup-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.json'; },
+    async saveBackup() {
+      const json = JSON.stringify(this.backupData());
+      if (window.Native && Native.player.backupSave) {
+        const r = await Native.player.backupSave({ json, name: this.backupName() }).catch(() => null);
+        return this.toast(!r ? 'Couldn’t save the backup' : r.usb ? 'Backup saved on the USB drive' : 'Backup saved on this device');
+      }
+      // Web, Windows and Mac: a file to keep.
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+      a.download = this.backupName();
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      this.toast('Backup saved');
+    },
+    async restoreBackup() {
+      const apply = text => {
+        try { this.restoreData(JSON.parse(text)); } catch (e) { return this.toast(e.message && /backup/.test(e.message) ? e.message : 'This file isn’t an InkonabTV backup'); }
+        this.toast('Backup restored');
+        this.closeModal();
+        setTimeout(() => location.reload(), 900);
+      };
+      if (window.Native && Native.player.backupList) {
+        const r = await Native.player.backupList().catch(() => ({ list: [] }));
+        const list = r.list || [];
+        if (!list.length) return this.toast('No backup found. Plug in the USB drive that has one.');
+        const m = this.openModal(`${this.closeBtn()}<h2 class="sheet-title">${esc(T('Restore a backup'))}</h2>
+          <p class="muted small-note">${esc(T('Your favorites, groups, lists and settings are replaced by the backup’s.'))}</p>
+          <div class="pick-list">${list.map((b, i) => `<button class="cat" data-b="${i}">${esc(new Date(b.time).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' }))} <span>${esc(T(b.usb ? 'USB drive' : 'This device'))}</span></button>`).join('')}</div>`, 'settings');
+        m.querySelector('.pick-list').addEventListener('click', async e => {
+          const b = e.target.closest('[data-b]');
+          if (!b) return;
+          const f = await Native.player.backupRead({ path: list[Number(b.dataset.b)].path }).catch(() => null);
+          if (!f) return this.toast('Couldn’t read the backup');
+          apply(f.json);
+        });
+        $('.pick-list button', m).focus();
+        return;
+      }
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json,.json';
+      input.onchange = () => { const f = input.files && input.files[0]; if (f) f.text().then(apply); };
+      input.click();
+    },
+
+    // ---------- organising: hide and reorder categories and channels, own groups ----------
+    // Saved per list ('live', 'movie', 'series'): { hidden: [keys], order: [keys],
+    // chHidden: { groupKey: [channel keys] }, chOrder: { groupKey: [channel keys] } }.
+    org(kind) { return Store.get('org.' + kind, null) || {}; },
+    saveOrg(kind, o) { Store.set('org.' + kind, o); this.redrawLater = true; if (kind === 'live') this.homeRowsLater(); },
+    myGroups() { return Store.get('myGroups', []); },
+    saveMyGroups(list) { Store.set('myGroups', list); this.redrawLater = true; this.homeRowsLater(); },
+    // list in the viewer's order, without the hidden. Something new since (a new group, a new
+    // category from the provider) stays next to what comes before it in the natural order.
+    arrange(list, keyOf, order = [], hidden = []) {
+      const off = new Set(hidden), at = new Map(order.map((k, i) => [k, i]));
+      let last = -1;
+      return list.map((x, i) => {
+        const k = keyOf(x);
+        if (at.has(k)) { last = at.get(k); return [x, last]; }
+        return [x, last + 0.5 + i * 1e-6];
+      }).filter(([x]) => !off.has(keyOf(x))).sort((a, b) => a[1] - b[1]).map(([x]) => x);
+    },
+    organised(groups, kind) {
+      const o = this.org(kind);
+      return this.arrange(groups, g => g.key, o.order, o.hidden).map(g => {
+        const ho = (o.chHidden || {})[g.key], or = (o.chOrder || {})[g.key];
+        return ho || or ? { ...g, channels: this.arrange(g.channels, c => c.gkey, or, ho) } : g;
+      });
     },
 
     // Play list[index]; group = {key, name} is what the player's channel list opens on.
@@ -1629,7 +1967,7 @@
     versionLabel(v) { return [v.lang, v.quality, ...(v.tags || [])].filter(Boolean).join(' · ') || 'Other version'; },
     altVersions(item) {
       const alts = (item.versions || []).filter(v => String(v.id) !== String(item.id))
-        .map(v => ({ id: v.id, ext: v.ext || 'mp4', label: this.versionLabel(v) }));
+        .map(v => ({ id: v.id, ext: v.ext || 'mp4', label: this.versionLabel(v), lang: v.lang || '' }));
       return alts.length ? { label: this.versionLabel(item), alts } : {};
     },
     // The same episode (season and number) in the series' other versions. Slow answers (4 s) are
@@ -1641,15 +1979,73 @@
       const infos = await Promise.all(others.map(v => cut(this.api.seriesInfo(v.id).catch(() => null)).then(d => ({ v, d }))));
       return ep => infos.flatMap(({ v, d }) => {
         const hit = asArray(d && d.episodes && d.episodes[ep.season]).find(e => String(e.episode_num) === String(ep.episode_num));
-        return hit ? [{ id: hit.id, ext: hit.container_extension || 'mp4', label: this.versionLabel(v) }] : [];
+        return hit ? [{ id: hit.id, ext: hit.container_extension || 'mp4', label: this.versionLabel(v), lang: v.lang || '' }] : [];
       });
     },
 
+    // ---------- audio language from the playlist languages ----------
+    // The audio languages of the playlist languages chosen (Settings → Playlist languages):
+    // one → films and episodes start in it; several → asked before a title that comes in more
+    // than one of them (a series remembers the answer).
+    audioLangs() {
+      if (!this.api || !this.langPickerOn()) return [];
+      return [...new Set((Store.get(this.langKey(this.api)) || []).map(audioOf).filter(Boolean))];
+    },
+    async pickAudio(entry) {
+      const chosen = this.audioLangs();
+      if (!chosen.length) return { entry, lang: '' };
+      const versions = [{ id: entry.id, ext: entry.ext, label: entry.label, lang: entry.lang }, ...(entry.alts || [])];
+      const verLang = v => audioOf(v.lang);
+      const useVersion = lang => {
+        const v = versions.find(x => verLang(x) === lang);
+        if (!v || String(v.id) === String(entry.id)) return entry;
+        // That language's version plays first; the others stay as fall-backs.
+        return { ...entry, id: v.id, ext: v.ext, label: v.label, lang: v.lang, alts: versions.filter(x => x !== v) };
+      };
+      if (chosen.length === 1) return { entry: useVersion(chosen[0]), lang: chosen[0] };
+      const offered = chosen.filter(l => versions.some(v => verLang(v) === l));
+      const remember = entry.seriesId ? 'audio:' + entry.seriesId : '';
+      const saved = remember && (Store.get('audioPick', {}) || {})[remember];
+      if (saved && chosen.includes(saved)) return { entry: useVersion(saved), lang: saved };
+      // One version only: it plays in its own language when that's one of the chosen ones.
+      if (offered.length === 1 && versions.length === 1) return { entry, lang: offered[0] };
+      const ask = offered.length >= 2 ? offered : chosen;
+      const name = l => { try { const n = new Intl.DisplayNames([LOCALE, 'en'], { type: 'language' }).of(l); return n.charAt(0).toLocaleUpperCase(LOCALE) + n.slice(1); } catch { return l.toUpperCase(); } };
+      return new Promise(resolve => {
+        let done = false;
+        const m = this.openModal(`${this.closeBtn()}<h2 class="sheet-title">${esc(T('Audio language'))}</h2>
+          <p class="muted">${esc(entry.title)}${entry.kind === 'episode' ? ' · ' + esc(entry.subtitle.split(' — ')[0]) : ''}</p>
+          <div class="pick-list">${ask.map(l => `<button class="cat" data-l="${l}">${esc(name(l))}${versions.some(v => verLang(v) === l) ? '' : ` <span>${esc(T('if the file has it'))}</span>`}</button>`).join('')}</div>`, 'settings');
+        this.modalOnClose = () => { if (!done) resolve(null); };
+        $('.pick-list', m).addEventListener('click', e => {
+          const b = e.target.closest('[data-l]');
+          if (!b) return;
+          done = true;
+          const lang = b.dataset.l;
+          if (remember) Store.set('audioPick', { ...(Store.get('audioPick', {}) || {}), [remember]: lang });
+          this.closeModal();
+          resolve({ entry: useVersion(lang), lang });
+        });
+        ($(`[data-l="${Store.get('audioLast', '')}"]`, m) || $('.pick-list button', m)).focus();
+      }).then(r => { if (r) Store.set('audioLast', r.lang); return r; });
+    },
+
     // queue: the episodes after this one. at: which of [entry, ...queue] the progress is for.
-    playEntry(entry, resume = true, queue = []) {
-      const all = [entry, ...queue];
+    async playEntry(entry, resume = true, queue = []) {
+      // Resuming: the version and language already chosen, without asking again.
+      const only = this.audioLangs().length === 1 ? this.audioLangs()[0] : '';
+      const pick = resume && entry.pos > 5 ? { entry, lang: entry.audioLang || only || audioOf(entry.lang) } : await this.pickAudio(entry);
+      if (!pick) return; // the question was closed: nothing plays
+      entry = { ...pick.entry, audioLang: pick.lang };
+      // The same language for the following episodes: their version in it, when there is one.
+      const pickVer = e => {
+        const v = (e.alts || []).find(x => audioOf(x.lang) === pick.lang);
+        return pick.lang && v && audioOf(e.lang) !== pick.lang ? { ...e, id: v.id, ext: v.ext, label: v.label, lang: v.lang, alts: [{ id: e.id, ext: e.ext, label: e.label, lang: e.lang }, ...e.alts.filter(x => x !== v)] } : e;
+      };
+      queue = queue.map(pickVer);
+      const all = [entry, ...queue]; // Continue watching keeps the version that plays
       Player.open({
-        kind: entry.kind, id: entry.id, ext: entry.ext, title: entry.title, subtitle: entry.subtitle,
+        kind: entry.kind, id: entry.id, ext: entry.ext, title: entry.title, subtitle: entry.subtitle, audioLang: pick.lang,
         resumeAt: resume ? entry.pos : 0, label: entry.label, alts: entry.alts,
         queue: queue.map(e => ({ kind: e.kind, id: e.id, ext: e.ext, title: e.title, subtitle: e.subtitle, label: e.label, alts: e.alts })),
         onProgress: (pos, dur, at = 0) => all[at] && this.cwSave(all[at], pos, dur),
@@ -1834,11 +2230,13 @@
       this.setBackdrop('');
       const [all, cats, picks] = await Promise.all([kind === 'movie' ? this.loadVod() : this.loadSeries(), this.loadCats(kind), this.tmdbPicks(kind)]);
       await this.genreCats(kind);
-      const items = this.allowed(all);
+      const hiddenCats = new Set(this.org(kind).hidden || []);
+      const items = this.allowed(all).filter(i => !hiddenCats.has(String(i.cat)));
       const perCat = {};
       for (const i of items) (perCat[i.cat] || (perCat[i.cat] = new Set())).add(i.gkey);
       const counts = Object.fromEntries(Object.entries(perCat).map(([k, v]) => [k, v.size]));
-      const usable = cats.filter(c => counts[c.category_id]);
+      const ob = this.org(kind);
+      const usable = this.arrange(cats.filter(c => counts[c.category_id]), c => String(c.category_id), ob.order, ob.hidden);
       const byId = new Map(items.map(i => [i.kind + i.id, i]));
       const label = kind === 'movie' ? 'Movies' : 'Series';
       const latest = uniq(items);
@@ -1855,6 +2253,7 @@
           <aside class="cats">
             <input class="field" type="search" placeholder="Filter categories" id="catFilter">
             <div class="cat-list" id="catList">
+              <button class="cat special org-open" data-org="${kind}" data-name="">✎ Organise</button>
               <button class="cat special" data-cat="@fav">★ My List <span>${mine().length}</span></button>
               ${picks.byDate.length ? `
               <button class="cat special" data-cat="@top">Top picks <span>${picks.byDate.length}</span></button>
@@ -1867,7 +2266,7 @@
             <div class="grid-head">
               <h2 id="gridTitle"></h2>
               <select class="field sort" id="sort">
-                <option value="auto">Default order</option><option value="added">Recently added</option><option value="name">A – Z</option><option value="rating">Top rated</option>
+                <option value="auto">Default order</option><option value="added">Recently added</option><option value="year">Release year</option><option value="name">A – Z</option><option value="za">Z – A</option><option value="rating">Top rated</option>
               </select>
             </div>
             <div class="genre-cards" id="genres" hidden></div>
@@ -1908,9 +2307,13 @@
         const g = Number(genre);
         if (g) list = list.filter(i => this.genresOf(i).includes(g));
         const s = sortSel.value;
-        if (s === 'name') list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+        // A–Z on the title itself: "- YAGA" files under Y, accents don't matter.
+        const title = i => i._sortName || (i._sortName = fold(i.name).replace(/^[^a-z0-9]+/, ''));
+        if (s === 'name') list = [...list].sort((a, b) => title(a).localeCompare(title(b)));
+        else if (s === 'za') list = [...list].sort((a, b) => title(b).localeCompare(title(a)));
         else if (s === 'rating') list = [...list].sort((a, b) => b.rating - a.rating);
         else if (s === 'added') list = [...list].sort((a, b) => b.added - a.added);
+        else if (s === 'year') list = [...list].sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0) || b.added - a.added);
         current = list; shown = 0; grid.innerHTML = '';
         $('#gridTitle', main).innerHTML = titles[cat] || esc(name);
         if (!list.length) grid.innerHTML = `<div class="empty"><p>${cat === '@fav' ? 'Nothing in My List yet. Open a title and choose “☆ My List” to add it here.' : 'Nothing here yet.'}</p></div>`;
@@ -1918,13 +2321,19 @@
       };
 
       $('#catList', main).addEventListener('click', e => {
+        const org = e.target.closest('[data-org]');
+        if (org) return this.openOrganise(org.dataset.org);
         const b = e.target.closest('.cat');
         if (!b) return;
         $$('.cat', main).forEach(c => c.classList.toggle('active', c === b));
         this.browseCat = b.dataset.cat;
         show(b.dataset.cat, b.firstChild.textContent.trim());
       });
+      // The order chosen is kept for next time (one for movies, one for series).
+      const sortKey = 'sort' + (kind === 'movie' ? 'Movies' : 'Series');
+      if (Settings[sortKey] && $(`option[value="${Settings[sortKey]}"]`, sortSel)) sortSel.value = Settings[sortKey];
       sortSel.addEventListener('change', () => {
+        Settings[sortKey] = sortSel.value; Settings.save();
         const b = $('.cat.active', main);
         show(b.dataset.cat, b.firstChild.textContent.trim());
       });
@@ -2037,6 +2446,7 @@
           <aside class="cats">
             <input class="field" type="search" placeholder="Filter categories" id="catFilter">
             <div class="cat-list" id="catList">
+              <button class="cat special org-open" data-org="live" data-name="">✎ Organise</button>
               ${groups.map(g => `<button class="cat${g.free || g.special ? ' special' : ''}"${g.genre ? ' data-genre' : ''} data-cat="${esc(g.key)}" data-name="${esc(fold(T(g.name) + ' ' + g.name))}">${g.key === '@fav' ? '★ ' : ''}${esc(g.name)} <span>${g.channels.length}</span></button>`).join('')}
             </div>
           </aside>
@@ -2096,7 +2506,11 @@
         renderChannels(b.dataset.cat);
       };
 
-      $('#catList', main).addEventListener('click', e => { const b = e.target.closest('.cat'); if (b) pick(b); });
+      $('#catList', main).addEventListener('click', e => {
+        const org = e.target.closest('[data-org]');
+        if (org) return this.openOrganise('live');
+        const b = e.target.closest('.cat'); if (b) pick(b);
+      });
       pills.addEventListener('click', e => { const b = e.target.closest('.genre-card'); if (b) pick(b); });
       $('#catFilter', main).addEventListener('input', e => {
         const q = fold(e.target.value);
@@ -2164,7 +2578,7 @@
       chList.addEventListener('click', e => { const b = e.target.closest('.ch'); if (b) play(Number(b.dataset.i)); });
 
       // Reopen on the group (and channel) watched last.
-      const start = (this.liveCat && $(`[data-cat="${CSS.escape(this.liveCat)}"]`, main)) || $('.cat:not([data-genre])', main) || $('.cat', main);
+      const start = (this.liveCat && $(`[data-cat="${CSS.escape(this.liveCat)}"]`, main)) || $('.cat:not([data-genre]):not([data-org])', main) || $('.cat:not([data-org])', main);
       if (!start) return;
       pick(start);
       start.scrollIntoView({ block: 'nearest' });
@@ -2186,7 +2600,8 @@
 
     // Cached for 20 minutes, at most 6 requests at a time.
     epgFor(ch) {
-      const v = this.epgStream(ch);
+      // With the viewer's own guide link, channels the provider has no guide for can have one.
+      const v = this.epgStream(ch) || (Settings.epgUrl && !ch.url && ch.versions && ch.versions[0]);
       if (!v || !this.api) return Promise.resolve([]);
       const cache = this.epgCache || (this.epgCache = new Map());
       const hit = cache.get(v.stream_id);
@@ -2247,7 +2662,64 @@
         if (this.canReplay(ch, prog)) return this.playCatchup(ch, prog);
         return this.toast(ch.versions.some(v => Number(v.tv_archive)) ? 'This programme is no longer in the replay archive' : 'Replay isn’t available on this channel');
       }
-      this.toast(`${prog.title} starts ${this.dayLabel(prog.start).toLowerCase()} at ${hm(prog.start)}`);
+      this.futureProgramme(ch, prog);
+    },
+
+    // A programme still to come: a reminder, or (InkonabTV+) a recording on the USB drive.
+    async futureProgramme(ch, prog) {
+      const rec = window.Native && Native.player.recordings ? await Native.player.recordings().catch(() => null) : null;
+      if (!rec || !rec.available) return this.toggleReminder(ch, prog);
+      const has = this.hasReminder(ch.gkey, prog.start);
+      const m = this.openModal(`${this.closeBtn()}<h2 class="sheet-title">${esc(prog.title)}</h2>
+        <p class="muted">${esc(ch.label)} · ${esc(this.dayLabel(prog.start))} ${hm(prog.start)} – ${hm(prog.end)}</p>
+        <div class="set-row vpn-actions"><button class="btn" id="fpRemind">${has ? '🔕 ' + esc(T('Remove reminder')) : '🔔 ' + esc(T('Reminder'))}</button>
+        <button class="btn ghost" id="fpRec">⏺ ${esc(T('Record'))}</button></div>
+        ${rec.usb ? '' : `<p class="muted small-note">${esc(T('Recordings go on a USB drive or memory stick: plug one into the TV box.'))}</p>`}`, 'settings');
+      $('#fpRemind', m).addEventListener('click', () => { this.closeModal(); this.toggleReminder(ch, prog); });
+      $('#fpRec', m).addEventListener('click', async () => {
+        this.closeModal();
+        this.recordProgramme(ch, prog);
+      });
+      $('#fpRemind', m).focus();
+    },
+
+    // Records a channel from start to end (two minutes either side) on the USB drive.
+    async recordProgramme(ch, prog) {
+      const v = ch.versions ? ch.versions[0] : ch;
+      const url = v.url || (this.api && this.api.streamUrl('live', v.stream_id, 'ts'));
+      if (!url) return this.toast('Can’t record this channel');
+      const r = await Native.player.record({ title: prog.title, ch: ch.label || ch.name || '', url,
+        start: prog.start - 2 * 60000, end: prog.end + 2 * 60000 }).catch(() => null);
+      this.toast(r && r.ok ? `⏺ ${T('Recording set')}: ${prog.title} · ${this.dayLabel(prog.start)} ${hm(prog.start)}` : T((r && r.why) || 'Can’t record this channel'));
+    },
+
+    // Settings → Recordings (InkonabTV+): what's planned, running and saved on the USB drive.
+    async openRecordings() {
+      const r = await Native.player.recordings().catch(() => null);
+      if (!r) return;
+      const list = [...(r.list || [])].sort((a, b) => b.start - a.start);
+      const size = b => b > 1e9 ? (b / 1e9).toFixed(1) + ' GB' : b >= 1e6 ? Math.round(b / 1e6) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' KB';
+      const label = { scheduled: 'Planned', recording: '⏺ Recording', done: 'Saved', failed: 'Failed', stopped: 'Stopped' };
+      const m = this.openModal(`${this.closeBtn()}<h2 class="sheet-title">${esc(T('Recordings'))}</h2>
+        <p class="muted small-note">${esc(T(r.usb ? 'Saved on the USB drive, in Android/data/tv.inkonab.app.full/files/Recordings.' : 'Plug a USB drive or memory stick into the TV box to record.'))}</p>
+        <div class="org-list">${list.length ? list.map((x, i) => `<div class="org-row" data-i="${i}">
+          <span class="org-name">${esc(x.title || x.ch)} <small>${esc(x.ch)} · ${esc(this.dayLabel(x.start + 2 * 60000))} ${hm(x.start + 2 * 60000)} · ${esc(T(label[x.status] || x.status))}${x.bytes ? ' · ' + size(x.bytes) : ''}</small></span>
+          ${x.file && (x.status === 'done' || x.status === 'stopped') ? '<button class="btn ghost sm" data-act="play">▶ Play</button>' : ''}
+          ${x.status === 'recording' || x.status === 'scheduled' ? `<button class="btn ghost sm" data-act="stop">${esc(T(x.status === 'recording' ? 'Stop' : 'Cancel'))}</button>` : ''}
+          <button class="btn ghost sm" data-act="delete">${esc(T('Delete'))}</button></div>`).join('') : `<p class="muted">${esc(T('No recordings yet. In the TV Guide, choose a programme still to come, or press OK on a channel and choose ⏺ Record.'))}</p>`}</div>`, 'settings organise');
+      $('.org-list', m).addEventListener('click', async e => {
+        const b = e.target.closest('[data-act]');
+        if (!b) return;
+        const x = list[Number(b.closest('.org-row').dataset.i)];
+        if (b.dataset.act === 'play') {
+          this.closeModal();
+          return Player.open({ kind: 'movie', id: 'rec:' + x.id, url: 'file://' + x.file, title: x.title || x.ch, subtitle: x.ch + ' · ' + T('Recording') });
+        }
+        await Native.player.recordStop({ id: x.id, delete: b.dataset.act === 'delete' }).catch(() => {});
+        setTimeout(() => this.openRecordings(), 400);
+      });
+      const first = $('.org-row button', m) || $('[data-close]', m);
+      if (first) first.focus();
     },
 
     // ---------- TV guide grid ----------
@@ -2325,8 +2797,9 @@
           track.innerHTML = progs.length ? progs.map((p, k) => {
             const state = p.end <= now ? 'past' : p.start <= now ? 'now' : 'future';
             const replay = this.canReplay(ch, p);
+            const bell = state === 'future' && this.hasReminder(ch.gkey, p.start);
             return `<button class="prog ${state}${replay ? ' replay' : ''}" data-k="${k}" style="left:${x(p.start)}px;width:${Math.max(x(p.end) - x(p.start) - 3, 24)}px">
-              <b>${replay ? '⟲ ' : ''}${esc(p.title)}</b><small>${hm(p.start)} – ${hm(p.end)}</small></button>`;
+              <b>${replay ? '⟲ ' : bell ? '🔔 ' : ''}${esc(p.title)}</b><small>${hm(p.start)} – ${hm(p.end)}</small></button>`;
           }).join('') : `<button class="prog none" data-k="-1" style="left:0;width:${width - 4}px"><b>${ch.url ? 'Free channel' : 'No guide information'}</b><small>OK to watch live</small></button>`;
         };
 
@@ -2352,7 +2825,7 @@
         const badge = !prog ? '<span class="chip">Live</span>'
           : prog.start <= now && prog.end > now ? `<span class="badge on-air">● Live now</span> <span class="bar gp-bar"><i style="width:${(((now - prog.start) / (prog.end - prog.start)) * 100).toFixed(1)}%"></i></span>`
           : prog.end <= now ? (this.canReplay(ch, prog) ? '<span class="badge replay">⟲ Replay — press OK</span>' : '<span class="chip">Ended</span>')
-          : '<span class="chip">Upcoming</span>';
+          : this.hasReminder(ch.gkey, prog.start) ? '<span class="chip">🔔 Reminder set — OK to change</span>' : '<span class="chip">Upcoming — OK for a reminder or recording</span>';
         info.innerHTML = `
           <div class="gp-info-ch">${ch.stream_icon ? `<img src="${esc(ch.stream_icon)}" alt="">` : ''}<span>${esc(ch.num)} · ${esc(ch.label)}</span></div>
           <h2>${esc(prog ? prog.title : ch.label)}</h2>
@@ -2366,6 +2839,12 @@
         if (!b) return;
         const { i, prog } = progAt(b);
         this.playProgramme(group.channels, i, group, prog);
+        // A reminder set or removed: the bell on the programme and the info follow.
+        if (prog && prog.start > Date.now()) {
+          const t = $('b', b), on = this.hasReminder(group.channels[i].gkey, prog.start);
+          if (t) t.textContent = (on ? '🔔 ' : '') + prog.title;
+          showInfo(b);
+        }
       });
       $('#gpDays', main).addEventListener('click', e => {
         const b = e.target.closest('[data-day]');
@@ -2546,7 +3025,7 @@
       const entry = {
         key: 'movie:' + item.id, kind: 'movie', id: item.id, ext: md.container_extension || item.ext,
         title: (t2 && t2.title) || item.name, subtitle: [item.year, item.lang].filter(Boolean).join(' · ') || 'Movie',
-        img: (t2 && t2.poster) || item.img, backdrop: extra.backdrop,
+        img: (t2 && t2.poster) || item.img, backdrop: extra.backdrop, lang: item.lang || '',
         ...this.altVersions(item),
       };
       const actions = $('.detail-actions', m);
@@ -2623,7 +3102,7 @@
         key: 'episode:' + ep.id, kind: 'episode', id: ep.id, ext: ep.container_extension || 'mp4', title,
         subtitle: `S${ep.season} · E${ep.episode_num}${ep.title ? ' — ' + ep.title : ''}`,
         img: item.img, backdrop: (ep.info && ep.info.movie_image) || extra.backdrop, seriesId: item.id,
-        label: this.versionLabel(item), alts: altOf(ep),
+        label: this.versionLabel(item), alts: altOf(ep), lang: item.lang || '',
       });
       const playEp = (ep, resume) => {
         const entry = epEntry(ep);
@@ -2739,6 +3218,8 @@
         // A word may be left out only when nothing anywhere matches all of them.
         if ([mvHits, svHits, lvHits, frHits].some(l => l.some(h => h.full))) [mvHits, svHits, lvHits, frHits] = [mvHits, svHits, lvHits, frHits].map(l => l.filter(h => h.full));
         const lv = pick(lvHits, c => okLive.has(c)).concat(pick(frHits, () => true)).slice(0, samsung ? 12 : 24);
+        // TMDB still being asked (other-language titles, actors): an empty page waits for it.
+        let asking = raw.length >= 3 && !!CFG.tmdbKey;
         // people: [{ name, items }] — an actor's (or director's) films and series in the playlist.
         const render = (mvRank, svRank, people = []) => {
         const mv = pick(mvRank, i => okFilm.has(i)).slice(0, limit), sv = pick(svRank, () => true).slice(0, limit);
@@ -2753,7 +3234,7 @@
           mv.length && `<h3>Movies</h3><div class="grid">${mv.map(i => this.card(i)).join('')}</div>`,
           sv.length && `<h3>Series</h3><div class="grid">${sv.map(i => this.card(i)).join('')}</div>`,
           strongTitle && peopleHtml,
-        ].filter(Boolean).join('') : '<p class="muted center">No results.</p>';
+        ].filter(Boolean).join('') : asking ? `<div class="loader small"><span></span></div><p class="muted center">${esc(T('Looking for other titles and names…'))}</p>` : '<p class="muted center">No results.</p>';
         res.onclick = e => {
           const go = e.target.closest('[data-go-genre]');
           if (go) {
@@ -2772,8 +3253,10 @@
         render(mvHits, svHits);
         // Other-language titles from TMDB: a title it finds joins the results as if every word
         // matched with one typo, so exact matches in the playlist's own names stay first.
-        if (raw.length >= 3) TMDB.search(raw).then(found => {
-          if (!found.length || fold(q.value.trim()) !== term) return;
+        const settle = () => { if (asking && fold(q.value.trim()) === term) { asking = false; render(mvHits, svHits); } };
+        if (asking) TMDB.search(raw).then(found => {
+          if (fold(q.value.trim()) !== term) return;
+          if (!found.length) return settle();
           const add = (hits, list, type) => {
             const have = new Set(hits.map(h => h.item));
             const nWords = Math.max(1, toks(raw).length);
@@ -2785,10 +3268,11 @@
             return extra.length ? [...hits, ...extra].sort((a, b) => b.score - a.score) : null;
           };
           const m2 = add(mvHits, vod, 'movie'), s2 = add(svHits, series, 'tv');
-          if (m2 || s2) render(m2 || mvHits, s2 || svHits);
+          if (m2 || s2) { const wasAsking = asking; asking = false; render(m2 || mvHits, s2 || svHits); asking = wasAsking; }
           // Actors and directors: their films and series in the playlist, best known first.
-          const persons = found.filter(f => f.type === 'person' && nameMatches(f.name, raw)).slice(0, 2);
-          if (!persons.length) return;
+          // Actors and directors only (TMDB also lists companies and crew as people).
+          const persons = found.filter(f => f.type === 'person' && /^(Acting|Directing)$/.test(f.job) && nameMatches(f.name, raw)).slice(0, 2);
+          if (!persons.length) { asking = false; if (!m2 && !s2) settle(); return; }
           const byTmdb = new Map();
           for (const i of uniq(this.allowed(vod))) if (i.tmdb) byTmdb.set('movie:' + i.tmdb, i);
           for (const i of uniq(series)) if (i.tmdb) byTmdb.set('tv:' + i.tmdb, i);
@@ -2797,9 +3281,11 @@
             items: [...new Set(cr.map(c => byTmdb.get(c.type + ':' + c.id)).filter(Boolean))].slice(0, limit),
           })))).then(people => {
             people = people.filter(p => p.items.length);
-            if (people.length && fold(q.value.trim()) === term) render(m2 || mvHits, s2 || svHits, people);
-          });
-        });
+            if (fold(q.value.trim()) !== term) return;
+            asking = false;
+            render(m2 || mvHits, s2 || svHits, people);
+          }, () => settle());
+        }, () => settle());
       };
       const run = debounce(search, samsung ? 1000 : 250);
       q.addEventListener('input', () => run());
@@ -2994,7 +3480,11 @@
             <select class="field" id="setLang">${langs.map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join('')}</select></label>
           <label class="set"${this.api.isM3U ? ' hidden' : ''}><span>Catch-up time correction<small>If replays start at the wrong time, shift them here.</small></span>
             <select class="field" id="setShift">${[-2, -1, 0, 1, 2].map(h => `<option value="${h}">${h === 0 ? 'None (server time)' : (h > 0 ? '+' : '−') + Math.abs(h) + ' hour' + (Math.abs(h) > 1 ? 's' : '')}</option>`).join('')}</select></label>
+          ${window.Native && Native.player.autostart && !CFG.hotel && CFG.autostart !== false ? `<label class="set toggle" id="autoStartRow" hidden><span>Open InkonabTV when the TV turns on<small>Starts on the channel you watched last.</small></span><input type="checkbox" id="setAutoStart"></label>` : ''}
           ${this.homeRowsAvail() ? `<label class="set toggle"><span>Show on the TV's home screen<small>Live channels, movies and series to resume and the newest ones, as rows on the TV's home screen. One click opens them.</small></span><input type="checkbox" id="setHomeRows"></label>` : ''}
+          <label class="set"><span>TV guide link (XMLTV)<small>Optional: a guide of your own (.xml or .xml.gz) for channels whose guide is missing or wrong. Channels are matched by name.</small></span>
+            <span class="set-row"><input class="field" id="setEpg" type="url" inputmode="url" placeholder="https://…/guide.xml.gz" autocapitalize="none" spellcheck="false" value="${esc(Settings.epgUrl || '')}"><button class="btn ghost" id="testEpg">Check</button></span></label>
+          <div class="kv" id="epgState"${Settings.epgUrl ? '' : ' hidden'}><span>Guide link</span><b>…</b></div>
           <label class="set toggle"><span>Show adult categories<small>Protected by your parental PIN. Hidden again each time the app starts.</small></span><input type="checkbox" id="setAdult"></label>
           <div class="kv"><span>Parental PIN</span><b id="pinState">${Settings.adultPin ? 'Set' : 'Not set'}</b></div>
           ${Settings.adultPin ? '<div class="set-row vpn-actions"><button class="btn ghost" id="pinChange">Change PIN</button></div>' : ''}
@@ -3043,6 +3533,16 @@
               <div class="pair-code">…</div><p class="muted pair-note"></p></div>
           </div>
         </section>
+        <section class="set-group" id="recGroup" hidden>
+          <h3>Recordings</h3>
+          <p class="muted small-note">Record live channels on a USB drive or memory stick: press OK on a channel and choose ⏺ Record, or pick a programme still to come in the TV Guide.</p>
+          <div class="set-row vpn-actions"><button class="btn ghost" id="recOpen">Recordings</button></div>
+        </section>
+        ${document.documentElement.classList.contains('tizen') ? '' : `<section class="set-group">
+          <h3>Backup and restore</h3>
+          <p class="muted small-note">${window.Native ? 'Keeps your favorites, groups, lists and settings on a USB drive (or this device) to bring back after a reinstall or on another TV box.' : 'Keeps your favorites, groups, lists and settings in a file, to bring back later or on another device.'} Your sign-in details are not included.</p>
+          <div class="set-row vpn-actions"><button class="btn ghost" id="bkSave">Save a backup</button><button class="btn ghost" id="bkRestore">Restore a backup</button><button class="btn ghost" id="orgLive">✎ Organise lists</button></div>
+        </section>`}
         <section class="set-group">
           <h3>Help</h3>
           <p class="muted small-note">See how to get around the app, with the remote or by touch.</p>
@@ -3083,6 +3583,72 @@
         resetPicks();
         this.route();
       });
+      const autoBox = $('#setAutoStart', m);
+      if (autoBox) {
+        Native.player.autostart({}).then(r => {
+          if (!r.available) return;
+          $('#autoStartRow', m).hidden = false;
+          autoBox.checked = r.on && r.allowed;
+        }).catch(() => {});
+        autoBox.addEventListener('change', async e => {
+          const on = e.target.checked;
+          const r = await Native.player.autostart({ on }).catch(() => null);
+          if (!r || !on) return;
+          if (r.allowed) return this.toast('InkonabTV will open when the TV turns on');
+          // Android asks for "Display over other apps" before an app may open itself at start.
+          const p = await Native.player.autostartPermission().catch(() => ({ opened: false }));
+          if (p.opened) {
+            this.toast('Allow "Display over other apps" for InkonabTV, then come back');
+            // Back from Android's page (it covers only part of the screen, so the page never
+            // hides): keep the switch on only if it was allowed.
+            const App_ = Native.app;
+            let done = false;
+            const back = () => {
+              if (done) return;
+              done = true;
+              Native.player.autostart({}).then(x => { autoBox.checked = x.on && x.allowed; if (!x.allowed) Native.player.autostart({ on: false }); });
+            };
+            if (App_ && App_.addListener) App_.addListener('resume', back).then(h => { const off = () => h.remove(); setTimeout(off, 10 * 60e3); });
+            window.addEventListener('focus', back, { once: true });
+          } else {
+            autoBox.checked = false;
+            Native.player.autostart({ on: false });
+            this.toast('This TV doesn’t let apps open by themselves when it starts');
+          }
+        });
+      }
+      // Own guide link: saved as typed; Check reads it and says how many channels it covers.
+      const epgIn = $('#setEpg', m), epgState = $('#epgState', m);
+      const checkEpg = async () => {
+        if (!Settings.epgUrl) { epgState.hidden = true; return; }
+        epgState.hidden = false;
+        $('b', epgState).textContent = T('Reading the guide…');
+        const x = await OwnGuide.load(this.api).catch(e => ({ error: e }));
+        if (!epgState.isConnected) return;
+        $('b', epgState).textContent = x && !x.error ? `${x.byStream.size} ${T('channels covered')}` : T('Couldn’t read this link');
+      };
+      epgIn.addEventListener('change', () => {
+        Settings.epgUrl = epgIn.value.trim();
+        Settings.save();
+        this.api.ownP = null;
+        this.epgCache = null;
+        this.data.guideCache = null;
+        checkEpg();
+      });
+      $('#testEpg', m).addEventListener('click', () => { Settings.epgUrl = epgIn.value.trim(); Settings.save(); this.api.ownP = null; this.epgCache = null; checkEpg(); });
+      if (Settings.epgUrl && this.api.ownReady) $('b', epgState).textContent = `${this.api.ownReady.byStream.size} ${T('channels covered')}`;
+      else if (Settings.epgUrl) checkEpg();
+      if (window.Native && Native.player.recordings) Native.player.recordings().then(r => {
+        if (!r || !r.available || !m.isConnected) return;
+        const g = $('#recGroup', m);
+        if (g) { g.hidden = false; $('#recOpen', g).addEventListener('click', () => this.openRecordings()); }
+      }).catch(() => {});
+      const bk = $('#bkSave', m);
+      if (bk) {
+        bk.addEventListener('click', () => this.saveBackup());
+        $('#bkRestore', m).addEventListener('click', () => this.restoreBackup());
+        $('#orgLive', m).addEventListener('click', () => this.openOrganise('live'));
+      }
       const homeBox = $('#setHomeRows', m);
       if (homeBox) {
         homeBox.checked = !Settings.noHomeRows;
@@ -3150,6 +3716,7 @@
   };
 
   window.App = App;
+  App.trackLang = trackLang;
   App.rankSearch = (list, term, nameOf = i => i.name) => rankSearch(searchIndex(list, nameOf), term).map(h => h.item); // for tests
   document.addEventListener('DOMContentLoaded', () => App.boot());
 

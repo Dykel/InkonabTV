@@ -42,6 +42,175 @@ public class NativePlayerPlugin extends Plugin {
      * TV home screen rows (Android TV channels and Play Next), written off the main thread.
      * Live TV, Movies and Series rows: Android adds the first by itself and asks once for each other.
      */
+    /**
+     * "Open InkonabTV when the TV turns on" (InkonabTV+ only). { on? } sets it; returns
+     * { available, on, allowed } (allowed: Android lets the app open itself at start).
+     */
+    @PluginMethod
+    public void autostart(PluginCall call) {
+        android.content.Context c = getContext();
+        android.content.SharedPreferences p = c.getSharedPreferences("player", android.content.Context.MODE_PRIVATE);
+        if (call.getData().has("on")) p.edit().putBoolean("autostart", Boolean.TRUE.equals(call.getBoolean("on"))).apply();
+        JSObject r = new JSObject();
+        r.put("available", c.getPackageName().endsWith(".full"));
+        r.put("on", p.getBoolean("autostart", false));
+        r.put("allowed", android.os.Build.VERSION.SDK_INT < 29 || android.provider.Settings.canDrawOverlays(c));
+        call.resolve(r);
+    }
+
+    /** Opens Android's "Display over other apps" page for this app; { opened: false } if the TV has none. */
+    @PluginMethod
+    public void autostartPermission(PluginCall call) {
+        JSObject r = new JSObject();
+        try {
+            Intent i = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + getContext().getPackageName()))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            r.put("opened", true);
+        } catch (Exception e) {
+            r.put("opened", false);
+        }
+        call.resolve(r);
+    }
+
+    // ---------- recordings (InkonabTV+ only; on a USB drive) ----------
+    /** → { available, usb, list } */
+    @PluginMethod
+    public void recordings(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("available", tv.inkonab.app.rec.Recorder.AVAILABLE);
+        r.put("usb", tv.inkonab.app.rec.Recorder.usb(getContext()));
+        try { r.put("list", new JSArray(tv.inkonab.app.rec.Recorder.list(getContext()).toString())); } catch (Exception e) { r.put("list", new JSArray()); }
+        call.resolve(r);
+    }
+
+    /** { title, ch, url, start, end } → { ok, why } */
+    @PluginMethod
+    public void record(PluginCall call) {
+        JSObject r = new JSObject();
+        try {
+            org.json.JSONObject job = new org.json.JSONObject()
+                    .put("title", call.getString("title", "")).put("ch", call.getString("ch", ""))
+                    .put("url", call.getString("url", "")).put("start", call.getData().optLong("start"))
+                    .put("end", call.getData().optLong("end"));
+            String why = tv.inkonab.app.rec.Recorder.add(getContext(), job);
+            r.put("ok", why.isEmpty());
+            r.put("why", why);
+        } catch (Exception e) { r.put("ok", false); r.put("why", "Can't record this channel"); }
+        call.resolve(r);
+    }
+
+    /** { id, delete? } stops (or cancels) a recording; delete also removes its file. */
+    @PluginMethod
+    public void recordStop(PluginCall call) {
+        String id = call.getString("id", "");
+        if (Boolean.TRUE.equals(call.getBoolean("delete", false))) tv.inkonab.app.rec.Recorder.remove(getContext(), id);
+        else tv.inkonab.app.rec.Recorder.stop(getContext(), id);
+        call.resolve();
+    }
+
+    // ---------- programme reminders (shared with PlayerActivity) ----------
+    /** { json? } stores the list when given; returns { json, fired }. */
+    @PluginMethod
+    public void reminders(PluginCall call) {
+        android.content.SharedPreferences p = getContext().getSharedPreferences("player", android.content.Context.MODE_PRIVATE);
+        String json = call.getString("json");
+        if (json != null) p.edit().putString("reminders", json).apply();
+        String fired = call.getString("fired");
+        if (fired != null) p.edit().putString("remFired", fired).apply();
+        JSObject r = new JSObject();
+        r.put("json", p.getString("reminders", "[]"));
+        r.put("fired", p.getString("remFired", "[]"));
+        call.resolve(r);
+    }
+
+    // ---------- backups ----------
+    // In the app's own folder on each storage: a USB drive or memory stick first, else the TV's
+    // own storage (no permission needed). On a USB drive it's Android/data/<app>/files/Backups,
+    // so the stick carries it to another TV box with InkonabTV.
+
+    private java.util.List<java.io.File> backupDirs() {
+        java.util.List<java.io.File> usb = new java.util.ArrayList<>(), own = new java.util.ArrayList<>();
+        for (java.io.File d : getContext().getExternalFilesDirs(null)) {
+            if (d == null) continue;
+            boolean removable = false;
+            try { removable = android.os.Environment.isExternalStorageRemovable(d); } catch (Exception ignored) {}
+            (removable ? usb : own).add(new java.io.File(d, "Backups"));
+        }
+        usb.addAll(own);
+        if (usb.isEmpty()) usb.add(new java.io.File(getContext().getFilesDir(), "Backups"));
+        return usb;
+    }
+
+    /** { json, name } → { path, usb } */
+    @PluginMethod
+    public void backupSave(PluginCall call) {
+        String json = call.getString("json", "");
+        String name = call.getString("name", "inkonabtv-backup.json").replaceAll("[^A-Za-z0-9._-]", "_");
+        for (java.io.File dir : backupDirs()) {
+            try {
+                if (!dir.isDirectory() && !dir.mkdirs()) continue;
+                java.io.File f = new java.io.File(dir, name);
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) { out.write(json.getBytes("UTF-8")); }
+                JSObject r = new JSObject();
+                r.put("path", f.getAbsolutePath());
+                boolean usb = false;
+                try { usb = android.os.Environment.isExternalStorageRemovable(dir.getParentFile()); } catch (Exception ignored) {}
+                r.put("usb", usb);
+                call.resolve(r);
+                return;
+            } catch (Exception ignored) {}
+        }
+        call.reject("Can't save the backup on this device");
+    }
+
+    /** → { list: [{ path, name, size, time, usb }] }, newest first. */
+    @PluginMethod
+    public void backupList(PluginCall call) {
+        JSArray list = new JSArray();
+        java.util.List<java.io.File> all = new java.util.ArrayList<>();
+        java.util.Map<java.io.File, Boolean> onUsb = new java.util.HashMap<>();
+        for (java.io.File dir : backupDirs()) {
+            java.io.File[] fs = dir.listFiles((d, n) -> n.endsWith(".json"));
+            if (fs == null) continue;
+            boolean usb = false;
+            try { usb = android.os.Environment.isExternalStorageRemovable(dir.getParentFile()); } catch (Exception ignored) {}
+            for (java.io.File f : fs) { all.add(f); onUsb.put(f, usb); }
+        }
+        all.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        for (java.io.File f : all) {
+            JSObject o = new JSObject();
+            o.put("path", f.getAbsolutePath());
+            o.put("name", f.getName());
+            o.put("size", f.length());
+            o.put("time", f.lastModified());
+            o.put("usb", Boolean.TRUE.equals(onUsb.get(f)));
+            list.put(o);
+        }
+        JSObject r = new JSObject();
+        r.put("list", list);
+        call.resolve(r);
+    }
+
+    /** { path } → { json } (only files in the backup folders). */
+    @PluginMethod
+    public void backupRead(PluginCall call) {
+        String path = call.getString("path", "");
+        try {
+            java.io.File f = new java.io.File(path).getCanonicalFile();
+            boolean ok = false;
+            for (java.io.File dir : backupDirs()) if (f.getParentFile() != null && f.getParentFile().equals(dir.getCanonicalFile())) ok = true;
+            if (!ok || f.length() > 5 * 1024 * 1024) { call.reject("Not a backup"); return; }
+            byte[] b = new byte[(int) f.length()];
+            try (java.io.FileInputStream in = new java.io.FileInputStream(f)) { int n = 0; while (n < b.length) { int k = in.read(b, n, b.length - n); if (k < 0) break; n += k; } }
+            JSObject r = new JSObject();
+            r.put("json", new String(b, "UTF-8"));
+            call.resolve(r);
+        } catch (Exception e) {
+            call.reject("Can't read the backup");
+        }
+    }
+
     @PluginMethod
     public void homeRows(PluginCall call) {
         String json = call.getString("rows", "{}");
@@ -434,6 +603,7 @@ public class NativePlayerPlugin extends Plugin {
             try {
                 out.put("history", new JSArray(d.getStringExtra("history")));
                 out.put("fav", new JSObject(d.getStringExtra("fav")));
+                if (d.getStringExtra("remindOpen") != null) out.put("remindOpen", d.getStringExtra("remindOpen"));
             } catch (Exception ignored) {
             }
         }
