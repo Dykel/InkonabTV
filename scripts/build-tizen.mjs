@@ -34,8 +34,12 @@ const lower = (code, file) => transformSync(code, { target: TARGET, loader: 'js'
 const playerConfig = readFileSync(join(root, 'config.js'), 'utf8')
   .replace(/^(\s*server:\s*)'[^']*'/m, "$1''")
   .replace(/^(\s*freePlaylists:\s*)\[[\s\S]*?\n\s*\]/m, '$1[]');
+// Smart Hub Preview (the app's rows on the home bar) needs a background service, which Samsung
+// allows to partner sellers only: the store package leaves it out; `npm run tizen -- --preview`
+// builds it in, for a TV in developer mode.
+const PREVIEW = process.argv.includes('--preview');
 writeFileSync(join(out, 'config.js'), lower(playerConfig +
-  "\nObject.assign(window.INKONAB_CONFIG, { playerMode: true, server: '', freePlaylists: [], updateUrl: '' });\n", 'config.js'));
+  `\nObject.assign(window.INKONAB_CONFIG, { playerMode: true, server: '', freePlaylists: [], updateUrl: '', tizenPreview: ${PREVIEW} });\n`, 'config.js'));
 writeFileSync(join(out, 'assets/js/vendor/qrcode.js'), lower(readFileSync(join(root, 'assets/js/vendor/qrcode.js'), 'utf8'), 'qrcode.js'));
 writeFileSync(join(out, 'assets/js/polyfills.js'), lower(readFileSync(join(root, 'tizen/polyfills.js'), 'utf8'), 'polyfills.js'));
 for (const f of readdirSync(join(root, 'assets/js'))) {
@@ -122,9 +126,10 @@ writeFileSync(join(out, 'config.xml'), `<?xml version="1.0" encoding="UTF-8"?>
     <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
     <tizen:privilege name="http://developer.samsung.com/privilege/network.public"/>
     <tizen:privilege name="http://developer.samsung.com/privilege/avplay"/>
-    <tizen:privilege name="http://tizen.org/privilege/application.launch"/>
+${PREVIEW ? `    <tizen:privilege name="http://tizen.org/privilege/application.launch"/>
     <!-- Smart Hub Preview: rows under the app's tile (tizen/preview-service.js); a tile reopens the app with its link. -->
     <tizen:metadata key="http://samsung.com/tv/metadata/use.preview" value="bg_service"/>
+    <tizen:metadata key="http://samsung.com/tv/metadata/devel.api.version" value="2.4"/>
     <tizen:app-control>
         <tizen:src name="index.html" reload="disable"/>
         <tizen:operation name="http://samsung.com/appcontrol/operation/eden_resume"/>
@@ -136,13 +141,16 @@ writeFileSync(join(out, 'config.xml'), `<?xml version="1.0" encoding="UTF-8"?>
         <tizen:description>Smart Hub Preview rows</tizen:description>
         <tizen:category name="http://tizen.org/category/service"/>
     </tizen:service>
-    <tizen:setting screen-orientation="landscape" context-menu="disable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
+` : ''}    <tizen:setting screen-orientation="landscape" context-menu="disable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
     <access origin="*" subdomains="true"/>
 </widget>
 `);
 copyFileSync(join(root, 'store/samsung/icon_512x423.png'), join(out, 'icon.png')); // Samsung: 512 × 423
-mkdirSync(join(out, 'service'), { recursive: true });
-copyFileSync(join(root, 'tizen/preview-service.js'), join(out, 'service/preview-service.js'));
+if (PREVIEW) {
+  mkdirSync(join(out, 'service'), { recursive: true });
+  copyFileSync(join(root, 'tizen/preview-service.js'), join(out, 'service/preview-service.js'));
+}
+console.log(PREVIEW ? 'With Smart Hub Preview (developer TVs)' : 'Store package: no Smart Hub Preview');
 console.log('Samsung TV app built in build/tizen');
 
 // ---------- package (.wgt) ----------

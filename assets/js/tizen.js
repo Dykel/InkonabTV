@@ -354,7 +354,9 @@
   // app.js builds the rows (homeRowsData); the preview service (tizen/preview-service.js) sets
   // them. A tile reopens the app with its inkonabtv:// link (eden_resume, PAYLOAD).
   const PREVIEW_SERVICE = 'InkonabTV1.Preview';
-  window.TizenHome = {
+  // Only in packages built with it (developer TVs): Samsung allows the preview service to partner
+  // sellers only, so the store version has no home bar rows (and no setting for them).
+  if ((window.INKONAB_CONFIG || {}).tizenPreview) window.TizenHome = {
     set(rows) {
       try {
         const tiles = (list, ratio) => (list || []).filter(t => /^https?:/.test(t.img || '')).slice(0, 12)
