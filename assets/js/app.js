@@ -1293,11 +1293,16 @@
       window.scrollTo(0, 0);
       const main = $('#view');
       main.innerHTML = '<div class="loader"><span></span></div>';
+      // Each page load gets a number: a page still downloading when another tab is opened (after a
+      // playlist-language change, the first download can take a while) must not draw over it.
+      const seq = String((this.routeSeq = (this.routeSeq || 0) + 1));
+      main.dataset.seq = seq;
       this.cancelRetry();
       const render = { home: this.renderHome, live: this.renderLive, guide: this.renderGuide, movies: this.renderMovies, series: this.renderSeries }[this.view];
       setTimeout(() => this.detectGenres().catch(() => {}), 8000); // once, after the first page is up
       return render.call(this, main).then(() => { this.routeFails = 0; }).catch(err => {
         console.error(err);
+        if (main.dataset.seq !== seq) return; // another page is open now
         main.innerHTML = `<div class="empty"><h3>Couldn’t load this page</h3><p>${esc(err.message)}</p><p class="retry-count"></p><button class="btn" id="retry">Try again</button></div>`;
         // A failed download stays failed in this.data: start the page's data afresh.
         const again = () => { this.data = {}; this.route(); };
@@ -2139,8 +2144,13 @@
     },
 
     // ---------- home ----------
+    // Is `main` still showing the page this render started for? (see route)
+    stale(main, seq) { return main.dataset.seq !== seq; },
+
     async renderHome(main) {
+      const seq = main.dataset.seq;
       const [vod, series] = await Promise.all([this.loadVod(), this.loadSeries(), this.genreCats('movie'), this.genreCats('series')]);
+      if (this.stale(main, seq)) return;
       const movies = uniq(this.allowed(vod)), shows = uniq(series);
       // Two movies, then one series, so both show up even when one side is updated more often.
       const latest = [];
@@ -2251,8 +2261,10 @@
 
     async renderBrowse(main, kind) {
       this.setBackdrop('');
+      const seq = main.dataset.seq;
       const [all, cats, picks] = await Promise.all([kind === 'movie' ? this.loadVod() : this.loadSeries(), this.loadCats(kind), this.tmdbPicks(kind)]);
       await this.genreCats(kind);
+      if (this.stale(main, seq)) return;
       const hiddenCats = new Set(this.org(kind).hidden || []);
       const items = this.allowed(all).filter(i => !hiddenCats.has(String(i.cat)));
       const perCat = {};
@@ -2456,7 +2468,9 @@
     // ---------- live ----------
     async renderLive(main) {
       this.setBackdrop('');
+      const seq = main.dataset.seq;
       const [base, cat] = await Promise.all([this.liveGroups(), this.liveCatalog()]);
+      if (this.stale(main, seq)) return;
       // TV and wider: genres are a row of pills. Phones: they stay in the swipeable category row.
       const phone = matchMedia('(max-width: 860px)').matches, pinned = g => g.free || g.special;
       const groups = phone ? [...base.filter(pinned), ...cat.genres, ...base.filter(g => !pinned(g))] : base;
@@ -2748,7 +2762,9 @@
     // ---------- TV guide grid ----------
     async renderGuide(main) {
       this.setBackdrop('');
+      const seq = main.dataset.seq;
       const groups = (await this.liveGroups()).filter(g => !g.free);
+      if (this.stale(main, seq)) return;
       if (!groups.length) { main.innerHTML = '<div class="empty"><h3>No channels</h3></div>'; return; }
       // The last group watched, else the first one whose channels have a guide.
       const hasGuide = g => g.channels.some(c => c.versions && c.versions.some(v => v.epg_channel_id));
