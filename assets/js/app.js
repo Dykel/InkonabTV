@@ -546,7 +546,8 @@
       $('#app').classList.add('hidden');
       $('#login').classList.remove('hidden');
       $('#loginError').textContent = error || '';
-      this.renderFree($('#freeLogin'));
+      // The built-in free channels (MBC PLAY in InkonabTV+) show after sign-in only, not here.
+      $('#freeLogin').innerHTML = '';
       if (CFG.playerMode) {
         $('#loginSub').textContent = 'Add your playlist';
         $('#loginNote').hidden = false;
