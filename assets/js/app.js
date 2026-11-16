@@ -25,11 +25,11 @@
   // interface language: 'l:xx' is a language, 'r:XX' a country (both named by Intl), anything else
   // a plain English name (translated by i18n.js).
   const PLAYLIST_LANGS = {
-    FR: 'l:fr', EN: 'l:en', UK: 'r:GB', USA: 'r:US', US: 'r:US', CAN: 'r:CA', QC: 'Québec', ESP: 'l:es', ES: 'l:es', DE: 'l:de',
+    FR: 'l:fr', EN: 'l:en', TN: 'r:TN', MA: 'r:MA', DZ: 'r:DZ', EG: 'r:EG', UK: 'r:GB', USA: 'r:US', US: 'r:US', CAN: 'r:CA', QC: 'Québec', ESP: 'l:es', ES: 'l:es', DE: 'l:de',
     NL: 'l:nl', BE: 'r:BE', IT: 'l:it', PT: 'l:pt', BR: 'r:BR', ARA: 'l:ar', AR: 'l:ar', TR: 'l:tr', PL: 'l:pl', SE: 'r:SE',
     NO: 'r:NO', DK: 'r:DK', FI: 'r:FI', SCAN: 'Scandinavia', IS: 'r:IL', ISR: 'r:IL', GR: 'l:el', RO: 'l:ro', BG: 'l:bg', RU: 'l:ru',
     CZ: 'r:CZ', HU: 'l:hu', HR: 'r:HR', SL: 'r:SI', AL: 'l:sq', EXYU: 'Ex-Yugoslavia', AT: 'r:AT', CH: 'r:CH', CY: 'r:CY', MT: 'r:MT',
-    IR: 'l:fa', KU: 'l:ku', AF: 'r:AF', PK: 'r:PK', IN: 'r:IN', PH: 'r:PH', ID: 'r:ID', CN: 'l:zh', JP: 'l:ja', AS: 'Asia',
+    IR: 'l:fa', KU: 'l:ku', AF: 'Africa', PK: 'r:PK', IN: 'r:IN', PH: 'r:PH', ID: 'r:ID', CN: 'l:zh', JP: 'l:ja', AS: 'Asia',
     AU: 'r:AU', NZ: 'r:NZ', SO: 'l:so', MU: 'Music', AFRICAN: 'Africa', CG: 'r:ME', LV: 'Latin America', LA: 'Latvia / Latino',
     EU: 'Europe', GLOBAL: 'International', MULTI: 'Multi-language', SPT: 'Sports',
   };
@@ -1339,8 +1339,8 @@
         await this.loadCats(kind);
         const out = {};
         for (const c of await this.data[kind + 'Cats']) {
-          const m = /^\s*([A-Za-z]{2,5})\s*[:|]/.exec(c.category_name || '');
-          if (m && PLAYLIST_LANGS[m[1].toUpperCase()]) out[String(c.category_id)] = m[1].toUpperCase();
+          const code = langCode(c.category_name);
+          if (PLAYLIST_LANGS[code]) out[String(c.category_id)] = code;
         }
         return out;
       } catch { return {}; }

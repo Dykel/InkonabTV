@@ -861,9 +861,16 @@
   };
 
   function asArray(v) {
-    if (Array.isArray(v)) return v;
-    if (v && typeof v === 'object') return Object.values(v);
-    return [];
+    const a = Array.isArray(v) ? v : v && typeof v === 'object' ? Object.values(v) : [];
+    return a.length && a[0] && typeof a[0] === 'object' ? a.map(clean) : a;
+  }
+  // Some panels write a missing value as the text "None" (stream_icon, epg_channel_id, cover…):
+  // read as "", so no broken logo is loaded and no channel claims a guide it doesn't have.
+  const NONE = /^(none|null|undefined)$/i;
+  function clean(o) {
+    if (!o || typeof o !== 'object') return o;
+    for (const k in o) if (typeof o[k] === 'string' && NONE.test(o[k])) o[k] = '';
+    return o;
   }
 
   // The language code a category name starts with ("FR: Sport" → "FR", "UK | News" → "UK"); '' when none.
@@ -876,9 +883,20 @@
   // When a saved list was last compared with the server (an unchanged list keeps its old date).
   function checkedAt(key, t) { return Math.max(t || 0, Store.get('checked.' + key, 0)); }
 
+  // "FR: Sport", "UK | News" → FR / UK. Some panels write "FR-FRANCE" or "VOD FR" / "Series EN 2024",
+  // or name Arabic categories in Arabic script only ("أفلام عربي") → FR / EN / AR.
+  const NOT_LANG = new Set(['VOD', 'TOP', 'NEW', 'HD', 'FHD', 'UHD', 'SD', 'TV', 'PPV', 'VIP', 'ALL', 'THE']);
+  const WORD_LANG = /(?:^|[\s(\[])(FR|EN|AR|ES|ESP|DE|IT|PT|NL|PL|TR|RU|GR|RO)(?=$|[\s)\]])/;
   function langCode(name) {
-    const m = /^\s*([A-Za-z]{2,8})\s*[:|]/.exec(name || '');
-    return m ? m[1].toUpperCase() : '';
+    name = String(name || '');
+    let m = /^\s*([A-Za-z]{2,8})\s*[:|]/.exec(name);
+    if (m) return m[1].toUpperCase();
+    m = /^\s*([A-Z]{2,3})\s?-\s?[^\s\d-]/.exec(name);
+    if (m && !NOT_LANG.has(m[1])) return m[1];
+    m = WORD_LANG.exec(name.replace(/\bSUB[\s-]+[A-Za-z]{2,3}\b/gi, ''));
+    if (m) return m[1];
+    if (/[\u0600-\u06FF]/.test(name)) return 'AR';
+    return '';
   }
 
   function b64(s) {
