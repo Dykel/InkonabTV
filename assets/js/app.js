@@ -326,6 +326,7 @@
         await this.connect(creds, { quick: true });
         this.start();
       } catch (err) {
+        if (this.accountBlocked(err)) return this.showExpired(err.message);
         this.showLogin();
         this.loginFailed(err, creds, 0);
       } finally {
@@ -432,7 +433,7 @@
         try { await api.login({ strict: true }); }
         catch (err) {
           if (this.api !== api) return;
-          if (!this.unreachable(err)) return this.signedOut(err.message);
+          if (!this.unreachable(err)) return this.accountBlocked(err, api) ? this.showExpired(err.message) : this.signedOut(err.message);
           let ok = await this.vpnRescue();
           if (ok) ok = await this.loginThroughVpn(api).then(() => true, () => false);
           if (!ok) {
@@ -458,6 +459,83 @@
       if (this.api !== api || !api.refreshFailed || !(await this.vpnRescue(true))) return;
       await new Promise(r => setTimeout(r, 3000));
       if (this.api === api) await api.refreshAll();
+    },
+
+    // The subscription ended or the account was disabled ("Account expired"), or the server now
+    // refuses an account whose saved end date has passed (some panels answer an expired account
+    // as a wrong password).
+    accountBlocked(err, api) {
+      const m = String((err && err.message) || '');
+      if (/^Account /.test(m)) return true;
+      if (!/^Wrong username/.test(m)) return false;
+      const end = Number((((api || this.api || {}).info || {}).user_info || {}).exp_date) * 1000;
+      return end > 0 && end < Date.now();
+    },
+
+    // Instead of signing out: an Expired screen. The account stays saved, so Try again opens the
+    // app as soon as it's renewed; a phone can send another account (QR code); or Sign out.
+    showExpired(message) {
+      const disabled = /disabled|banned/i.test(message || '');
+      this.api = null;
+      this.data = {};
+      this.closeModal();
+      try { if (Player.isOpen()) Player.close(); } catch {}
+      $('#app').classList.add('hidden');
+      $('#login').classList.add('hidden');
+      const box = $('#expired');
+      box.classList.remove('hidden');
+      $('#expBadge').textContent = disabled ? 'Disabled' : 'Expired';
+      $('#expTitle').textContent = disabled ? 'This account is disabled' : 'Your subscription has expired';
+      $('#expText').textContent = disabled ? 'Contact your provider, then choose Try again.'
+        : 'Renew it with your provider, then choose Try again. Your favourites and settings are kept.';
+      $('#expError').textContent = '';
+      if (!box.dataset.bound) {
+        box.dataset.bound = '1';
+        $('#expRetry').addEventListener('click', () => this.retryExpired());
+        $('#expOut').addEventListener('click', () => { this.hideExpired(); this.logout(); });
+      }
+      const pair = $('#expPair');
+      pair.hidden = !CFG.pairApi;
+      if (CFG.pairApi) {
+        this.startPair({
+          box: pair,
+          onData: d => {
+            this.hideExpired();
+            this.showLogin();
+            const c = this.pairCreds(d);
+            if (c.m) $('#loginM3u').value = c.m; else { $('#loginUser').value = c.u || ''; if (c.s) $('#loginServer').value = c.s; }
+            this.signIn(c);
+          },
+        });
+      }
+      setTimeout(() => $('#expRetry').focus(), 50);
+    },
+
+    hideExpired() {
+      this.stopPair();
+      $('#expired').classList.add('hidden');
+    },
+
+    async retryExpired() {
+      const creds = Store.get('creds');
+      if (!creds) { this.hideExpired(); return this.showLogin(); }
+      const btn = $('#expRetry'), err = $('#expError');
+      btn.disabled = true; btn.textContent = 'Checking…'; err.textContent = '';
+      try {
+        await this.connect(creds);
+        this.hideExpired();
+        this.start();
+      } catch (e) {
+        err.textContent = this.accountBlocked(e) ? 'Still not active. Renew it with your provider, then try again.' : this.loginError(e, creds);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Try again';
+        if (!$('#expired').classList.contains('hidden')) btn.focus(); // the remote keeps its place
+      }
+    },
+
+    // What a phone sent through remote setup → sign-in details.
+    pairCreds(d) {
+      return d.m ? { m: d.m } : { s: CFG.playerMode ? normServer(d.s) : undefined, u: d.u, p: d.p };
     },
 
     // The server refused the saved account (password changed, subscription ended): back to sign-in.
@@ -544,6 +622,7 @@
 
     showLogin(error) {
       $('#app').classList.add('hidden');
+      $('#expired').classList.add('hidden');
       $('#login').classList.remove('hidden');
       $('#loginError').textContent = error || '';
       // The built-in free channels (MBC PLAY in InkonabTV+) show after sign-in only, not here.
@@ -702,7 +781,7 @@
             if (run !== this.pairRun) return;
             this.pairRun = null;
             if (opts.onData) return opts.onData(d);
-            const c = d.m ? { m: d.m } : { s: CFG.playerMode ? normServer(d.s) : undefined, u: d.u, p: d.p };
+            const c = this.pairCreds(d);
             if (c.m) $('#loginM3u').value = c.m; else { $('#loginUser').value = c.u || ''; if (c.s) $('#loginServer').value = c.s; }
             note.textContent = 'Received — signing in…';
             return this.signIn(c);
@@ -2260,6 +2339,76 @@
     renderMovies(main) { return this.renderBrowse(main, 'movie'); },
     renderSeries(main) { return this.renderBrowse(main, 'series'); },
 
+    // Movies / Series: the category list hides at the left so the covers get the whole width.
+    // ◀ from the first column (or the › tab) slides it in; ▶, Back, a category or a click outside
+    // slides it away and the focus goes back to the covers. Phones keep their row of chips.
+    catsDrawer(main) {
+      const box = $('#browse', main), side = $('#catsSide', main), tab = $('#catsHandle', main), wrap = $('.grid-wrap', main);
+      const wide = () => getComputedStyle(tab).display !== 'none';
+      let back = null;
+      const isOpen = () => box.classList.contains('open');
+      const set = on => {
+        box.classList.toggle('open', on);
+        tab.setAttribute('aria-expanded', String(on));
+        if (on || !wide()) side.removeAttribute('inert'); else side.setAttribute('inert', '');
+      };
+      const open = () => {
+        if (!wide() || isOpen()) return;
+        const a = document.activeElement;
+        back = a && wrap.contains(a) ? a : null;
+        set(true);
+        const on = $('.cat.active', side) || $('.cat', side);
+        if (on) { on.focus({ preventScroll: true }); on.scrollIntoView({ block: 'nearest' }); }
+      };
+      const close = toCovers => {
+        if (!isOpen()) return;
+        set(false);
+        if (toCovers === false) return;
+        const to = toCovers === true ? $('#grid .card', main) : back && back.isConnected ? back : $('#grid .card', main);
+        if (to) to.focus({ preventScroll: true });
+        if (toCovers === true) window.scrollTo({ top: Math.max(0, wrap.getBoundingClientRect().top + scrollY - 130), behavior: 'smooth' });
+      };
+      set(false);
+      addEventListener('resize', () => { if (box.isConnected && !isOpen()) set(false); });
+      tab.addEventListener('click', () => (isOpen() ? close() : open()));
+      // ◀ with nothing more to its left among the covers (or the genre row) opens the list.
+      main.addEventListener('keydown', e => {
+        if (e.key !== 'ArrowLeft' || isOpen() || !wide()) return;
+        const a = document.activeElement;
+        if (!a || !wrap.contains(a) || a.matches('input, select')) return;
+        const r = a.getBoundingClientRect();
+        const pool = a.closest('.genre-cards') ? $$('.genre-card', wrap) : $$('#grid .card', wrap);
+        const more = pool.some(el => {
+          if (el === a) return false;
+          const b = el.getBoundingClientRect();
+          return b.right <= r.left + 4 && Math.min(r.bottom, b.bottom) - Math.max(r.top, b.top) > 0;
+        });
+        if (more) return;
+        e.preventDefault(); e.stopPropagation();
+        open();
+      }, true);
+      side.addEventListener('keydown', e => {
+        if (!isOpen()) return;
+        const t = e.target;
+        const typing = t.matches('input') && !t.hasAttribute('data-im') && !t.readOnly;
+        const goBack = e.key === 'Escape' || e.key === 'BrowserBack' || e.key === 'GoBack' || (e.key === 'Backspace' && !t.matches('input'));
+        if (goBack || (e.key === 'ArrowRight' && !(typing && t.selectionStart < t.value.length))) {
+          e.preventDefault(); e.stopPropagation();
+          close();
+        }
+      });
+      // Up to the menu bar, or a click elsewhere: the list just goes away.
+      side.addEventListener('focusout', e => {
+        if (isOpen() && e.relatedTarget && !side.contains(e.relatedTarget) && e.relatedTarget !== tab) close(false);
+      });
+      const outside = e => {
+        if (!box.isConnected) { document.removeEventListener('pointerdown', outside, true); return; }
+        if (isOpen() && !side.contains(e.target) && !tab.contains(e.target) && !e.target.closest('#modal')) close(false);
+      };
+      document.addEventListener('pointerdown', outside, true);
+      return { isOpen, open, close };
+    },
+
     async renderBrowse(main, kind) {
       this.setBackdrop('');
       const seq = main.dataset.seq;
@@ -2285,8 +2434,11 @@
 
       main.innerHTML = `
         <section class="slider" id="slider" aria-roledescription="carousel"></section>
-        <div class="browse">
-          <aside class="cats">
+        <div class="browse drawer" id="browse">
+          <button class="cats-handle" id="catsHandle" tabindex="-1" aria-expanded="false" aria-controls="catsSide">
+            <span class="ch-arrow" aria-hidden="true">›</span><span class="ch-label">Categories</span>
+          </button>
+          <aside class="cats" id="catsSide">
             <input class="field" type="search" placeholder="Filter categories" id="catFilter">
             <div class="cat-list" id="catList">
               <button class="cat special org-open" data-org="${kind}" data-name="">✎ Organise</button>
@@ -2364,7 +2516,9 @@
         $$('.cat', main).forEach(c => c.classList.toggle('active', c === b));
         this.browseCat = b.dataset.cat;
         show(b.dataset.cat, b.firstChild.textContent.trim());
+        if (drawer.isOpen()) drawer.close(true);
       });
+      const drawer = this.catsDrawer(main);
       // The order chosen is kept for next time (one for movies, one for series).
       const sortKey = 'sort' + (kind === 'movie' ? 'Movies' : 'Series');
       if (Settings[sortKey] && $(`option[value="${Settings[sortKey]}"]`, sortSel)) sortSel.value = Settings[sortKey];

@@ -53,6 +53,33 @@
     <div class="login-free" id="freeLogin"></div>
   </section>
 
+  <!-- Account expired / disabled: the account stays saved; renew and try again, add another from a phone, or sign out -->
+  <section id="expired" class="login expired hidden" aria-labelledby="expTitle">
+    <div class="login-card has-pair">
+      <img class="login-logo" data-logo alt="">
+      <div class="exp-head">
+        <span class="exp-badge" id="expBadge">Expired</span>
+        <h2 id="expTitle">Your subscription has expired</h2>
+        <p id="expText">Renew it with your provider, then choose Try again. Your favourites and settings are kept.</p>
+      </div>
+      <div class="pair" id="expPair">
+        <img class="pair-qr" alt="">
+        <div class="pair-text">
+          <p>Use another account: on your phone, open</p>
+          <b class="pair-url"></b>
+          <p>and enter this code:</p>
+          <div class="pair-code">…</div>
+          <p class="muted pair-note"></p>
+        </div>
+      </div>
+      <p class="login-error" id="expError" role="alert"></p>
+      <div class="exp-actions">
+        <button class="btn primary" id="expRetry" type="button">Try again</button>
+        <button class="btn ghost" id="expOut" type="button">Sign out</button>
+      </div>
+    </div>
+  </section>
+
   <!-- App -->
   <div id="app" class="app hidden">
     <header class="topbar">

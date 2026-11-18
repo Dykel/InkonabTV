@@ -26,6 +26,16 @@
     'Your subscription ends soon': ['Votre abonnement se termine bientôt', 'Tu suscripción termina pronto', 'Dein Abo endet bald', 'Il tuo abbonamento sta per scadere', 'A sua subscrição termina em breve'],
     'Your subscription ends today.': ['Votre abonnement se termine aujourd’hui.', 'Tu suscripción termina hoy.', 'Dein Abo endet heute.', 'Il tuo abbonamento scade oggi.', 'A sua subscrição termina hoje.'],
     'Contact your provider to renew it and keep watching.': ['Contactez votre fournisseur pour le renouveler et continuer à regarder.', 'Contacta con tu proveedor para renovarla y seguir viendo.', 'Wende dich an deinen Anbieter, um es zu verlängern und weiterzuschauen.', 'Contatta il tuo fornitore per rinnovarlo e continuare a guardare.', 'Contacte o seu fornecedor para a renovar e continuar a ver.'],
+    // account expired / disabled
+    'Expired': ['Expiré', 'Caducada', 'Abgelaufen', 'Scaduto', 'Expirada'],
+    'Disabled': ['Désactivé', 'Desactivada', 'Deaktiviert', 'Disattivato', 'Desativada'],
+    'Your subscription has expired': ['Votre abonnement a expiré', 'Tu suscripción ha caducado', 'Dein Abo ist abgelaufen', 'Il tuo abbonamento è scaduto', 'A sua subscrição expirou'],
+    'This account is disabled': ['Ce compte est désactivé', 'Esta cuenta está desactivada', 'Dieses Konto ist deaktiviert', 'Questo account è disattivato', 'Esta conta está desativada'],
+    'Renew it with your provider, then choose Try again. Your favourites and settings are kept.': ['Renouvelez-le auprès de votre fournisseur, puis choisissez Réessayer. Vos favoris et réglages sont conservés.', 'Renuévala con tu proveedor y elige Reintentar. Tus favoritos y ajustes se conservan.', 'Verlängere es bei deinem Anbieter und wähle dann Erneut versuchen. Favoriten und Einstellungen bleiben erhalten.', 'Rinnovalo con il tuo fornitore, poi scegli Riprova. Preferiti e impostazioni restano salvati.', 'Renove-a com o seu fornecedor e escolha Tentar novamente. Os favoritos e definições são mantidos.'],
+    'Contact your provider, then choose Try again.': ['Contactez votre fournisseur, puis choisissez Réessayer.', 'Contacta con tu proveedor y elige Reintentar.', 'Wende dich an deinen Anbieter und wähle dann Erneut versuchen.', 'Contatta il tuo fornitore, poi scegli Riprova.', 'Contacte o seu fornecedor e escolha Tentar novamente.'],
+    'Use another account: on your phone, open': ['Utiliser un autre compte : sur votre téléphone, ouvrez', 'Usar otra cuenta: en tu teléfono, abre', 'Anderes Konto nutzen: Öffne auf deinem Handy', 'Usa un altro account: sul telefono apri', 'Usar outra conta: no telemóvel, abra'],
+    'Checking…': ['Vérification…', 'Comprobando…', 'Wird geprüft…', 'Verifica…', 'A verificar…'],
+    'Still not active. Renew it with your provider, then try again.': ['Toujours inactif. Renouvelez-le auprès de votre fournisseur, puis réessayez.', 'Sigue sin estar activa. Renuévala con tu proveedor y vuelve a intentarlo.', 'Noch nicht aktiv. Verlängere es bei deinem Anbieter und versuche es erneut.', 'Non ancora attivo. Rinnovalo con il fornitore e riprova.', 'Ainda inativa. Renove-a com o fornecedor e tente novamente.'],
     // genres
     'All genres': ['Tous les genres', 'Todos los géneros', 'Alle Genres', 'Tutti i generi', 'Todos os géneros'],
     'Genres': ['Genres', 'Géneros', 'Genres', 'Generi', 'Géneros'],

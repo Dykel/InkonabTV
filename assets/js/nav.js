@@ -9,6 +9,8 @@
     if (keypad) return keypad;
     const modal = document.querySelector('#modal:not(.hidden)');
     if (modal) return modal;
+    const expired = document.querySelector('#expired:not(.hidden)');
+    if (expired) return expired;
     const login = document.querySelector('#login:not(.hidden)');
     return login || document.querySelector('#app');
   }
