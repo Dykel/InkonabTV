@@ -36,6 +36,7 @@
   };
 
   // IndexedDB key/value store: the playlists are several MB each (too big for localStorage).
+  const DISK_PART = 5000;
   const Disk = {
     open() {
       if (!this.db) {
@@ -60,8 +61,40 @@
         });
       } catch { return null; }
     },
-    get(key) { return this.run('readonly', st => st.get(key)); },
-    set(key, value) { return this.run('readwrite', st => st.put(value, key)); },
+    // Big lists ({ t, d: [200 000 titles] }) are kept in parts of 5 000: saving or reading them in
+    // one go stopped the screen for half a second on a TV. The record then holds { …, d: null,
+    // parts, gen }, written after its parts, so an interrupted save leaves the old copy whole.
+    async get(key) {
+      const v = await this.run('readonly', st => st.get(key));
+      if (!v || !v.parts) return v;
+      const d = [];
+      for (let i = 0; i < v.parts; i++) {
+        const part = await this.run('readonly', st => st.get(`${key}#${v.gen}#${i}`));
+        if (!Array.isArray(part)) return null;
+        for (const x of part) d.push(x);
+      }
+      return { ...v, d };
+    },
+    async set(key, value) {
+      const d = value && value.d;
+      if (!Array.isArray(d) || d.length <= DISK_PART) {
+        const old = await this.run('readonly', st => st.get(key));
+        await this.run('readwrite', st => st.put(value, key));
+        return this.dropParts(key, old);
+      }
+      const old = await this.run('readonly', st => st.get(key));
+      const gen = Date.now().toString(36) + Math.random().toString(36).slice(2, 6), parts = Math.ceil(d.length / DISK_PART);
+      for (let i = 0; i < parts; i++) {
+        const part = d.slice(i * DISK_PART, (i + 1) * DISK_PART);
+        await this.run('readwrite', st => st.put(part, `${key}#${gen}#${i}`));
+      }
+      await this.run('readwrite', st => st.put({ ...value, d: null, parts, gen }, key));
+      return this.dropParts(key, old);
+    },
+    dropParts(key, old) {
+      if (!old || !old.parts) return null;
+      return this.run('readwrite', st => { for (let i = 0; i < old.parts; i++) st.delete(`${key}#${old.gen}#${i}`); });
+    },
     clear() { return this.run('readwrite', st => st.clear()); },
   };
 

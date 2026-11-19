@@ -201,35 +201,64 @@
   const soundKey = t => t.replace(/ph/g, 'f').replace(/gh/g, '').replace(/eau|au/g, 'o').replace(/ou/g, 'u').replace(/[ae]i/g, 'e').replace(/qu|ck|c(?![eiy])/g, 'k')
     .replace(/c/g, 's').replace(/y/g, 'i').replace(/z/g, 's').replace(/w/g, 'v').replace(/h/g, '').replace(/(.)\1+/g, '$1')
     .replace(/(er|ez|et)$/, 'e').replace(/(.{3,})[estxd]$/, '$1');
+  // Big playlists (200 000 titles): long loops run in slices of ~8 ms, so the TV keeps drawing and
+  // answering the remote in between (one long loop froze the screen for 1–2 s on a TV).
+  const yieldNow = () => new Promise(r => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); });
+  async function eachSlice(list, fn, ms = 8) {
+    let t = performance.now();
+    for (let i = 0; i < list.length; i++) {
+      fn(list[i], i);
+      if ((i & 127) === 127 && performance.now() - t > ms) { await yieldNow(); t = performance.now(); }
+    }
+  }
+  async function mapSlices(list, fn) { const out = new Array(list.length); await eachSlice(list, (x, i) => { out[i] = fn(x); }); return out; }
+
   // Word index of a list: built once per list (the lists are kept while the playlist is the same).
-  const searchIndexes = new WeakMap();
+  const searchIndexes = new WeakMap(), indexBuilds = new WeakMap();
+  const newIndex = list => ({ list, byWord: new Map(), compact: [], first: [] });
+  function indexItem(ix, nameOf, item, n) {
+    const t = toks(nameOf(item));
+    ix.compact.push(t.join(''));
+    ix.first.push(t[0] || '');
+    for (const w of new Set(t)) { let set = ix.byWord.get(w); if (!set) ix.byWord.set(w, set = []); set.push(n); }
+  }
   function searchIndex(list, nameOf) {
     let ix = searchIndexes.get(list);
     if (ix) return ix;
-    const byWord = new Map(), compact = [], first = [];
-    list.forEach((item, n) => {
-      const t = toks(nameOf(item));
-      compact.push(t.join(''));
-      first.push(t[0] || '');
-      for (const w of new Set(t)) { let set = byWord.get(w); if (!set) byWord.set(w, set = []); set.push(n); }
-    });
-    const vocab = [...byWord.keys()];
-    ix = { list, byWord, vocab, sounds: vocab.map(soundKey), compact, first };
+    ix = newIndex(list);
+    list.forEach((item, n) => indexItem(ix, nameOf, item, n));
+    ix.vocab = [...ix.byWord.keys()];
+    ix.sounds = ix.vocab.map(soundKey);
     searchIndexes.set(list, ix);
     return ix;
   }
-  // [{ item, score, full }] best first; full: every word typed matched (else one was left out). boost(item) adds up to ~60 (popularity, favourites, watched).
-  function rankSearch(ix, term, boost = () => 0) {
+  // The same, in slices (in the background after the first page, or while the search shows its loader).
+  function searchIndexSoon(list, nameOf) {
+    if (searchIndexes.has(list)) return Promise.resolve();
+    if (indexBuilds.has(list)) return indexBuilds.get(list);
+    const p = (async () => {
+      const ix = newIndex(list);
+      await eachSlice(list, (item, n) => indexItem(ix, nameOf, item, n));
+      ix.vocab = [...ix.byWord.keys()];
+      ix.sounds = await mapSlices(ix.vocab, soundKey);
+      if (!searchIndexes.has(list)) searchIndexes.set(list, ix);
+    })();
+    indexBuilds.set(list, p);
+    return p;
+  }
+  // The ranking in steps, so it can run at once (tests) or a slice at a time (the search screen:
+  // matching against every word of a 200 000-title playlist stopped a TV for half a second).
+  function rankSteps(ix, term, boost) {
     let q = toks(term);
     if (!q.length) q = words(term).split(' ').filter(Boolean);
-    if (!q.length) return [];
+    if (!q.length) return null;
     const per = new Map(); // item index → { words: [{typos, exact}] }
-    q.forEach((w, k) => {
+    const word = (w, k) => {
       const last = k === q.length - 1;
       // Numbers must match as typed (911 is not 91), as on the big search engines.
       const num = /\d/.test(w);
       const budget = num ? 0 : typoBudget(w.length), sw = !num && w.length >= 3 ? soundKey(w) : null;
-      ix.vocab.forEach((v, vi) => {
+      return (v, vi) => {
         let typos = -1, exact = false;
         if (v === w) { typos = 0; exact = true; }
         else if (v.startsWith(w) && (last || w.length >= 3)) typos = 0;
@@ -247,26 +276,44 @@
           const old = e.words[k];
           if (!old || typos < old.typos || (typos === old.typos && exact && !old.exact)) e.words[k] = { typos, exact };
         }
-      });
-    });
+      };
+    };
     // Words typed joined or apart: "spiderman" / "spider man".
     const joined = q.join(''), jb = /\d/.test(joined) ? 0 : typoBudget(joined.length);
-    if (joined.length >= 5) ix.compact.forEach((c, n) => {
+    const join = joined.length >= 5 ? (c, n) => {
       if (per.has(n) && per.get(n).words.filter(Boolean).length === q.length) return;
       const d = c.startsWith(joined) ? 0 : editDistance(joined, c.slice(0, joined.length), jb);
       if (d <= jb) per.set(n, { words: q.map(() => ({ typos: d, exact: false })) });
-    });
-    const need = q.length >= 3 ? q.length - 1 : q.length;
-    const out = [];
-    for (const [n, e] of per) {
-      const hit = e.words.filter(Boolean);
-      if (hit.length < need) continue;
-      const typos = hit.reduce((a, h) => a + h.typos, 0), exact = hit.filter(h => h.exact).length;
-      const item = ix.list[n];
-      const starts = e.words[0] && ix.first[n] && (ix.first[n] === q[0] || ix.first[n].startsWith(q[0])) ? 1 : 0;
-      out.push({ item, full: hit.length === q.length, score: hit.length * 1000 - typos * 120 + exact * 25 + starts * 40 + boost(item) - ix.compact[n].length * 0.2 });
-    }
-    return out.sort((a, b) => b.score - a.score);
+    } : null;
+    const finish = () => {
+      const need = q.length >= 3 ? q.length - 1 : q.length;
+      const out = [];
+      for (const [n, e] of per) {
+        const hit = e.words.filter(Boolean);
+        if (hit.length < need) continue;
+        const typos = hit.reduce((a, h) => a + h.typos, 0), exact = hit.filter(h => h.exact).length;
+        const item = ix.list[n];
+        const starts = e.words[0] && ix.first[n] && (ix.first[n] === q[0] || ix.first[n].startsWith(q[0])) ? 1 : 0;
+        out.push({ item, full: hit.length === q.length, score: hit.length * 1000 - typos * 120 + exact * 25 + starts * 40 + boost(item) - ix.compact[n].length * 0.2 });
+      }
+      return out.sort((a, b) => b.score - a.score);
+    };
+    return { q, word, join, finish };
+  }
+  // [{ item, score, full }] best first; full: every word typed matched (else one was left out). boost(item) adds up to ~60 (popularity, favourites, watched).
+  function rankSearch(ix, term, boost = () => 0) {
+    const r = rankSteps(ix, term, boost);
+    if (!r) return [];
+    r.q.forEach((w, k) => ix.vocab.forEach(r.word(w, k)));
+    if (r.join) ix.compact.forEach(r.join);
+    return r.finish();
+  }
+  async function rankSearchSoon(ix, term, boost = () => 0) {
+    const r = rankSteps(ix, term, boost);
+    if (!r) return [];
+    for (let k = 0; k < r.q.length; k++) await eachSlice(ix.vocab, r.word(r.q[k], k));
+    if (r.join) await eachSlice(ix.compact, r.join);
+    return r.finish();
   }
   // Every word typed is in the person's name (typos allowed as above): "brad pit" = Brad Pitt.
   function nameMatches(name, term) {
@@ -1377,9 +1424,11 @@
       // playlist-language change, the first download can take a while) must not draw over it.
       const seq = String((this.routeSeq = (this.routeSeq || 0) + 1));
       main.dataset.seq = seq;
+      this.leavePage();
       this.cancelRetry();
       const render = { home: this.renderHome, live: this.renderLive, guide: this.renderGuide, movies: this.renderMovies, series: this.renderSeries }[this.view];
       setTimeout(() => this.detectGenres().catch(() => {}), 8000); // once, after the first page is up
+      setTimeout(() => this.warmSearch(), 4000);
       return render.call(this, main).then(() => { this.routeFails = 0; }).catch(err => {
         console.error(err);
         if (main.dataset.seq !== seq) return; // another page is open now
@@ -1402,14 +1451,65 @@
       else if (this.view === 'home') this.renderContinue();
     },
 
-    // ---------- data ----------
-    loadVod() {
-      return this.data.vod || (this.data.vod = Promise.all([this.api.vodStreams(), this.catLangs('movie')])
-        .then(([list, langs]) => this.group(this.fillLang(list.map(fromVod), langs).sort((a, b) => b.added - a.added))));
+    // Things a page sets up that must stop when another page opens: an IntersectionObserver
+    // left running keeps its whole old page in memory (it grew with every tab change).
+    onLeave(fn) { (this.leaving || (this.leaving = [])).push(fn); },
+    leavePage() {
+      const list = this.leaving || [];
+      this.leaving = [];
+      for (const fn of list) { try { fn(); } catch {} }
     },
-    loadSeries() {
-      return this.data.series || (this.data.series = Promise.all([this.api.seriesList(), this.catLangs('series')])
-        .then(([list, langs]) => this.group(this.fillLang(list.map(fromSeries), langs).sort((a, b) => b.added - a.added))));
+
+    // ---------- data ----------
+    loadVod() { return this.data.vod || (this.data.vod = this.buildTitles(this.api.vodStreams(), 'movie', fromVod)); },
+    loadSeries() { return this.data.series || (this.data.series = this.buildTitles(this.api.seriesList(), 'series', fromSeries)); },
+    async buildTitles(listP, kind, from) {
+      const [list, langs] = await Promise.all([listP, this.catLangs(kind)]);
+      const items = this.fillLang(await mapSlices(list, from), langs).sort((a, b) => b.added - a.added);
+      return this.group(items, true);
+    },
+    // One entry per title, adult titles left out unless allowed; kept per list (it only changes with the playlist).
+    titles(list) {
+      const c = this.titleCache || (this.titleCache = new WeakMap()), k = c.get(list);
+      if (k && k.adult === Settings.showAdult) return k.list;
+      const out = uniq(this.allowed(list));
+      c.set(list, { adult: Settings.showAdult, list: out });
+      return out;
+    },
+    // What the Movies / Series page needs from a list (its titles minus hidden categories, the count per
+    // category, the latest titles), worked out in slices once and kept until the list or the choices change.
+    browseData(kind, all) {
+      const hidden = this.org(kind).hidden || [], key = hidden.join(',') + '|' + Settings.showAdult;
+      const c = this.data[kind + 'Browse'];
+      if (c && c.all === all && c.key === key) return c.p;
+      const hiddenCats = new Set(hidden.map(String)), adult = Settings.showAdult;
+      const p = (async () => {
+        const items = [], perCat = {}, byId = new Map(), latest = [], seen = new Set();
+        await eachSlice(all, i => {
+          if ((i.adult && !adult) || hiddenCats.has(String(i.cat))) return;
+          items.push(i);
+          byId.set(i.kind + i.id, i);
+          (perCat[i.cat] || (perCat[i.cat] = new Set())).add(i.gkey);
+          if (!seen.has(i.gkey)) { seen.add(i.gkey); latest.push(i); }
+        });
+        const counts = {};
+        for (const k in perCat) counts[k] = perCat[k].size;
+        return { items, counts, byId, latest };
+      })();
+      this.data[kind + 'Browse'] = { all, key, p };
+      return p;
+    },
+    // Builds the search word lists in the background once the first page is up, so the first
+    // search doesn't stop the screen.
+    async warmSearch() {
+      if (!this.api || this.searchWarm === this.data) return;
+      const data = this.searchWarm = this.data;
+      try {
+        const [vod, series] = await Promise.all([this.loadVod(), this.loadSeries()]);
+        if (this.data !== data) return;
+        await searchIndexSoon(vod, i => i.name);
+        await searchIndexSoon(series, i => i.name);
+      } catch {}
     },
     // Category → its language code ("FR: [4K-Q] SERIES" → FR), for titles whose own name has none
     // ("[4K-Q] - YAGA" showed as "— Original" next to its French copy).
@@ -1431,22 +1531,26 @@
 
     // Link every copy of the same title (other languages, 4K, MKV/MP4…) through item.versions,
     // best first: info language, French, English, then by resolution.
-    group(list) {
+    group(list, slices) {
       const order = [Settings.tmdbLang.split('-')[0].toUpperCase(), 'FR', 'QFR', 'EN', ''];
       // A language taken from the category doesn't move a copy up: which copy plays first stays as it was.
       const langRank = i => { const r = order.indexOf(i.catLang ? '' : i.lang); return r < 0 ? order.length : r; };
       const rank = i => langRank(i) * 10 + (QUALITY_RANK[i.quality] ?? 5) + (i.tags.includes('Low quality') || i.tags.includes('CAM') ? 5 : 0);
       const groups = new Map();
-      for (const i of list) {
+      const add = i => {
         i.gkey = i.tmdb && i.tmdb !== '0' ? 't' + i.tmdb : 'n' + fold(i.name) + i.year;
         let g = groups.get(i.gkey);
         if (!g) groups.set(i.gkey, (g = []));
         g.push(i);
-      }
-      for (const g of groups.values()) {
-        g.sort((a, b) => rank(a) - rank(b) || b.added - a.added);
+      };
+      const link = g => {
+        if (g.length > 1) g.sort((a, b) => rank(a) - rank(b) || b.added - a.added);
         for (const i of g) i.versions = g;
-      }
+      };
+      // slices: a promise, the big lists are grouped a slice at a time
+      if (slices) return eachSlice(list, add).then(() => eachSlice([...groups.values()], link)).then(() => list);
+      list.forEach(add);
+      for (const g of groups.values()) link(g);
       return list;
     },
     // ---------- genres ----------
@@ -1494,8 +1598,8 @@
       const [vod, series, topM, topS] = await Promise.all([this.loadVod().catch(() => []), this.loadSeries().catch(() => []), TMDB.top('movie'), TMDB.top('tv')]);
       for (const [letter, top] of [['m', topM], ['s', topS]]) for (const [id, t] of top) if (t.g) store[letter + 't' + id] = genreIds(t.g);
       // Titles whose provider genre field is usable (most series) need no lookup.
-      const queue = [...uniq(this.allowed(vod)), ...uniq(series)].sort((a, b) => b.added - a.added)
-        .filter(i => !store[this.genreKey(i)] && !i.versions.some(v => textGenres(v.genre).length));
+      const queue = [], all = [...this.titles(vod), ...this.titles(series)].sort((a, b) => b.added - a.added);
+      await eachSlice(all, i => { if (!store[this.genreKey(i)] && !i.versions.some(v => textGenres(v.genre).length)) queue.push(i); });
       let failed = 0, saved = Date.now(), fresh = 0;
       const flush = () => { Disk.set('genres.v1', store); saved = Date.now(); fresh = 0; if (this.onGenres) this.onGenres(); };
       // The free VPN is slow: through it, one title at a time and only now and then.
@@ -1536,30 +1640,42 @@
     loadLive() {
       // Channels named "✶⋆✶ … ✶⋆✶" are the provider's section dividers, not real channels.
       // Copies of the same channel in other qualities share c.versions (best first).
-      return this.data.live || (this.data.live = this.api.liveStreams().then(list => {
-        const out = list
-          .filter(c => !String(c.name || '').trim().startsWith('✶⋆✶'))
-          .map(c => { const p = parseChannel(c.name); return { ...c, ...p, key: fold(c.name), gkey: fold(p.label), adult: Number(c.is_adult) === 1 }; });
+      return this.data.live || (this.data.live = this.api.liveStreams().then(async list => {
+        const out = [];
+        await eachSlice(list, c => {
+          if (String(c.name || '').trim().startsWith('✶⋆✶')) return;
+          const p = parseChannel(c.name);
+          out.push({ ...c, ...p, key: fold(c.name), gkey: fold(p.label), adult: Number(c.is_adult) === 1 });
+        });
         const groups = new Map();
         for (const c of out) { let g = groups.get(c.gkey); if (!g) groups.set(c.gkey, (g = [])); g.push(c); }
-        for (const g of groups.values()) {
-          g.sort((a, b) => liveRank(a) - liveRank(b));
+        await eachSlice([...groups.values()], g => {
+          if (g.length > 1) g.sort((a, b) => liveRank(a) - liveRank(b));
           for (const c of g) c.versions = g;
-        }
+        });
         return out;
       }));
     },
     async loadCats(kind) {
-      const key = kind + 'Cats';
+      const key = kind + 'Cats', api = this.api; // kept: the account may be signed out or expire meanwhile
+      if (!api) return [];
       if (!this.data[key]) {
         const fn = { live: 'liveCategories', movie: 'vodCategories', series: 'seriesCategories' }[kind];
-        this.data[key] = this.api[fn]();
+        this.data[key] = api[fn]();
       }
       let cats = await this.data[key];
-      if (this.api.langAllowed) cats = cats.filter(c => this.api.langAllowed(c.category_name));
+      if (api.langAllowed) cats = cats.filter(c => api.langAllowed(c.category_name));
       return Settings.showAdult ? cats : cats.filter(c => !ADULT.test(c.category_name));
     },
     allowed(list) { return Settings.showAdult ? list : list.filter(i => !i.adult); },
+    // The allowed items of a list as a Set (search), kept per list.
+    okSet(list) {
+      const c = this.okSets || (this.okSets = new WeakMap()), k = c.get(list);
+      if (k && k.adult === Settings.showAdult) return k.set;
+      const set = new Set(this.allowed(list));
+      c.set(list, { adult: Settings.showAdult, set });
+      return set;
+    },
 
     // Catalog titles that TMDB currently ranks highly, one copy per title.
     // byDate: newest release first. byPop: most watched (TMDB popularity) first.
@@ -1634,13 +1750,13 @@
           for (const grp of groups) {
             if (/\bradio\b/.test(words(grp.name))) continue;
             const named = grp.free ? [] : genres.filter(g => g.re.test(words(grp.name)));
-            for (const c of grp.channels) {
+            await eachSlice(grp.channels, c => {
               const text = words(c.label);
-              if (c.radio || /event has not begun|\bno event\b/.test(text)) continue; // empty pay-per-view slots
+              if (c.radio || /event has not begun|\bno event\b/.test(text)) return; // empty pay-per-view slots
               for (const g of named.length ? named : genres.filter(x => x.re.test(text))) {
                 if (!g.seen.has(c.gkey)) { g.seen.add(c.gkey); g.channels.push(c); }
               }
-            }
+            });
           }
           return { groups, catName, byKey, genres: genres.filter(g => g.channels.length) };
         })();
@@ -2231,7 +2347,7 @@
       const seq = main.dataset.seq;
       const [vod, series] = await Promise.all([this.loadVod(), this.loadSeries(), this.genreCats('movie'), this.genreCats('series')]);
       if (this.stale(main, seq)) return;
-      const movies = uniq(this.allowed(vod)), shows = uniq(series);
+      const movies = this.titles(vod), shows = this.titles(series);
       // Two movies, then one series, so both show up even when one side is updated more often.
       const latest = [];
       for (let i = 0; latest.length < 30 && i < 30; i++) {
@@ -2241,8 +2357,10 @@
       const topRated = movies.slice(0, 3000).filter(m => m.rating >= 7.5).slice(0, 30);
       const recentSeries = shows.slice(0, 30);
       // My List: favorite movies and series, newest first.
-      const byG = new Map([...movies, ...shows].map(i => [i.kind + i.gkey, i]));
       const myList = Store.get('fav', {});
+      const want = new Set([...(myList.series || []).map(k => 'series' + k), ...(myList.movie || []).map(k => 'movie' + k)]);
+      const byG = new Map();
+      if (want.size) for (const list of [movies, shows]) for (const i of list) if (want.has(i.kind + i.gkey)) byG.set(i.kind + i.gkey, i);
       const mine = [...(myList.series || []).map(k => byG.get('series' + k)), ...(myList.movie || []).map(k => byG.get('movie' + k))].filter(Boolean);
       const index = new Map([...latest, ...topRated, ...recentSeries, ...mine].map(i => [i.kind + i.id, i]));
 
@@ -2369,10 +2487,10 @@
         if (toCovers === true) window.scrollTo({ top: Math.max(0, wrap.getBoundingClientRect().top + scrollY - 130), behavior: 'smooth' });
       };
       set(false);
-      addEventListener('resize', () => { if (box.isConnected && !isOpen()) set(false); });
       tab.addEventListener('click', () => (isOpen() ? close() : open()));
       // ◀ with nothing more to its left among the covers (or the genre row) opens the list.
-      main.addEventListener('keydown', e => {
+      // (On this page's own element: on #view, which outlives the page, it kept every old page in memory.)
+      box.addEventListener('keydown', e => {
         if (e.key !== 'ArrowLeft' || isOpen() || !wide()) return;
         const a = document.activeElement;
         if (!a || !wrap.contains(a) || a.matches('input, select')) return;
@@ -2401,11 +2519,19 @@
       side.addEventListener('focusout', e => {
         if (isOpen() && e.relatedTarget && !side.contains(e.relatedTarget) && e.relatedTarget !== tab) close(false);
       });
-      const outside = e => {
-        if (!box.isConnected) { document.removeEventListener('pointerdown', outside, true); return; }
-        if (isOpen() && !side.contains(e.target) && !tab.contains(e.target) && !e.target.closest('#modal')) close(false);
-      };
-      document.addEventListener('pointerdown', outside, true);
+      // Page-wide handlers are added once and act on the page shown now (one per visit piled up
+      // on a TV, where no click ever removed them).
+      this.drawerNow = { box, side, tab, isOpen, close, set };
+      this.onLeave(() => { if (this.drawerNow && this.drawerNow.box === box) this.drawerNow = null; back = null; });
+      if (!this.drawerBound) {
+        this.drawerBound = true;
+        const now = () => { const d = this.drawerNow; return d && d.box.isConnected ? d : null; };
+        document.addEventListener('pointerdown', e => {
+          const d = now();
+          if (d && d.isOpen() && !d.side.contains(e.target) && !d.tab.contains(e.target) && !e.target.closest('#modal')) d.close(false);
+        }, true);
+        addEventListener('resize', () => { const d = now(); if (d && !d.isOpen()) d.set(false); });
+      }
       return { isOpen, open, close };
     },
 
@@ -2415,16 +2541,12 @@
       const [all, cats, picks] = await Promise.all([kind === 'movie' ? this.loadVod() : this.loadSeries(), this.loadCats(kind), this.tmdbPicks(kind)]);
       await this.genreCats(kind);
       if (this.stale(main, seq)) return;
-      const hiddenCats = new Set(this.org(kind).hidden || []);
-      const items = this.allowed(all).filter(i => !hiddenCats.has(String(i.cat)));
-      const perCat = {};
-      for (const i of items) (perCat[i.cat] || (perCat[i.cat] = new Set())).add(i.gkey);
-      const counts = Object.fromEntries(Object.entries(perCat).map(([k, v]) => [k, v.size]));
+      const bd = await this.browseData(kind, all);
+      if (this.stale(main, seq)) return;
+      const { items, counts, byId, latest } = bd;
       const ob = this.org(kind);
       const usable = this.arrange(cats.filter(c => counts[c.category_id]), c => String(c.category_id), ob.order, ob.hidden);
-      const byId = new Map(items.map(i => [i.kind + i.id, i]));
       const label = kind === 'movie' ? 'Movies' : 'Series';
-      const latest = uniq(items);
       const byGkey = new Map(latest.map(i => [i.gkey, i]));
       const mine = () => this.favs(kind).map(k => byGkey.get(k)).filter(Boolean);
       const virtual = { '': latest, '@top': picks.byDate, '@popular': picks.byPop };
@@ -2468,23 +2590,30 @@
       const sortSel = $('#sort', main), genreRow = $('#genres', main);
       let genre = String(wanted || '');
       // The row grows while titles are being looked up; left alone while the viewer is on it.
-      const paintGenres = () => {
+      // Counted in slices, once per list (again when new genres are found).
+      let countRun = 0;
+      const paintGenres = async fresh => {
+        if (fresh || !bd.genres) {
+          const run = ++countRun, n = {};
+          await eachSlice(latest, i => { for (const g of this.genresOf(i)) n[g] = (n[g] || 0) + 1; });
+          if (run !== countRun) return;
+          bd.genres = n;
+        }
         if (!genreRow.isConnected || genreRow.contains(document.activeElement)) return;
-        const n = {};
-        for (const i of latest) for (const g of this.genresOf(i)) n[g] = (n[g] || 0) + 1;
+        const n = bd.genres;
         const list = GENRES.filter(g => n[g.id] || String(g.id) === genre).map(g => ({ ...g, label: this.genreName(g) })).sort((x, y) => x.label.localeCompare(y.label));
         const tile = (id, label) => `<button class="genre-card${id === genre ? ' active' : ''}" data-g="${id}">${esc(label)}</button>`;
         genreRow.innerHTML = tile('', this.infoName('All genres')) + list.map(g => tile(String(g.id), g.label)).join('');
         genreRow.hidden = !list.length;
       };
-      paintGenres();
-      if (genre) { const b = $('.genre-card.active', genreRow); if (b) genreRow.scrollLeft = b.offsetLeft - 20; }
+      paintGenres().then(() => { if (genre) { const b = $('.genre-card.active', genreRow); if (b) genreRow.scrollLeft = b.offsetLeft - 20; } });
       // Covers already on screen get their genres as they're found.
       const paintCovers = () => $$('.poster:not(.has-genre)', grid).forEach(p => {
         const c = p.closest('.card'), item = byId.get(c.dataset.kind + c.dataset.id), html = item && this.coverGenreHtml(item);
         if (html) { p.classList.add('has-genre'); $('.play', p).insertAdjacentHTML('beforebegin', html); }
       });
-      this.onGenres = () => { if (grid.isConnected) { paintGenres(); paintCovers(); } };
+      this.onGenres = () => { if (grid.isConnected) { paintGenres(true); paintCovers(); } };
+      { const mine = this.onGenres; this.onLeave(() => { if (this.onGenres === mine) this.onGenres = null; }); }
       const more = () => {
         const slice = current.slice(shown, shown + CHUNK);
         grid.insertAdjacentHTML('beforeend', slice.map(i => this.card(i)).join(''));
@@ -2547,8 +2676,9 @@
       });
       this.bindCards(grid, (k, id) => byId.get(k + id));
 
-      new IntersectionObserver(es => { if (es[0].isIntersecting && shown < current.length) more(); }, { rootMargin: '800px' })
-        .observe($('#sentinel', main));
+      const io = new IntersectionObserver(es => { if (es[0].isIntersecting && shown < current.length) more(); }, { rootMargin: '800px' });
+      io.observe($('#sentinel', main));
+      this.onLeave(() => io.disconnect());
       const first = $(`.cat[data-cat="${startCat}"]`, main);
       first.classList.add('active');
       show(startCat, '');
@@ -2673,8 +2803,9 @@
         chList.insertAdjacentHTML('beforeend', current.slice(shownCh, end).map((c, i) => rowHtml(c, shownCh + i)).join(''));
         shownCh = Math.min(end, current.length);
       };
-      new IntersectionObserver(es => { if (es[0].isIntersecting && shownCh < current.length) moreChannels(); }, { rootMargin: '800px' })
-        .observe($('#chEnd', main));
+      const io = new IntersectionObserver(es => { if (es[0].isIntersecting && shownCh < current.length) moreChannels(); }, { rootMargin: '800px' });
+      io.observe($('#chEnd', main));
+      this.onLeave(() => io.disconnect());
       const renderChannels = (key, q = '') => {
         group = byKey.get(key);
         current = group.channels.filter(c => !q || c.versions.some(v => v.key.includes(q)));
@@ -2777,7 +2908,7 @@
       const at = this.liveFocus ? current.findIndex(c => c.gkey === this.liveFocus) : -1;
       this.liveFocus = null;
       if (at >= shownCh) moreChannels(at);
-      const target = at >= 0 ? chList.querySelector(`[data-i="${at}"]`) : start;
+      const target = (at >= 0 && chList.querySelector(`[data-i="${at}"]`)) || start;
       target.focus({ preventScroll: true });
       target.scrollIntoView({ block: 'center' });
     },
@@ -2998,6 +3129,7 @@
         };
 
         if (observer) observer.disconnect();
+        else this.onLeave(() => observer && observer.disconnect());
         observer = new IntersectionObserver(entries => {
           for (const e of entries) if (e.isIntersecting && !e.target.filled) { e.target.filled = true; fill(e.target); }
         }, { root: grid, rootMargin: '600px 0px' });
@@ -3069,9 +3201,14 @@
 
       render();
       // Land on what's on now for the first channel.
+      // Only while the Guide is still the page shown and nothing opened over it (a search typed
+      // meanwhile lost its letters; a page left in that time threw an error).
       setTimeout(() => {
-        const n = $('.gp-row .prog.now', grid) || $('.gp-row .prog', grid);
-        (n || $('#gpGroup', main)).focus({ preventScroll: true });
+        if (!grid.isConnected || !$('#modal').classList.contains('hidden') || (window.Player && Player.isOpen())) return;
+        const a = document.activeElement;
+        if (a && a !== document.body && !main.contains(a) && !a.closest('.topbar')) return;
+        const n = $('.gp-row .prog.now', grid) || $('.gp-row .prog', grid) || $('#gpGroup', main);
+        if (n) n.focus({ preventScroll: true });
       }, 900);
     },
 
@@ -3397,18 +3534,21 @@
         const genreBtn = (go, label, where) => `<button class="season" data-go-genre="${go}">${esc(label)} · ${esc(T(where))}</button>`;
         const inKind = (list, kind, label) => hits.filter(g => list.some(i => this.genresOf(i).includes(g.id))).map(g => genreBtn(kind + ':' + g.id, this.genreName(g), label));
         const genreBtns = [
-          ...inKind(uniq(this.allowed(vod)), 'movie', 'Movies'), ...inKind(uniq(series), 'series', 'Series'),
+          ...(hits.length ? inKind(this.titles(vod), 'movie', 'Movies') : []), ...(hits.length ? inKind(this.titles(series), 'series', 'Series') : []),
           ...liveCat.genres.filter(isGenre).map(g => genreBtn('live:' + g.genre, g.name, 'Live TV')),
         ];
         // Ranked as typed (typos and sound-alikes allowed), then titles TMDB knows under the words
         // typed in any language ("Other Mommy" finds "Malfaisante"), added when TMDB answers.
         const raw = q.value.trim();
         const boost = this.searchBoost();
-        const ranked = (list, nameOf) => rankSearch(searchIndex(list, nameOf), raw, boost);
+        // The word lists are built a slice at a time (the loader stays up meanwhile); after that, instant.
+        await Promise.all([[vod, i => i.name], [series, i => i.name], [live, c => c.label || c.name], [free, c => c.label || c.name]].map(([l, f]) => searchIndexSoon(l, f)));
+        if (fold(q.value.trim()) !== term) return;
+        const ranked = (list, nameOf) => rankSearchSoon(searchIndex(list, nameOf), raw, boost);
         const pick = (hits, allow) => uniq(hits.map(h => h.item).filter(allow));
-        const okFilm = new Set(this.allowed(vod)), okLive = new Set(this.allowed(live));
-        let mvHits = ranked(vod, i => i.name), svHits = ranked(series, i => i.name);
-        let lvHits = ranked(live, c => c.label || c.name), frHits = ranked(free, c => c.label || c.name);
+        const okFilm = this.okSet(vod), okLive = this.okSet(live);
+        let [mvHits, svHits, lvHits, frHits] = await Promise.all([ranked(vod, i => i.name), ranked(series, i => i.name), ranked(live, c => c.label || c.name), ranked(free, c => c.label || c.name)]);
+        if (fold(q.value.trim()) !== term) return;
         // A word may be left out only when nothing anywhere matches all of them.
         if ([mvHits, svHits, lvHits, frHits].some(l => l.some(h => h.full))) [mvHits, svHits, lvHits, frHits] = [mvHits, svHits, lvHits, frHits].map(l => l.filter(h => h.full));
         const lv = pick(lvHits, c => okLive.has(c)).concat(pick(frHits, () => true)).slice(0, samsung ? 12 : 24);

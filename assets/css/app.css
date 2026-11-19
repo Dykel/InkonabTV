@@ -736,7 +736,7 @@ img.broken { visibility: hidden; }
 .gp-info-ch { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .9rem; }
 .gp-info-ch img { width: 48px; height: 30px; object-fit: contain; }
 .gp-info-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: #d2dee1; }
-.badge.on-air { background: #ff5a4e; color: #fff; border-color: transparent; }
+.badge.on-air { background: #d42a1e; color: #fff; border-color: transparent; }
 .badge.replay { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .gp-bar { width: 120px; display: inline-block; }
 .gp-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; max-width: 58vw; }
@@ -1246,3 +1246,11 @@ img.broken { visibility: hidden; }
   box-shadow: 0 8px 30px rgba(0,0,0,.45); max-width: 86vw;
 }
 .p-remind[hidden] { display: none; }
+
+/* Touch screens: every control at least 44 px, an easy finger target */
+@media (pointer: coarse) {
+  .gp-day, .genre-card, .sort, .org-row .btn, .login-mode, #gpGroup, #gpNow { min-height: 44px; }
+  .org-row .btn { min-width: 44px; }
+  .remember { min-height: 44px; }
+  .remember input { width: 22px; height: 22px; }
+}
