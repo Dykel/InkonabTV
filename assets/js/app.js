@@ -1588,7 +1588,13 @@
     genreName(g) { return (this.genreNames && this.genreNames.map[g.id]) || this.infoName(g.name); },
     // Needs genreCats(kind) first. Every copy of a title counts: one may be in "FR: ACTION".
     genresOf(i) {
-      if (!i.kw) i.kw = [...new Set((i.versions || [i]).flatMap(v => [...textGenres(this.data.catNames[i.kind][v.cat]), ...textGenres(v.genre)]))];
+      // Category names not loaded yet (a page drawn right after a profile switch): genres from the
+      // titles only, worked out again once the names are there.
+      const names = (this.data.catNames || {})[i.kind];
+      if (!i.kw || (!i.kwCats && names)) {
+        i.kw = [...new Set((i.versions || [i]).flatMap(v => [...textGenres(names ? names[v.cat] : ''), ...textGenres(v.genre)]))];
+        i.kwCats = !!names;
+      }
       const found = this.genreStore[this.genreKey(i)];
       return found && found.length ? [...new Set([...i.kw, ...found])] : i.kw;
     },
