@@ -249,6 +249,26 @@ public class NativePlayerPlugin extends Plugin {
         startActivityForResult(call, intent, "onClosed");
     }
 
+    /** Multiview (live channels side by side). Payload staged like play(): resolves when it closes. */
+    @PluginMethod
+    public void multi(PluginCall call) {
+        if (PlayerActivity.pending == null) { call.reject("Nothing to play"); return; }
+        startActivityForResult(call, new Intent(getContext(), MultiviewActivity.class), "onMultiClosed");
+    }
+
+    @ActivityCallback
+    private void onMultiClosed(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        JSObject out = new JSObject();
+        Intent d = result.getData();
+        if (d != null) {
+            try { out.put("tiles", new JSArray(d.getStringExtra("tiles"))); } catch (Exception ignored) { }
+            if (d.getStringExtra("focus") != null) out.put("focus", d.getStringExtra("focus"));
+            if (d.getStringExtra("full") != null) out.put("full", d.getStringExtra("full"));
+        }
+        call.resolve(out);
+    }
+
     /** Open the on-screen keyboard for the focused text field (TV remotes can't tap a field). */
     @PluginMethod
     public void showKeyboard(PluginCall call) {
@@ -604,6 +624,7 @@ public class NativePlayerPlugin extends Plugin {
                 out.put("history", new JSArray(d.getStringExtra("history")));
                 out.put("fav", new JSObject(d.getStringExtra("fav")));
                 if (d.getStringExtra("remindOpen") != null) out.put("remindOpen", d.getStringExtra("remindOpen"));
+                if (d.getBooleanExtra("multi", false)) out.put("multi", true);
             } catch (Exception ignored) {
             }
         }

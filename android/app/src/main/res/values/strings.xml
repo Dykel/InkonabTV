@@ -4,4 +4,16 @@
     <string name="title_activity_main">InkonabTV</string>
     <string name="package_name">tv.inkonab.app</string>
     <string name="custom_url_scheme">tv.inkonab.app</string>
+    <!-- Multiview -->
+    <string name="mv_hint">Multiview · OK: options · Back: close</string>
+    <string name="mv_add">+  Add channel</string>
+    <string name="mv_add_title">Add a channel</string>
+    <string name="mv_full">Full screen</string>
+    <string name="mv_change">Change channel</string>
+    <string name="mv_remove">Remove</string>
+    <string name="mv_already">This channel is already on screen</string>
+    <string name="mv_cant_play">Can’t play this channel</string>
+    <string name="mv_decoders">This TV can’t play this many channels at once</string>
+    <string name="mv_limit">Your subscription allows %1$d stream(s) at once: some channels may not play</string>
+    <string name="sleep_ask">Still watching?\nPlayback stops in %1$d s · press any key to keep watching</string>
 </resources>

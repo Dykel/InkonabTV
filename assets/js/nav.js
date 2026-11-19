@@ -7,6 +7,9 @@
     // The code keypad sits on top of everything, including an open Settings window.
     const keypad = document.querySelector('.pin-dlg');
     if (keypad) return keypad;
+    // Multiview: its menu or channel picker when open, else the tiles.
+    const multi = document.querySelector('#multi:not(.hidden)');
+    if (multi) return multi.querySelector('.mv-pop:not(.hidden)') || multi.querySelector('.mv-grid');
     const modal = document.querySelector('#modal:not(.hidden)');
     if (modal) return modal;
     const expired = document.querySelector('#expired:not(.hidden)');

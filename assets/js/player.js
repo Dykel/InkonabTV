@@ -1,6 +1,7 @@
 /* Full-screen video player: HLS (hls.js), MPEG-TS (mpegts.js) and native files. */
 (function () {
   const $ = s => document.querySelector(s);
+  const T = s => (window.T ? window.T(s) : s);
 
   // hls.js / mpegts.js ship with the app but load only on the website, the first time a stream
   // needs them (the Android app plays with ExoPlayer, Samsung TVs with AVPlay).
@@ -83,6 +84,16 @@
       this.el.querySelector('[data-act="next"]').addEventListener('click', () => this.zap(1));
       this.el.querySelector('[data-act="list"]').addEventListener('click', () => this.openSide());
       this.el.querySelector('[data-act="fav"]').addEventListener('click', () => this.toggleFav());
+      // Picture in picture (computers and phone browsers): the video goes on in a small window.
+      const pip = this.el.querySelector('[data-act="pip"]');
+      if (document.pictureInPictureEnabled && !this.video.isAV) {
+        pip.classList.remove('hidden');
+        pip.addEventListener('click', () => {
+          const v = this.video;
+          (document.pictureInPictureElement ? document.exitPictureInPicture() : v.requestPictureInPicture()).catch(() => App.toast(T('Picture in picture isn’t available for this video')));
+        });
+        // Closing the small window while the player is hidden behind other windows: nothing changes.
+      }
       this.side = this.el.querySelector('.p-side');
       this.side.addEventListener('click', e => this.onSideClick(e));
       this.sched = this.el.querySelector('.p-sched');
@@ -112,12 +123,45 @@
         if (it && it.kind === 'live' && !appleTouch && this.liveOk !== it.title) { this.liveOk = it.title; this.liveGood = Date.now(); }
       });
       setInterval(() => this.guardLive(), 2000);
+      // Sleep timer (Settings): no key or pointer for that long while a video plays → ask, then stop.
+      this.lastInput = Date.now();
+      for (const ev of ['keydown', 'pointerdown', 'pointermove', 'wheel']) document.addEventListener(ev, () => { this.lastInput = Date.now(); this.sleepCancel(); }, true);
+      setInterval(() => this.sleepCheck(), 5000);
       this.video.addEventListener('waiting', () => { const was = this.el.dataset.state; this.setState('loading'); if (was === 'playing') this.onFreeze(); });
       this.video.addEventListener('error', () => this.fail());
       this.video.addEventListener('ended', () => this.ended());
       document.addEventListener('keydown', e => this.onKey(e), true);
       // Website: fetch hls.js in the background once the app is up, so the first channel starts at once.
       setTimeout(() => { if (!window.Native && !this.video.isAV) lib('Hls').catch(() => {}); }, 4000);
+    },
+
+    sleepCheck() {
+      const min = Number(Settings.sleepMin) || 0;
+      const playing = this.isOpen() || (window.Multi && Multi.isOpen());
+      if (!min || !playing || this.sleepAsk) return;
+      if (Date.now() - this.lastInput < min * 60000) return;
+      // Still watching? 60 seconds to press a key, then everything stops.
+      const box = this.sleepAsk = document.createElement('div');
+      box.className = 'sleep-ask';
+      box.innerHTML = `<b>${T('Still watching?')}</b><span>${T('Playback stops in')} <i>60</i> s · ${T('Press any key to keep watching')}</span>`;
+      document.body.appendChild(box);
+      let left = 60;
+      this.sleepTimer = setInterval(() => {
+        left -= 1;
+        const i = box.querySelector('i');
+        if (i) i.textContent = left;
+        if (left > 0) return;
+        this.sleepCancel();
+        if (window.Multi && Multi.isOpen()) Multi.close();
+        if (this.isOpen()) this.close();
+        App.toast(T('Stopped by the sleep timer'));
+      }, 1000);
+    },
+    sleepCancel() {
+      if (!this.sleepAsk) return;
+      clearInterval(this.sleepTimer);
+      this.sleepAsk.remove();
+      this.sleepAsk = null;
     },
 
     isOpen() { return !this.el.classList.contains('hidden'); },
@@ -146,61 +190,70 @@
       catch (e) { this.nativeOpen = false; throw e; }
     },
 
+    // The live channel list for the Android app's player (and its multiview): every group, its
+    // channels deduplicated, guide links and catch-up template.
+    async livePayload(item) {
+      const label = v => [v.quality || (v.url ? '' : 'SD'), ...(v.tags || [])].filter(Boolean).join(' · ');
+      let payload, groups = [];
+      const cur = (item.list && item.list[item.index]) || item.version;
+      groups = await App.liveGroups().catch(() => []);
+      let gi = groups.findIndex(g => g.key === item.groupKey && g.channels.includes(cur));
+      if (gi < 0) gi = groups.findIndex(g => g.channels.includes(cur));
+      if (gi < 0) { groups.unshift({ key: item.groupKey || '@now', name: item.subtitle || 'Channels', channels: item.list || [cur] }); gi = 0; }
+      const flat = [], at = new Map();
+      // Guide read from the provider's XMLTV file (its guide calls answer nothing): handed to the
+      // native player, a day back to a day ahead, as [title, start, end].
+      const x = App.api && App.api.guideApiOff && App.api.xmltvReady, now = Date.now();
+      // The viewer's own guide link (Settings) first, for the channels it covers.
+      const own = Settings.epgUrl && App.api && await OwnGuide.load(App.api).catch(() => null);
+      const xmltvProgs = ch => {
+        const cut = list => list.filter(p => p[1] > now - 864e5 && p[0] < now + 864e5).map(p => [p[2], p[0], p[1]]);
+        if (own && ch.versions) for (const v of ch.versions) { const id = own.byStream.get(String(v.stream_id)); if (id && own.progs[id]) return cut(own.progs[id]); }
+        const v = x && ch.versions && App.epgStream(ch), id = v && x.byStream.get(String(v.stream_id));
+        return id && x.progs[id] ? cut(x.progs[id]) : undefined;
+      };
+      const add = ch => {
+        if (!at.has(ch)) {
+          at.set(ch, flat.length);
+          flat.push({
+            title: ch.label || ch.name || '', img: ch.stream_icon || '', num: String(ch.num || ''), radio: !!ch.radio,
+            gkey: ch.gkey || '', fav: App.isFav('live', ch.gkey), free: !!ch.source, // free / extra M3U playlist: never via the VPN
+            // Guide (▼ / ◀ in the player): the stream whose guide we read, and the catch-up copy.
+            epgId: String(((ch.versions && App.epgStream(ch)) || {}).stream_id || ''),
+            cu: String(((ch.versions || []).find(v => Number(v.tv_archive)) || {}).stream_id || ''),
+            progs: xmltvProgs(ch),
+            // An M3U playlist has no URL template: each channel brings its own link.
+            versions: (ch.versions || [ch]).map(v => (v.url ? { url: v.url, label: label(v) }
+              : App.api && App.api.isM3U ? { url: App.api.streamUrl('live', v.stream_id), label: label(v) }
+              : { id: String(v.stream_id), label: label(v) })),
+          });
+        }
+        return at.get(ch);
+      };
+      payload = {
+        live: true,
+        template: App.api ? App.api.streamUrl('live', '{id}', Settings.liveFormat) : '',
+        groups: groups.map(g => ({ key: g.key, name: g.name, items: g.channels.map(add) })),
+        group: gi,
+        index: Math.max(0, groups[gi].channels.indexOf(cur)),
+        version: Math.max(0, ((cur && cur.versions) || [cur]).indexOf(item.version)),
+      };
+      payload.channels = flat;
+      const api = App.api;
+      if (api && !api.isM3U && api.apiUrl) {
+        payload.epg = api.apiUrl({ action: 'get_simple_data_table', stream_id: 'ID' }).replace(/stream_id=ID$/, 'stream_id={id}');
+        payload.catchup = api.catchupUrl('{id}', Date.now(), 1).replace(/\/\d+\/[^/]+\/\{id\}\.ts$/, '/{min}/{start}/{id}.ts');
+        payload.tz = (api.info && api.info.server_info && api.info.server_info.timezone) || 'UTC';
+        payload.shift = Number(Settings.catchupShift) || 0;
+      }
+      return payload;
+    },
+
     async openNativeNow(item) {
       const label = v => [v.quality || (v.url ? '' : 'SD'), ...(v.tags || [])].filter(Boolean).join(' · ');
       let payload, groups = [];
       if (item.kind === 'live') {
-        const cur = (item.list && item.list[item.index]) || item.version;
-        groups = await App.liveGroups().catch(() => []);
-        let gi = groups.findIndex(g => g.key === item.groupKey && g.channels.includes(cur));
-        if (gi < 0) gi = groups.findIndex(g => g.channels.includes(cur));
-        if (gi < 0) { groups.unshift({ key: item.groupKey || '@now', name: item.subtitle || 'Channels', channels: item.list || [cur] }); gi = 0; }
-        const flat = [], at = new Map();
-        // Guide read from the provider's XMLTV file (its guide calls answer nothing): handed to the
-        // native player, a day back to a day ahead, as [title, start, end].
-        const x = App.api && App.api.guideApiOff && App.api.xmltvReady, now = Date.now();
-        // The viewer's own guide link (Settings) first, for the channels it covers.
-        const own = Settings.epgUrl && App.api && await OwnGuide.load(App.api).catch(() => null);
-        const xmltvProgs = ch => {
-          const cut = list => list.filter(p => p[1] > now - 864e5 && p[0] < now + 864e5).map(p => [p[2], p[0], p[1]]);
-          if (own && ch.versions) for (const v of ch.versions) { const id = own.byStream.get(String(v.stream_id)); if (id && own.progs[id]) return cut(own.progs[id]); }
-          const v = x && ch.versions && App.epgStream(ch), id = v && x.byStream.get(String(v.stream_id));
-          return id && x.progs[id] ? cut(x.progs[id]) : undefined;
-        };
-        const add = ch => {
-          if (!at.has(ch)) {
-            at.set(ch, flat.length);
-            flat.push({
-              title: ch.label || ch.name || '', img: ch.stream_icon || '', num: String(ch.num || ''), radio: !!ch.radio,
-              gkey: ch.gkey || '', fav: App.isFav('live', ch.gkey), free: !!ch.source, // free / extra M3U playlist: never via the VPN
-              // Guide (▼ / ◀ in the player): the stream whose guide we read, and the catch-up copy.
-              epgId: String(((ch.versions && App.epgStream(ch)) || {}).stream_id || ''),
-              cu: String(((ch.versions || []).find(v => Number(v.tv_archive)) || {}).stream_id || ''),
-              progs: xmltvProgs(ch),
-              // An M3U playlist has no URL template: each channel brings its own link.
-              versions: (ch.versions || [ch]).map(v => (v.url ? { url: v.url, label: label(v) }
-                : App.api && App.api.isM3U ? { url: App.api.streamUrl('live', v.stream_id), label: label(v) }
-                : { id: String(v.stream_id), label: label(v) })),
-            });
-          }
-          return at.get(ch);
-        };
-        payload = {
-          live: true,
-          template: App.api ? App.api.streamUrl('live', '{id}', Settings.liveFormat) : '',
-          groups: groups.map(g => ({ key: g.key, name: g.name, items: g.channels.map(add) })),
-          group: gi,
-          index: Math.max(0, groups[gi].channels.indexOf(cur)),
-          version: Math.max(0, ((cur && cur.versions) || [cur]).indexOf(item.version)),
-        };
-        payload.channels = flat;
-        const api = App.api;
-        if (api && !api.isM3U && api.apiUrl) {
-          payload.epg = api.apiUrl({ action: 'get_simple_data_table', stream_id: 'ID' }).replace(/stream_id=ID$/, 'stream_id={id}');
-          payload.catchup = api.catchupUrl('{id}', Date.now(), 1).replace(/\/\d+\/[^/]+\/\{id\}\.ts$/, '/{min}/{start}/{id}.ts');
-          payload.tz = (api.info && api.info.server_info && api.info.server_info.timezone) || 'UTC';
-          payload.shift = Number(Settings.catchupShift) || 0;
-        }
+        payload = await this.livePayload(item);
       } else {
         // A series sends the episodes after this one too: the player goes on to the next by itself.
         // Its other versions (language, quality) follow: the player tries them before the VPN.
@@ -213,6 +266,8 @@
           channels: [item, ...(item.queue || [])].map(film),
         };
       }
+      payload.sleep = Number(Settings.sleepMin) || 0;
+      payload.afr = !!Settings.afr;
       const back = document.activeElement;
       let r = {};
       try {
@@ -229,6 +284,13 @@
       } else {
         for (const [k, on] of Object.entries(r.fav || {})) App.setFav('live', k, on);
         if (r.remindOpen) setTimeout(() => App.openChannelByKey(r.remindOpen), 300);
+        // ⊞ Multiview in the native player: multiview starts with the channel that was on.
+        if (r.multi && window.Multi) {
+          const mg = payload.groups[r.group] || payload.groups[payload.group], mc = mg && payload.channels[mg.items[r.index]];
+          const cat = await App.liveCatalog().catch(() => null), seed = cat && mc && cat.byKey.get(mc.gkey);
+          for (const k of r.history || []) App.pushRecent(k);
+          return Multi.openNative(seed);
+        }
         for (const k of r.history || []) App.pushRecent(k);
         const g = payload.groups[r.group] || payload.groups[payload.group];
         const ch = g && payload.channels[g.items[r.index]];
@@ -514,6 +576,7 @@
           ${versions.length > 1 ? `<button class="btn ghost" data-a="quality">Quality · ${App.esc(it.version.quality || 'SD')}</button>` : ''}
           <button class="btn ghost" data-a="list">☰ Channels</button>
           <button class="btn ghost" data-a="sched">Programmes</button>
+          ${window.Multi && Multi.supported() ? '<button class="btn ghost" data-a="multi">⊞ Multiview</button>' : ''}
           <button class="btn ghost" data-a="pause">${this.livePausedAt ? '▶ Continue' : '⏸ Pause'}</button>
           ${this.prevLive ? `<button class="btn ghost" data-a="prev">↺ ${App.esc(this.prevLive.title || 'Previous channel')}</button>` : ''}
         </div>`;
@@ -543,6 +606,7 @@
       if (a === 'prev') { this.hidePanels(); this.previousChannel(); return; }
       if (a === 'pause') { this.hidePanels(); if (this.livePausedAt) this.resumeLive(); else this.pauseLive(); return; }
       if (a === 'sched') this.openSched();
+      if (a === 'multi') { const c = ch; this.close(); Multi.open(c); }
     },
 
     // A past (or the current) programme from the channel's archive; leaving it goes back to live.
@@ -1275,4 +1339,6 @@
 
   window.Player = Player;
   window.relayUrl = relay;
+  // Shared with multiview.js (same libraries, buffers and relay as the full-screen player).
+  window.PlayerLib = { lib, hlsConfig, relay, webPage };
 })();

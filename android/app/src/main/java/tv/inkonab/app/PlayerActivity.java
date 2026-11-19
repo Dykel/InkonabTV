@@ -140,6 +140,7 @@ public class PlayerActivity extends AppCompatActivity {
     private TextView subsView;           // subtitles: off or a language, shown when the file has some
     private TextView remindView;         // "programme starts now" banner (reminders)
     private String remindGkey;           // the channel that banner opens with OK
+    private boolean multiOpen;           // closing to open multiview with this channel
     private String remindOpen;           // closing to open that channel in the app (from a film)
     private long livePausedAt;           // live TV paused (0: playing)
     private long filmStartMs;            // where a film or episode was asked to start (resume)
@@ -154,6 +155,10 @@ public class PlayerActivity extends AppCompatActivity {
     private final StringBuilder digits = new StringBuilder();
     private final LogoLoader logos = new LogoLoader();
     private final Handler main = new Handler(Looper.getMainLooper());
+    private SleepTimer sleep;
+    private boolean afr;            // Settings → match the TV's refresh rate to the video
+    private float afrRate;          // frame rate the display was last set for
+    private int sleepMin;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -164,6 +169,8 @@ public class PlayerActivity extends AppCompatActivity {
         long startAtMs = 0;
         try {
             JSONObject p = new JSONObject(pending);
+            sleepMin = p.optInt("sleep", 0);
+            afr = p.optBoolean("afr", false);
             pending = null;
             channels = p.getJSONArray("channels");
             live = p.optBoolean("live", false);
@@ -201,6 +208,7 @@ public class PlayerActivity extends AppCompatActivity {
         }
 
         buildUi();
+        sleep = new SleepTimer(this, sleepMin, this::finishWithResult);
 
         DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
             .setUserAgent("InkonabTV/1.0 (Android)")
@@ -242,7 +250,7 @@ public class PlayerActivity extends AppCompatActivity {
         view.setPlayer(player);
         player.addListener(new Player.Listener() {
             @Override
-            public void onTracksChanged(Tracks tracks) { updateAudio(tracks); updateSubs(tracks); }
+            public void onTracksChanged(Tracks tracks) { updateAudio(tracks); updateSubs(tracks); matchFrameRate(tracks); }
 
             @Override
             public void onPlaybackStateChanged(int state) {
@@ -1335,6 +1343,7 @@ public class PlayerActivity extends AppCompatActivity {
         }
         act("☰ Channels", v -> { hidePanels(); openSide(); });
         act("Programmes", v -> openSched());
+        act("⊞ Multiview", v -> { multiOpen = true; finishWithResult(); });
         if (prevGroup >= 0 && prevGroup < groups.size() && prevIndex < groups.get(prevGroup).items.length)
             act("↺ " + channelAt(groups.get(prevGroup).items[prevIndex]).optString("title"), v -> { hidePanels(); previousChannel(); });
         infoActs.getChildAt(0).requestFocus();
@@ -2121,6 +2130,8 @@ public class PlayerActivity extends AppCompatActivity {
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
         boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+        // Sleep timer: any key counts as "still watching"; the key that closes its card does nothing else.
+        if (sleep != null && sleep.touch() && down) return true;
         boolean center = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER;
 
         // The OK press that opened the list must not also "click" the first channel.
@@ -2246,6 +2257,7 @@ public class PlayerActivity extends AppCompatActivity {
         data.putExtra("history", new JSONArray(history).toString());
         data.putExtra("fav", favChanges.toString());
         if (remindOpen != null) data.putExtra("remindOpen", remindOpen);
+        if (multiOpen) data.putExtra("multi", true);
         setResult(RESULT_OK, data);
         finish();
     }
@@ -2253,13 +2265,83 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         super.onStop();
+        // The picture-in-picture window was closed: the player is done.
+        if (inPip) { finishWithResult(); return; }
         if (player != null) player.pause();
+    }
+
+    // ---------- auto frame rate (Android TV, Settings) ----------
+    /** Switch the TV to the refresh rate that fits the video (same resolution): 25 fps → 50 Hz, 23.976 → 23.976/24 Hz… */
+    private void matchFrameRate(Tracks tracks) {
+        if (!afr || android.os.Build.VERSION.SDK_INT < 23) return;
+        float fps = 0;
+        for (Tracks.Group g : tracks.getGroups()) {
+            if (g.getType() != C.TRACK_TYPE_VIDEO) continue;
+            for (int i = 0; i < g.length; i++) if (g.isTrackSelected(i)) { Format f = g.getTrackFormat(i); if (f.frameRate > 0) fps = f.frameRate; }
+        }
+        if (fps <= 0 || Math.abs(fps - afrRate) < 0.01f) return;
+        android.view.Display d = getWindowManager().getDefaultDisplay();
+        android.view.Display.Mode cur = d.getMode(), best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (android.view.Display.Mode m : d.getSupportedModes()) {
+            if (m.getPhysicalWidth() != cur.getPhysicalWidth() || m.getPhysicalHeight() != cur.getPhysicalHeight()) continue;
+            float hz = m.getRefreshRate();
+            double ratio = hz / fps, mult = Math.round(ratio);
+            if (mult < 1 || Math.abs(ratio - mult) > 0.01) continue;   // must be a whole multiple of the frame rate
+            double score = mult + (hz > 61 ? 10 : 0);                  // the lowest multiple, avoiding 100/120 Hz
+            if (score < bestScore) { bestScore = score; best = m; }
+        }
+        if (best == null) return;
+        afrRate = fps;
+        if (best.getModeId() == cur.getModeId()) return;
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.preferredDisplayModeId = best.getModeId();
+        getWindow().setAttributes(lp);
+        Log.i(LIVE_TAG, "frame rate " + fps + " → display " + best.getRefreshRate() + " Hz");
+    }
+
+    // ---------- picture in picture (phones and tablets; TVs have none) ----------
+    private boolean inPip, pipCtl;
+
+    private boolean pipAllowed() {
+        if (android.os.Build.VERSION.SDK_INT < 26) return false;
+        if (getPackageManager().hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)) return false;
+        return getPackageManager().hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+            && player != null && player.isPlaying();
+    }
+
+    /** Home pressed while a video plays: it goes on in a small window over other apps. */
+    @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (!pipAllowed()) return;
+        try {
+            android.app.PictureInPictureParams.Builder b = new android.app.PictureInPictureParams.Builder()
+                .setAspectRatio(new android.util.Rational(16, 9));
+            enterPictureInPictureMode(b.build());
+        } catch (Exception ignored) { }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean pip, @NonNull android.content.res.Configuration cfg) {
+        super.onPictureInPictureModeChanged(pip, cfg);
+        inPip = pip;
+        // Only the picture in the small window: no bars, panels or lists.
+        if (pip) { pipCtl = view.getUseController(); hidePanels(); hideBar(); if (topBar != null) topBar.setVisibility(View.GONE); view.setUseController(false); }
+        else view.setUseController(pipCtl);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(android.view.MotionEvent e) {
+        if (sleep != null) sleep.touch();
+        return super.dispatchTouchEvent(e);
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         main.removeCallbacksAndMessages(null);
+        if (sleep != null) sleep.stop();
         VpnManager.get().removeListener(vpnListener);
         logos.shutdown();
         if (player != null) {

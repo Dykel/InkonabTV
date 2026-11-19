@@ -2,18 +2,31 @@
 (function () {
   const CFG = window.INKONAB_CONFIG;
 
+  // Profiles: what each viewer collects (favourites, Continue Watching, own groups, organising,
+  // reminders, multiview, audio choices) is kept per profile; the main profile ('') keeps the
+  // keys it always had, so nothing moves for people with one profile.
+  const SCOPED = /^(fav|recentLive|cw|myGroups|multiview|audioPick|audioLast|reminders|remFired)$|^org\./;
+  let profile = '';
+  try { profile = JSON.parse(localStorage.getItem('itv.profile') || '""') || ''; } catch {}
+  const full = key => 'itv.' + (profile && SCOPED.test(key) ? 'p.' + profile + '.' : '') + key;
   const Store = {
     get(key, fallback) {
       try {
-        const raw = localStorage.getItem('itv.' + key) ?? sessionStorage.getItem('itv.' + key);
+        const raw = localStorage.getItem(full(key)) ?? sessionStorage.getItem(full(key));
         return raw == null ? fallback : JSON.parse(raw);
       } catch { return fallback; }
     },
     set(key, value, sessionOnly) {
-      try { (sessionOnly ? sessionStorage : localStorage).setItem('itv.' + key, JSON.stringify(value)); } catch {}
+      try { (sessionOnly ? sessionStorage : localStorage).setItem(full(key), JSON.stringify(value)); } catch {}
     },
     del(key) {
-      try { localStorage.removeItem('itv.' + key); sessionStorage.removeItem('itv.' + key); } catch {}
+      try { localStorage.removeItem(full(key)); sessionStorage.removeItem(full(key)); } catch {}
+    },
+    get profile() { return profile; },
+    // Removes everything a deleted profile kept.
+    dropProfile(id) {
+      if (!id) return;
+      try { Object.keys(localStorage).filter(k => k.startsWith('itv.p.' + id + '.')).forEach(k => localStorage.removeItem(k)); } catch {}
     },
   };
 

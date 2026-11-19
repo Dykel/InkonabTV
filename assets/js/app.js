@@ -1102,7 +1102,8 @@
       }
       $('#login').classList.add('hidden');
       $('#app').classList.remove('hidden');
-      $('#avatar').textContent = (this.api.username[0] || '?').toUpperCase();
+      this.paintProfile();
+      if (Profiles.kids) await this.loadKidsCats();
       // First sign-in with a multi-language playlist: choose the languages before downloading it.
       // A playlist without language codes (or with only one) loads whole, as before.
       if (this.langPickerOn() && Store.get(this.langKey(this.api)) == null) {
@@ -1113,11 +1114,22 @@
         this.api.setLangs(Store.get(this.langKey(this.api)));
       }
       this.route();
+      Profiles.askAtStart();
       this.checkServer();
       this.homeRowsLater(20000);
       this.syncReminders().then(() => this.watchReminders());
       // Opened from a TV home screen tile before the app was ready: go there now.
       if (this.pendingLink) { const u = this.pendingLink; this.pendingLink = null; setTimeout(() => this.openLink(u), 600); }
+    },
+
+    // The avatar: the profile's first letter in its colour (the account's initial with one profile).
+    paintProfile() {
+      const p = Profiles.current(), many = Profiles.list().length > 1, a = $('#avatar');
+      a.textContent = ((many ? p.name : this.api && this.api.username) || '?')[0].toUpperCase();
+      a.style.background = many ? p.color : '';
+      a.style.color = many ? '#111' : '';
+      a.setAttribute('aria-label', many ? p.name : 'Account');
+      document.documentElement.classList.toggle('kids', Profiles.kids);
     },
 
     bindChrome() {
@@ -1131,7 +1143,7 @@
       $$('[data-view]').forEach(b => b.addEventListener('click', () => { location.hash = b.dataset.view; }));
       $('#searchBtn').addEventListener('click', () => this.openSearch());
       $('#settingsBtn').addEventListener('click', () => this.openSettings());
-      $('#avatar').addEventListener('click', () => this.openSettings());
+      $('#avatar').addEventListener('click', () => Profiles.open());
       window.addEventListener('hashchange', () => this.api && this.route());
       $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') this.closeModal(); });
 
@@ -1413,7 +1425,7 @@
     // ---------- routing ----------
     route() {
       const view = (location.hash.slice(1) || 'home').split('/')[0];
-      this.view = ['home', 'live', 'guide', 'movies', 'series'].includes(view) ? view : 'home';
+      this.view = ['home', 'live', 'guide', 'movies', 'series', 'sport'].includes(view) ? view : 'home';
       $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === this.view));
       $('.home-btn').classList.toggle('active', this.view === 'home');
       document.body.dataset.view = this.view;
@@ -1426,7 +1438,7 @@
       main.dataset.seq = seq;
       this.leavePage();
       this.cancelRetry();
-      const render = { home: this.renderHome, live: this.renderLive, guide: this.renderGuide, movies: this.renderMovies, series: this.renderSeries }[this.view];
+      const render = { home: this.renderHome, live: this.renderLive, guide: this.renderGuide, movies: this.renderMovies, series: this.renderSeries, sport: this.renderSport }[this.view];
       setTimeout(() => this.detectGenres().catch(() => {}), 8000); // once, after the first page is up
       setTimeout(() => this.warmSearch(), 4000);
       return render.call(this, main).then(() => { this.routeFails = 0; }).catch(err => {
@@ -1482,11 +1494,11 @@
       const hidden = this.org(kind).hidden || [], key = hidden.join(',') + '|' + Settings.showAdult;
       const c = this.data[kind + 'Browse'];
       if (c && c.all === all && c.key === key) return c.p;
-      const hiddenCats = new Set(hidden.map(String)), adult = Settings.showAdult;
+      const hiddenCats = new Set(hidden.map(String)), adult = Settings.showAdult, kids = Profiles.kids;
       const p = (async () => {
         const items = [], perCat = {}, byId = new Map(), latest = [], seen = new Set();
         await eachSlice(all, i => {
-          if ((i.adult && !adult) || hiddenCats.has(String(i.cat))) return;
+          if ((i.adult && !adult) || hiddenCats.has(String(i.cat)) || (kids && !this.kidsOk(i))) return;
           items.push(i);
           byId.set(i.kind + i.id, i);
           (perCat[i.cat] || (perCat[i.cat] = new Set())).add(i.gkey);
@@ -1665,9 +1677,27 @@
       }
       let cats = await this.data[key];
       if (api.langAllowed) cats = cats.filter(c => api.langAllowed(c.category_name));
+      // Kids profile: kids and family categories only (never adult ones).
+      if (Profiles.kids) return cats.filter(c => !ADULT.test(c.category_name) && Profiles.kidsCategory(c.category_name));
       return Settings.showAdult ? cats : cats.filter(c => !ADULT.test(c.category_name));
     },
-    allowed(list) { return Settings.showAdult ? list : list.filter(i => !i.adult); },
+    // Kids profile: the kids categories of each kind, before any list is shown.
+    async loadKidsCats() {
+      const set = new Set();
+      for (const kind of ['live', 'movie', 'series']) {
+        const cats = await this.loadCats(kind).catch(() => []);
+        for (const c of cats) set.add(kind + ':' + c.category_id);
+      }
+      this.kidsCats = set;
+    },
+    kidsOk(i) {
+      const kind = i.kind === 'movie' || i.kind === 'series' ? i.kind : 'live';
+      return Profiles.kidsItem(i, !!this.kidsCats && this.kidsCats.has(kind + ':' + (i.cat ?? i.category_id)));
+    },
+    allowed(list) {
+      if (Profiles.kids) return list.filter(i => this.kidsOk(i));
+      return Settings.showAdult ? list : list.filter(i => !i.adult);
+    },
     // The allowed items of a list as a Set (search), kept per list.
     okSet(list) {
       const c = this.okSets || (this.okSets = new WeakMap()), k = c.get(list);
@@ -1719,7 +1749,8 @@
     liveCatalog() {
       if (!this.data.liveCatalog) {
         this.data.liveCatalog = (async () => {
-          const free = await this.loadFree();
+          // Kids profile: extra playlists only when their name says they're for kids.
+          const free = (await this.loadFree()).filter(c => !Profiles.kids || Profiles.kidsCategory(c.source));
           const groups = [...new Set(free.map(c => c.source))].map(src => {
             const channels = free.filter(c => c.source === src);
             return { key: '@free:' + src, name: src, free: true, builtin: channels[0].builtin, channels };
@@ -2005,17 +2036,100 @@
       for (const k of this.backupKeys) { const v = Store.get(k, null); if (v != null) data[k] = v; }
       const { save, showAdult, adultPin, server, relay, ...settings } = Settings;
       data.settings = settings;
+      // Every profile's own lists (the profile in use is read the same way as the others).
+      const list = Profiles.list();
+      if (list.length > 1) {
+        data.profiles = list;
+        data.byProfile = {};
+        for (const p of list) {
+          if (!p.id) { for (const k of this.backupKeys) { try { const v = localStorage.getItem('itv.' + k); if (v != null) (data.byProfile[''] = data.byProfile[''] || {})[k] = JSON.parse(v); } catch {} } continue; }
+          const own = {};
+          for (const k of this.backupKeys) { try { const v = localStorage.getItem('itv.p.' + p.id + '.' + k); if (v != null) own[k] = JSON.parse(v); } catch {} }
+          data.byProfile[p.id] = own;
+        }
+      }
       return { app: 'InkonabTV', v: 1, at: new Date().toISOString(), data };
     },
     restoreData(b) {
       if (!b || b.app !== 'InkonabTV' || !b.data) throw new Error('This file isn’t an InkonabTV backup');
-      for (const k of this.backupKeys) if (k in b.data) Store.set(k, b.data[k]);
+      if (b.data.byProfile) {
+        // A copy with profiles: each profile's lists go back where they belong.
+        Store.set('profiles', b.data.profiles || []);
+        for (const [id, own] of Object.entries(b.data.byProfile)) for (const [k, v] of Object.entries(own)) {
+          try { localStorage.setItem('itv.' + (id ? 'p.' + id + '.' : '') + k, JSON.stringify(v)); } catch {}
+        }
+      } else for (const k of this.backupKeys) if (k in b.data) Store.set(k, b.data[k]);
       if (b.data.settings) {
         const { adultPin, server, relay, showAdult, save, ...keep } = b.data.settings;
         Object.assign(Settings, keep);
         Settings.save();
       }
     },
+    // ---------- copy to another device (through the remote-setup relay; never the account) ----------
+    copyApi() { return CFG.pairApi ? CFG.pairApi.replace(/\/+$/, '') + '/pair' : ''; },
+    // This device receives: it shows a code, the other device sends to it.
+    async copyReceive() {
+      let r;
+      try { r = await (await fetch(this.copyApi(), { method: 'POST' })).json(); } catch { return this.toast('Can’t reach the copy service. Check the connection.'); }
+      let stop = false;
+      this.openModal(`<button class="round-btn close" data-close aria-label="Close">✕</button>
+        <h2 class="sheet-title">${esc(T('Copy from another device'))}</h2>
+        <p>${esc(T('On the other device, open Settings → Copy to another device → Send, and enter this code:'))}</p>
+        <div class="pair-code copy-code">${esc(r.code.slice(0, 3) + '-' + r.code.slice(3))}</div>
+        <p class="muted small-note">${esc(T('Favourites, groups, lists, reminders, profiles and settings are copied. Your account is not. The code works once, for 15 minutes.'))}</p>
+        <div class="loader small"><span></span></div>`, 'copy');
+      this.modalOnClose = () => { stop = true; };
+      $('#modal [data-close]').addEventListener('click', () => this.closeModal());
+      const end = Date.now() + 15 * 60e3;
+      while (!stop && Date.now() < end) {
+        await new Promise(res => setTimeout(res, 3000));
+        if (stop) return;
+        let got = null;
+        try {
+          const x = await fetch(`${this.copyApi()}/${r.code}?token=${encodeURIComponent(r.token)}`, { cache: 'no-store' });
+          if (x.status === 200) got = await x.json();
+          else if (x.status === 404) break;
+        } catch {}
+        if (got && got.b) {
+          try { this.restoreData(JSON.parse(got.b)); } catch { this.closeModal(); return this.toast('That copy couldn’t be read'); }
+          stop = true;
+          this.closeModal();
+          this.toast('Copied from the other device');
+          setTimeout(() => location.reload(), 900);
+          return;
+        }
+      }
+      if (!stop) { this.closeModal(); this.toast('The code has expired. Try again.'); }
+    },
+    // This device sends its copy to the code the other device shows.
+    copySend() {
+      this.openModal(`<button class="round-btn close" data-close aria-label="Close">✕</button>
+        <h2 class="sheet-title">${esc(T('Copy to another device'))}</h2>
+        <p>${esc(T('On the other device, open Settings → Copy from another device. Enter the code it shows:'))}</p>
+        <label class="set"><span>${esc(T('Code'))}</span><input class="field copy-in" id="copyCode" maxlength="7" autocapitalize="characters" spellcheck="false" placeholder="ABC-123"></label>
+        <p class="login-error" id="copyErr"></p>
+        <div class="set-row vpn-actions"><button class="btn primary" id="copyGo">${esc(T('Send'))}</button></div>`, 'copy');
+      const m = $('#modal');
+      $('[data-close]', m).addEventListener('click', () => this.closeModal());
+      const go = async () => {
+        const code = $('#copyCode', m).value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const err = $('#copyErr', m);
+        if (code.length !== 6) { err.textContent = T('The code has 6 letters and numbers'); return; }
+        let body = JSON.stringify(this.backupData());
+        // Too big for the relay (a very long Continue Watching): send the lists without it.
+        if (body.length > 118000) { const d = this.backupData(); delete d.data.cw; if (d.data.byProfile) for (const o of Object.values(d.data.byProfile)) delete o.cw; body = JSON.stringify(d); }
+        err.textContent = '';
+        try {
+          const x = await fetch(`${this.copyApi()}/${code}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ b: body }) });
+          if (x.status === 204) { this.closeModal(); return this.toast('Sent. The other device updates in a few seconds.'); }
+          err.textContent = T(x.status === 404 ? 'Wrong or expired code' : x.status === 409 ? 'This code was already used' : x.status === 413 ? 'Too much to send at once' : 'Couldn’t send. Try again.');
+        } catch { err.textContent = T('Can’t reach the copy service. Check the connection.'); }
+      };
+      $('#copyGo', m).addEventListener('click', go);
+      $('#copyCode', m).addEventListener('keydown', e => { if (e.key === 'Enter' && !e.target.readOnly) { e.preventDefault(); go(); } });
+      $('#copyCode', m).focus();
+    },
+
     backupName() { return 'inkonabtv-backup-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.json'; },
     async saveBackup() {
       const json = JSON.stringify(this.backupData());
@@ -2382,6 +2496,7 @@
           <div id="cwSlot"></div>
           ${this.row('My List', mine)}
           <div id="freeSlot"></div>
+          <div id="mediaSlot"></div>
           <div id="popSlot"></div>
           ${this.row('Top rated', topRated)}
           ${this.row('New episodes', recentSeries)}
@@ -2393,6 +2508,8 @@
       $('[data-hero="info"]', main).addEventListener('click', () => this.heroItem && (this.heroItem.kind === 'series' ? this.openSeries(this.heroItem) : this.openMovie(this.heroItem)));
       this.renderContinue();
       this.renderFree($('#freeSlot', main), true);
+      // Kids profile: the media server's library isn't filtered, so it isn't shown there.
+      if (!Profiles.kids) MediaServer.renderRows($('#mediaSlot', main)).catch(() => {});
       if (latest[0]) this.setHero(latest[0]);
 
       // TMDB-ranked rows arrive a moment later so they never hold up the page.
@@ -2773,7 +2890,7 @@
             </div>
           </aside>
           <section class="channels">
-            <div class="grid-head"><h2 id="chTitle"></h2><input class="field" type="search" placeholder="Find channel" id="chFilter"></div>
+            <div class="grid-head"><h2 id="chTitle"></h2>${window.Multi && Multi.supported() ? '<button class="btn ghost sm mv-open" id="mvOpen">⊞ Multiview</button>' : ''}<input class="field" type="search" placeholder="Find channel" id="chFilter"></div>
             <div class="genre-cards" id="liveGenres"${genrePills.length ? '' : ' hidden'}>
               <button class="genre-card" data-cat="">${esc(this.infoName('All genres'))}</button>
               ${genrePills.map(g => `<button class="genre-card" data-cat="${esc(g.key)}">${esc(g.name)}</button>`).join('')}
@@ -2844,6 +2961,11 @@
       }, 150));
 
       const play = (index, version) => this.playChannel(current, index, group, version);
+      // Multiview: the channels watched there last time, else this group's selected (or first) channel.
+      const mv = $('#mvOpen', main);
+      if (mv) mv.addEventListener('click', () => {
+        Multi.open((Store.get('multiview', []) || []).length ? null : (current.includes(this.guideFor) && this.guideFor) || current[0]);
+      });
 
       const guide = $('#guide', main);
       const favBtn = ch => `<button class="btn ghost sm fav-btn" data-fav>${this.isFav('live', ch.gkey) ? '★ In Favorites' : '☆ Add to Favorites'}</button>`;
@@ -3046,6 +3168,88 @@
     },
 
     // ---------- TV guide grid ----------
+    // ---------- Sport: what's on the sports channels now, and the matches coming up ----------
+    async renderSport(main) {
+      this.setBackdrop('');
+      const seq = main.dataset.seq;
+      const cat = await this.liveCatalog();
+      if (this.stale(main, seq)) return;
+      const sports = (cat.genres.find(g => g.genre === 'sports') || { channels: [] }).channels.filter(c => !c.radio);
+      if (!sports.length) { main.innerHTML = `<div class="empty"><h3>${esc(T('No sports channels'))}</h3><p>${esc(T('Your playlist has no channels recognised as sport.'))}</p></div>`; return; }
+      // Matches and events: "A vs B", "A - B", competitions… (not studio shows, news or replays).
+      const MATCH = /\s(vs?\.?|x|-|–|—|@)\s|\b(ligue ?1|ligue des champions|premier league|la ?liga|serie a|bundesliga|champions league|europa|conference league|coupe|cup|copa|coppa|pokal|nba|nfl|nhl|mlb|f1|formula ?1|grand prix|moto ?gp|ufc|boxing|boxe|tennis|atp|wta|roland|wimbledon|rugby|six nations|top 14|tour de france|cyclisme|handball|basket|volley|golf|cricket|ipl|olymp|match|live)\b/i;
+      const NOT = /\b(magazine|mag|news|journal|resume|résumé|highlights|best of|replay|rediffusion|talk|debrief|avant[- ]match|apres[- ]match|pre[- ]match|post[- ]match|after|before)\b/i;
+      const isEvent = t => MATCH.test(' ' + t + ' ') && !NOT.test(t);
+      main.innerHTML = `<div class="sport-page">
+          <section class="row"><h2><b>${esc(T('On now'))}</b> ${esc(T('in sport'))}</h2><div class="row-scroll sp-now"></div></section>
+          <section class="sp-up-wrap"><h2><b>${esc(T('Coming up'))}</b> <small class="muted">${esc(T('next 24 hours'))}</small></h2><div class="sp-up"><div class="loader small"><span></span></div></div></section>
+        </div>`;
+      const nowBox = $('.sp-now', main), upBox = $('.sp-up', main);
+      const list = sports.slice(0, 150), now = Date.now();
+      const nowCards = new Map(), up = [];
+      const card = (c, prog) => `<button class="sp-card${prog && isEvent(prog.title) ? ' event' : ''}" data-g="${esc(c.gkey)}">
+          <span class="sp-logo">${c.stream_icon ? `<img loading="lazy" src="${esc(c.stream_icon)}" alt="">` : ''}<span class="ph">${esc(c.label)}</span></span>
+          <span class="sp-text"><b>${esc(prog ? prog.title : c.label)}</b><small>${esc(prog ? c.label + ' · ' + hm(prog.start) + '–' + hm(prog.end) : T('No guide information'))}</small>
+          ${prog ? `<span class="sp-bar"><i style="width:${Math.min(100, Math.max(0, (now - prog.start) / (prog.end - prog.start) * 100)).toFixed(0)}%"></i></span>` : ''}</span></button>`;
+      // The channels first (no guide yet), each replaced by its programme as the guide arrives.
+      nowBox.innerHTML = list.slice(0, 40).map(c => card(c, null)).join('');
+      const byKey = new Map(list.map(c => [c.gkey, c]));
+      const play = gkey => {
+        const c = byKey.get(gkey);
+        if (c) this.playChannel(list, list.indexOf(c), { key: '@genre:sports', name: T('Sport') });
+      };
+      nowBox.addEventListener('click', e => { const b = e.target.closest('[data-g]'); if (b) play(b.dataset.g); });
+      upBox.addEventListener('click', e => {
+        const b = e.target.closest('[data-up]');
+        if (!b) return;
+        const ev = up[Number(b.dataset.up)];
+        if (!ev) return;
+        if (ev.p.start <= Date.now()) return play(ev.c.gkey);
+        const on = this.toggleReminder(ev.c, ev.p);
+        b.classList.toggle('reminded', on);
+      });
+      let pending = list.length, drawn = 0;
+      const paintUp = () => {
+        if (this.stale(main, seq)) return;
+        up.sort((a, b) => a.p.start - b.p.start);
+        const rem = new Set(this.reminders().map(r => r.gkey + ':' + r.start));
+        const rows = up.slice(0, 120);
+        upBox.innerHTML = rows.length ? rows.map((ev, i) => {
+          const live = ev.p.start <= Date.now();
+          return `<button class="sp-ev${live ? ' live' : ''}${rem.has(ev.c.gkey + ':' + ev.p.start) ? ' reminded' : ''}" data-up="${i}">
+            <span class="sp-time">${live ? `<span class="badge on-air">● ${esc(T('Live'))}</span>` : `${esc(this.dayLabel(ev.p.start) === this.dayLabel(Date.now()) ? '' : this.dayLabel(ev.p.start) + ' ')}${hm(ev.p.start)}`}</span>
+            <span class="sp-title"><b>${esc(ev.p.title)}</b><small>${esc(ev.c.label)}</small></span>
+            <span class="sp-act">${live ? esc(T('Watch')) : '🔔'}</span></button>`;
+        }).join('') : (pending ? '<div class="loader small"><span></span></div>' : `<p class="muted">${esc(T('No matches found in the guide for the next 24 hours.'))}</p>`);
+        drawn = rows.length;
+      };
+      let paintTimer = 0;
+      const later = () => { clearTimeout(paintTimer); paintTimer = setTimeout(paintUp, 400); };
+      this.onLeave(() => clearTimeout(paintTimer));
+      await Promise.all(list.map(async c => {
+        const progs = await this.epgFor(c).catch(() => []);
+        pending--;
+        if (this.stale(main, seq)) return;
+        const cur = progs.find(p => p.start <= now && p.end > now);
+        const b = nowBox.querySelector(`[data-g="${CSS.escape(c.gkey)}"]`);
+        if (cur) {
+          nowCards.set(c.gkey, { c, cur });
+          const html = card(c, cur);
+          if (b) b.outerHTML = html; else nowBox.insertAdjacentHTML('beforeend', html);
+        }
+        for (const p of progs) if (p.end > now && p.start < now + 864e5 && isEvent(p.title)) up.push({ c, p });
+        later();
+      }));
+      if (this.stale(main, seq)) return;
+      // Events on now first, then the other channels with a programme, then the rest.
+      const order = c => { const n = nowCards.get(c.gkey); return n ? (isEvent(n.cur.title) ? 0 : 1) : 2; };
+      const sorted = [...nowBox.children].sort((a, b) => order(byKey.get(a.dataset.g)) - order(byKey.get(b.dataset.g)));
+      const had = document.activeElement && nowBox.contains(document.activeElement);
+      sorted.forEach(el => nowBox.appendChild(el));
+      if (had) nowBox.firstElementChild.focus({ preventScroll: true });
+      paintUp();
+    },
+
     async renderGuide(main) {
       this.setBackdrop('');
       const seq = main.dataset.seq;
@@ -3783,7 +3987,12 @@
     },
 
     // ---------- settings ----------
+    // A kids profile opens Settings with the parental PIN only.
     openSettings() {
+      if (Profiles.kids) return this.askPin('check').then(ok => { if (ok) this.openSettingsNow(); });
+      return this.openSettingsNow();
+    },
+    openSettingsNow() {
       const ui = (this.api && this.api.info && this.api.info.user_info) || {};
       const exp = Number(ui.exp_date) ? new Date(Number(ui.exp_date) * 1000).toLocaleDateString(LOCALE, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Never';
       const langs = [['en-US', 'English'], ['fr-FR', 'Français'], ['es-ES', 'Español'], ['de-DE', 'Deutsch'], ['it-IT', 'Italiano'], ['pt-PT', 'Português'], ['nl-NL', 'Nederlands'], ['ar-SA', 'العربية'], ['tr-TR', 'Türkçe']];
@@ -3812,6 +4021,9 @@
             <select class="field" id="setFormat"><option value="m3u8">HLS (.m3u8)</option><option value="ts">MPEG-TS (.ts)</option></select></label>
           <label class="set"><span>Info language<small>Language for summaries and titles from TMDB.</small></span>
             <select class="field" id="setLang">${langs.map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join('')}</select></label>
+          ${window.Native && document.documentElement.classList.contains('tv') ? `<label class="set toggle"><span>Match frame rate<small>The TV switches to the refresh rate of each video (24, 25, 50, 60 Hz) for smoother sport and films. The screen may go black for a second when a video starts.</small></span><input type="checkbox" id="setAfr"></label>` : ''}
+          <label class="set"><span>Sleep timer<small>Stops playback when no key has been pressed for this long (asks first).</small></span>
+            <select class="field" id="setSleep">${[0, 30, 60, 90, 120, 180].map(n => `<option value="${n}">${n ? (n >= 60 ? (n / 60) + ' h' : n + ' min').replace('1.5 h', '1 h 30') : 'Off'}</option>`).join('')}</select></label>
           <label class="set"${this.api.isM3U ? ' hidden' : ''}><span>Catch-up time correction<small>If replays start at the wrong time, shift them here.</small></span>
             <select class="field" id="setShift">${[-2, -1, 0, 1, 2].map(h => `<option value="${h}">${h === 0 ? 'None (server time)' : (h > 0 ? '+' : '−') + Math.abs(h) + ' hour' + (Math.abs(h) > 1 ? 's' : '')}</option>`).join('')}</select></label>
           ${window.Native && Native.player.autostart && !CFG.hotel && CFG.autostart !== false ? `<label class="set toggle" id="autoStartRow" hidden><span>Open InkonabTV when the TV turns on<small>Starts on the channel you watched last.</small></span><input type="checkbox" id="setAutoStart"></label>` : ''}
@@ -3872,9 +4084,12 @@
           <p class="muted small-note">Record live channels on a USB drive or memory stick: press OK on a channel and choose ⏺ Record, or pick a programme still to come in the TV Guide.</p>
           <div class="set-row vpn-actions"><button class="btn ghost" id="recOpen">Recordings</button></div>
         </section>
-        ${document.documentElement.classList.contains('tizen') ? '' : `<section class="set-group">
-          <h3>Backup and restore</h3>
+        ${MediaServer.settingsHtml()}
+        ${document.documentElement.classList.contains('tizen') ? (CFG.pairApi ? `<section class="set-group"><h3>Other devices</h3>
+          <div class="set-row vpn-actions"><button class="btn ghost" id="cpSend">Copy to another device</button><button class="btn ghost" id="cpGet">Copy from another device</button></div></section>` : '') : `<section class="set-group">
+          <h3>Backup, restore and other devices</h3>
           <p class="muted small-note">${window.Native ? 'Keeps your favorites, groups, lists and settings on a USB drive (or this device) to bring back after a reinstall or on another TV box.' : 'Keeps your favorites, groups, lists and settings in a file, to bring back later or on another device.'} Your sign-in details are not included.</p>
+          ${CFG.pairApi ? '<div class="set-row vpn-actions"><button class="btn ghost" id="cpSend">Copy to another device</button><button class="btn ghost" id="cpGet">Copy from another device</button></div>' : ''}
           <div class="set-row vpn-actions"><button class="btn ghost" id="bkSave">Save a backup</button><button class="btn ghost" id="bkRestore">Restore a backup</button><button class="btn ghost" id="orgLive">✎ Organise lists</button></div>
         </section>`}
         <section class="set-group">
@@ -3897,6 +4112,10 @@
       $('#setFormat', m).value = Settings.liveFormat;
       $('#setLang', m).value = Settings.tmdbLang;
       $('#setAdult', m).checked = Settings.showAdult;
+      const afrBox = $('#setAfr', m);
+      if (afrBox) { afrBox.checked = !!Settings.afr; afrBox.addEventListener('change', e => save('afr', e.target.checked)); }
+      $('#setSleep', m).value = String(Settings.sleepMin || 0);
+      $('#setSleep', m).addEventListener('change', e => save('sleepMin', Number(e.target.value)));
       $('#setShift', m).value = String(Settings.catchupShift || 0);
       $('#setShift', m).addEventListener('change', e => save('catchupShift', Number(e.target.value)));
       const save = (k, v) => { Settings[k] = v; Settings.save(); };
@@ -3977,9 +4196,13 @@
         const g = $('#recGroup', m);
         if (g) { g.hidden = false; $('#recOpen', g).addEventListener('click', () => this.openRecordings()); }
       }).catch(() => {});
+      MediaServer.bindSettings(m);
+      const cs = $('#cpSend', m);
+      if (cs) { cs.addEventListener('click', () => this.copySend()); $('#cpGet', m).addEventListener('click', () => this.copyReceive()); }
       const bk = $('#bkSave', m);
       if (bk) {
         bk.addEventListener('click', () => this.saveBackup());
+
         $('#bkRestore', m).addEventListener('click', () => this.restoreBackup());
         $('#orgLive', m).addEventListener('click', () => this.openOrganise('live'));
       }

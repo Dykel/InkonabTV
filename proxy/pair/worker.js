@@ -3,6 +3,7 @@
 //   TV     POST /pair                       → { code, token, ttl }   (shows the code on screen)
 //   phone  PUT  /pair/<code>  {s,u,p}|{m, name?, extra?}  → 204 (404: wrong/expired code, 409: already used)
 //   TV     GET  /pair/<code>?token=<token>  → 204 while waiting, 200 + the account once sent
+//   app    PUT  /pair/<code>  {b}            → copy favourites/settings from another InkonabTV (no account)
 //
 // The account is kept only until the TV collects it (then deleted) and never longer than
 // 15 minutes. Only the TV that asked for the code (it holds the token) can read it.
@@ -11,6 +12,9 @@
 const TTL = 15 * 60;
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
 const MAX_BODY = 4096;
+// A settings copy from another device (favourites, groups, reminders…): a Durable Object value
+// holds up to 128 KiB.
+const MAX_COPY = 120000;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -49,9 +53,15 @@ export default {
 
     if (request.method === 'PUT') {
       const text = await request.text();
-      if (text.length > MAX_BODY) return reply(413, { error: 'too large' });
+      if (text.length > MAX_COPY + 100) return reply(413, { error: 'too large' });
       let d;
       try { d = JSON.parse(text); } catch { return reply(400, { error: 'bad json' }); }
+      if (d && typeof d.b === 'string' && d.b) {
+        if (d.b.length > MAX_COPY) return reply(413, { error: 'too large' });
+        const r = await room(code).fetch('https://do/data', { method: 'PUT', body: JSON.stringify({ b: d.b }) });
+        return reply(r.status);
+      }
+      if (text.length > MAX_BODY) return reply(413, { error: 'too large' });
       const data = d && typeof d.m === 'string' && d.m
         ? { m: d.m, ...(typeof d.name === 'string' && d.name ? { name: d.name.slice(0, 40) } : {}), ...(d.extra === true ? { extra: true } : {}) }
         : d && typeof d.u === 'string' && typeof d.p === 'string' && d.u && d.p ? { s: typeof d.s === 'string' ? d.s : '', u: d.u, p: d.p } : null;
