@@ -881,13 +881,45 @@
 
   // Minimal M3U parser: [{name, logo, group, url, radio}]
   const M3U = {
+    // Why a playlist couldn't be read, in words the viewer can act on.
+    why(e, url) {
+      const m = String((e && e.message) || e || ''), host = (url.match(/^\w+:\/\/([^/:?]+)/) || [])[1] || url;
+      const code = Number((m.match(/Playlist (\d{3})/) || [])[1]);
+      let msg;
+      if (code === 401 || code === 403 || code === 884) msg = `${host} refused the link (${code}): the account may be wrong, expired or already in use`;
+      else if (code === 404) msg = `${host} says this playlist doesn’t exist (404). Check the link`;
+      else if (code === 429) msg = `${host} is limiting requests (429). Try again in a few minutes`;
+      else if (code >= 500) msg = `${host} has a problem (${code}). Try again later`;
+      else if (code) msg = `${host} answered ${code}`;
+      else if (/resolve|ENOTFOUND|UnknownHost/i.test(m)) msg = `Can’t find ${host}. Check the link`;
+      else if (/timeout|timed out/i.test(m)) msg = `${host} didn’t answer in time`;
+      else if (/too big/i.test(m)) msg = 'This playlist is too big (over 64 MB)';
+      else if (/Failed to fetch|NetworkError|Load failed|blocked/i.test(m)) msg = location.protocol === 'https:' && /^http:/i.test(url)
+        ? `The website can’t open plain-HTTP links like ${host}. Use the InkonabTV app, or an https link`
+        : `${host} doesn’t allow apps to read this playlist, or can’t be reached from here`;
+      else msg = `Can’t load the playlist from ${host}`;
+      const err = new Error(msg);
+      err.reason = m;
+      return err;
+    },
     async load(url) {
       const web = () => fetch(url, { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error('Playlist ' + r.status); return r.text(); });
       // Android app: read it natively when the site sends no CORS headers (the WebView then
       // refuses it, e.g. inkonabtv.alwaysdata.net/tv.m3u). App versions without fetchText fall back.
       const P = window.Native && Native.player;
       const native = () => P.fetchText({ url }).then(r => { if (!r.ok) throw new Error(r.text || 'Playlist failed'); return r.text; });
-      const text = P ? await web().catch(e => native().catch(() => { throw e; })) : await web();
+      // Website: a site that sends no CORS header can still be read through the helper / relay.
+      const viaRelay = () => {
+        const r = window.relayUrl && window.relayUrl(url);
+        if (!r || r === url) throw new Error('blocked');
+        return fetch(r, { cache: 'no-cache' }).then(x => { if (!x.ok) throw new Error('Playlist ' + x.status); return x.text(); });
+      };
+      let text;
+      try {
+        text = P ? await web().catch(e => native().catch(n => { throw n && /Playlist \d|resolve|timeout|refused|reach/i.test(n.message) ? n : e; }))
+          : await web().catch(e => viaRelay().catch(() => { throw e; }));
+      } catch (e) { throw M3U.why(e, url); }
+      if (!/#EXTINF/i.test(text)) throw new Error(/<html|<!doctype/i.test(text) ? 'This link opens a web page, not an M3U playlist' : /^\s*[{[]/.test(text) ? 'This link returns data, not an M3U playlist' : 'This playlist is empty');
       const out = [];
       let cur = null;
       for (const raw of text.split(/\r?\n/)) {

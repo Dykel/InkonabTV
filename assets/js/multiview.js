@@ -190,7 +190,10 @@
       const L = window.PlayerLib;
       let raw, ext;
       if (ver.url) { raw = ver.url; ext = ((ver.url.match(/\.(m3u8|ts|mp4)(?:\?|$)/i) || [])[1] || 'm3u8').toLowerCase(); }
-      else { ext = Settings.liveFormat || 'm3u8'; raw = App.api.streamUrl('live', ver.stream_id, ext); }
+      // The format that worked in the player this session (some providers' HLS is broken), or the
+      // tile's own switch after a failure.
+      else { ext = t.fmt || (window.Player && Player.fmtPref) || Settings.liveFormat || 'm3u8'; raw = App.api.streamUrl('live', ver.stream_id, ext); }
+      t.fmt = ext;
       const url = ver.url && !ver.relay ? raw : L.relay(raw);
       t.state = 'loading';
       this.paintState(i);
@@ -216,7 +219,11 @@
         v.src = url;
       }
       v.muted = i !== this.focus;
-      v.onplaying = () => { if (this.tiles[i] !== t) return; t.state = 'playing'; t.tries = 0; this.paintState(i); };
+      v.onplaying = () => {
+        if (this.tiles[i] !== t) return;
+        t.state = 'playing'; t.tries = 0; this.paintState(i);
+        if (t.altTried && window.Player) Player.fmtPref = t.fmt;
+      };
       v.onwaiting = () => { if (this.tiles[i] === t && t.state === 'playing') { t.state = 'loading'; this.paintState(i); } };
       v.onerror = fail;
       clearTimeout(t.timer);
@@ -227,6 +234,14 @@
 
     failed(i, t = this.tiles[i]) {
       if (!t || this.tiles[i] !== t || t.state === 'failed') return;
+      // The other format first (m3u8 ↔ ts), as the full-screen player does.
+      const ver = (t.ch.versions || [t.ch])[0];
+      if (!ver.url && !t.altTried) {
+        t.altTried = true;
+        t.fmt = t.fmt === 'ts' ? 'm3u8' : 'ts';
+        this.stop(i, true);
+        return this.start(i);
+      }
       // Try twice more, a little later (a stream that just started on another tile can take a moment).
       if (t.tries < 2) {
         t.tries++;
@@ -291,7 +306,7 @@
       this.hidePops();
       if (!t) return;
       if (m === 'full') return this.fullScreen(i);
-      if (m === 'retry') { t.tries = 0; t.state = 'loading'; return this.start(i); }
+      if (m === 'retry') { t.tries = 0; t.altTried = false; t.state = 'loading'; return this.start(i); }
       if (m === 'change') return this.openPicker(i);
       if (m === 'remove') {
         this.stop(i);

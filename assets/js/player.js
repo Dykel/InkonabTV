@@ -116,6 +116,9 @@
       this.el.addEventListener('mousemove', () => this.poke());
       this.el.addEventListener('click', () => this.poke());
       this.video.addEventListener('playing', () => {
+        // Live played in the other format after the usual one failed: start the next channels in it.
+        const pi = this.item;
+        if (pi && pi.kind === 'live' && pi.fmtOverride && pi.tried && pi.tried.size) { this.fmtPref = pi.fmtOverride; Store.set('fmtPref', pi.fmtOverride, true); }
         this.setState('playing');
         this.renderAudio();
         this.renderSubs();
@@ -163,6 +166,10 @@
       this.sleepAsk.remove();
       this.sleepAsk = null;
     },
+
+    // The live format that played after the usual one failed (kept until the app is closed).
+    get fmtPref() { return this._fmtPref || Store.get('fmtPref', '') || ''; },
+    set fmtPref(v) { this._fmtPref = v; },
 
     isOpen() { return !this.el.classList.contains('hidden'); },
     // A video is on screen, here or in the Android app's own player (isOpen() doesn't see that one).
@@ -321,7 +328,7 @@
       // it comes from the provider's plain-HTTP host like live TV). Otherwise an Xtream stream.
       let ext = item.url
         ? ((item.url.match(/\.(m3u8|ts|mp4|mkv|mp3|aac)(?:\?|$)/i) || [])[1] || 'm3u8').toLowerCase()
-        : item.kind === 'live' ? item.fmtOverride || Settings.liveFormat : item.ext || 'mp4';
+        : item.kind === 'live' ? item.fmtOverride || this.fmtPref || Settings.liveFormat : item.ext || 'mp4';
       // iPhone and iPad play HLS themselves but not raw MPEG-TS.
       if (appleTouch && !item.url && item.kind === 'live' && ext === 'ts') ext = 'm3u8';
       item.fmt = ext;
@@ -1026,18 +1033,20 @@
       it.tried = it.tried || new Set();
       it.tried.add(`${it.id}:${it.fmt}`);
       if (it.tried.size >= 6) return false; // keep the wait short when a channel is truly down
-      const versions = (it.version && it.version.versions) || [];
-      const next = versions.find(v => !it.tried.has(`${v.stream_id}:${it.fmt}`));
-      if (next) {
-        App.toast(`Trying another copy (${next.quality || 'SD'})…`);
-        this.play({ ...it, id: next.stream_id, version: next, tried: it.tried });
+      // The other format first, on the same copy: a provider's HLS (or TS) is often broken for a
+      // channel whose other format plays (FR: FRANCE 4: 6 copies, HLS broken on all of them).
+      const alt = it.fmt === 'm3u8' ? 'ts' : 'm3u8';
+      if (!appleTouch && !it.tried.has(`${it.id}:${alt}`)) {
+        App.toast(`Trying the ${alt === 'ts' ? 'MPEG-TS' : 'HLS'} format…`);
+        this.play({ ...it, fmtOverride: alt, tried: it.tried });
         return true;
       }
-      const alt = it.fmt === 'm3u8' ? 'ts' : 'm3u8';
-      const first = versions[0] || it.version;
-      if (first && !appleTouch && !it.tried.has(`${first.stream_id}:${alt}`)) {
-        App.toast(`Trying the ${alt === 'ts' ? 'MPEG-TS' : 'HLS'} format…`);
-        this.play({ ...it, id: first.stream_id, version: first, fmtOverride: alt, tried: it.tried });
+      const versions = (it.version && it.version.versions) || [];
+      const next = versions.find(v => !it.tried.has(`${v.stream_id}:${it.fmt}`) || !it.tried.has(`${v.stream_id}:${alt}`));
+      if (next) {
+        App.toast(`Trying another copy (${next.quality || 'SD'})…`);
+        const fmt = it.tried.has(`${next.stream_id}:${it.fmt}`) ? alt : it.fmt;
+        this.play({ ...it, id: next.stream_id, version: next, fmtOverride: fmt, tried: it.tried });
         return true;
       }
       return false;
@@ -1047,6 +1056,11 @@
     recover(d) {
       const hls = this.hls;
       if (!hls || this.recovers >= 8) return false;
+      // Data that can't be read (broken stream, wrong format) won't fix itself: try the next option.
+      // Once the channel has played, a passing glitch is still worth a couple of retries.
+      if (/ParsingError$/.test(d.details) && (this.el.dataset.state !== 'playing' && !this.keeps() || this.recovers >= 2)) return false;
+      // Not started yet and the playlist itself won't load: one retry, then the other format / copy.
+      if (/^manifest|^level/.test(d.details) && this.el.dataset.state !== 'playing' && !this.keeps() && this.recovers >= 1) return false;
       this.recovers++;
       if (d.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
       else setTimeout(() => { if (this.hls === hls) hls.startLoad(); }, Math.min(8000, 1000 * this.recovers));

@@ -894,7 +894,8 @@
           $('#xpName', m).value = ''; $('#xpUrl', m).value = '';
           paint();
         } catch (err) {
-          note.textContent = err.message === 'This playlist is empty' ? err.message : 'Can’t load the playlist. Check the link and your connection.';
+          // The real reason (refused, not found, not a playlist, blocked…), never the link itself.
+          note.textContent = err.message || 'Can’t load the playlist. Check the link and your connection.';
         }
       };
       $('#xpAdd', m).addEventListener('click', () => {
