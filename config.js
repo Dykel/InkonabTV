@@ -7,12 +7,14 @@ window.INKONAB_CONFIG = {
   // Xtream Codes server (HTTPS so it works from GitHub Pages).
   server: 'https://inkonabtv.ottb.xyz:443',
 
-  // HTTPS relay for the website (the apps don't use it). The provider's server can't be reached
+  // HTTPS relay for the website and the Samsung TV app (the Android apps don't use it). The provider's server can't be reached
   // from some networks and sends video over plain HTTP, so sign-in, the playlists, the guide and
   // the video all go through it. Others: https://inkonab-relay.netlify.app/relay and
   // https://inkonab-relay.vercel.app/relay (README → Video playback over HTTPS); a viewer can
   // pick one in Settings → HTTPS relay URL. '' turns it off (the InkonabTV Helper then plays video).
   relay: 'https://inkonabtv.alwaysdata.net/relay',
+  // The provider's server: the only host the relays accept, so only its addresses go through them.
+  relayHosts: ['inkonabtv.ottb.xyz'],
 
   // Free playlists that are always available, signed in or not (TV and radio), as
   // { name, url } M3U links. None built in: people add theirs in Settings → Extra playlists.

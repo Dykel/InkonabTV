@@ -116,14 +116,18 @@
   const MAX_AGE = 6 * 3600e3;
 
   // A fetch that gives up: a server that doesn't answer must not keep the app waiting forever.
-  // Website with a server relay set: the built-in provider's server can't be reached from some
-  // networks (blocked), so its API, guide and playlists go through the relay too, not only the
-  // video. Only that server: the relays refuse every other host. Apps connect directly.
+  // With a server relay set, the provider's own server (CFG.relayHosts: the only hosts the relays
+  // accept) is reached through it: it can't be reached from some networks, and the website also
+  // needs HTTPS. Website and Samsung TV; the Android apps connect directly.
+  function relayable(url) {
+    try { return (CFG.relayHosts || []).includes(new URL(url).hostname); } catch { return false; }
+  }
   function throughRelay(url) {
-    if (!Settings.relay || !window.relayUrl || window.relayUrl(url) === url) return url;
-    try { if (new URL(url).hostname !== new URL(CFG.server).hostname) return url; } catch { return url; }
+    if (!Settings.relay || !relayable(url)) return url;
+    if (!window.TizenTV && (!window.relayUrl || window.relayUrl(url) === url)) return url;
     return Settings.relay.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(url);
   }
+  window.relayable = relayable;
 
   function getJson(url, ms) {
     return Promise.race([

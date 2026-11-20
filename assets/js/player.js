@@ -1345,6 +1345,9 @@
   // Only the website needs this (HTTPS page, plain-HTTP video): the helper on this computer,
   // or a server relay if one is configured. The Samsung and Android apps play HTTP directly.
   function relay(url) {
+    // Samsung TV: AVPlay plays plain HTTP, but the provider's server may be unreachable from the
+    // viewer's network, so its streams go through the relay when one is set.
+    if (window.TizenTV) return Settings.relay && window.relayable && window.relayable(url) ? Settings.relay.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(url) : url;
     if (!webPage()) return url;
     if (helperOn) return HELPER + '/?url=' + encodeURIComponent(url);
     if (!Settings.relay) return url;
