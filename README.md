@@ -44,9 +44,10 @@ The relay only accepts your provider's host (`ALLOWED_HOSTS` in the worker), so 
 | Netlify | `https://inkonab-relay.netlify.app/relay` | `proxy/netlify/` (Edge Function) |
 | Vercel | `https://inkonab-relay.vercel.app/relay` | `proxy/api/relay.js`, see `proxy/vercel.md` |
 
-When a relay is set (`config.js` uses the Netlify one by default), the website also sends
-sign-in, the playlists and the guide for the provider's server through it, because that server
-can't be reached from some networks. The apps don't use the relay.
+When a relay is set (`config.js` uses the Netlify one by default), the website and the Samsung TV
+app first try the provider's server directly, and switch sign-in, playlists, the guide (and on the
+TV, video) to the relay only when it can't be reached (it's blocked on some networks). The result is
+remembered for 30 minutes. The Android apps don't use the relay.
 
 **No relay?** If you open the player from a plain-HTTP address (for example `http://localhost` on your own computer), the browser plays video directly without a relay.
 

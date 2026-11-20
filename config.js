@@ -7,10 +7,11 @@ window.INKONAB_CONFIG = {
   // Xtream Codes server (HTTPS so it works from GitHub Pages).
   server: 'https://inkonabtv.ottb.xyz:443',
 
-  // HTTPS relay for the website and the Samsung TV app (the Android apps don't use it). The provider's server can't be reached
-  // from some networks and sends video over plain HTTP, so sign-in, the playlists, the guide and
-  // the video all go through it. Others: https://inkonabtv.alwaysdata.net/relay and
-  // https://inkonab-relay.vercel.app/relay (README → Video playback over HTTPS); a viewer can
+  // HTTPS relay for the website and the Samsung TV app (the Android apps don't use it). It's used
+  // only when the provider's server can't be reached directly (blocked on some networks); the
+  // website also always needs it for the provider's plain-HTTP video. Others:
+  // https://inkonabtv.alwaysdata.net/relay and https://inkonab-relay.vercel.app/relay (README →
+  // Video playback over HTTPS); a viewer can
   // pick one in Settings → HTTPS relay URL. '' turns it off (the InkonabTV Helper then plays video).
   // Netlify's free plan covers about 5–10 hours of HD a month, then the site is suspended until
   // the next month: switch back to alwaysdata here if that happens.

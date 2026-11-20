@@ -123,29 +123,54 @@
   const PERSIST = new Set(['get_live_streams', 'get_vod_streams', 'get_series', 'get_live_categories', 'get_vod_categories', 'get_series_categories']);
   const MAX_AGE = 6 * 3600e3;
 
-  // A fetch that gives up: a server that doesn't answer must not keep the app waiting forever.
-  // With a server relay set, the provider's own server (CFG.relayHosts: the only hosts the relays
-  // accept) is reached through it: it can't be reached from some networks, and the website also
-  // needs HTTPS. Website and Samsung TV; the Android apps connect directly.
+  // Server relay (Settings.relay) for the provider's own server (CFG.relayHosts: the only hosts
+  // the relays accept), used only when that server can't be reached directly from this network
+  // (it's blocked on some). Reach.direct: null = not known yet, true/false = last result; kept
+  // 30 minutes so the next start skips a failing direct try. Website and Samsung TV only: the
+  // Android apps connect directly. On the website the provider's plain-HTTP video always needs
+  // the relay or helper (an HTTPS page can't load it), whatever Reach says.
   function relayable(url) {
-    try { return (CFG.relayHosts || []).includes(new URL(url).hostname); } catch { return false; }
+    try { return !!Settings.relay && (CFG.relayHosts || []).includes(new URL(url).hostname); } catch { return false; }
   }
-  function throughRelay(url) {
-    if (!Settings.relay || !relayable(url)) return url;
-    if (!window.TizenTV && (!window.relayUrl || window.relayUrl(url) === url)) return url;
-    return Settings.relay.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(url);
-  }
+  const relayApps = () => !!window.TizenTV || location.protocol === 'https:' && !window.Native && !window.Desktop;
+  const Reach = {
+    direct: (() => { const r = Store.get('reach', null); return r && Date.now() - r.at < 30 * 60e3 ? r.direct : null; })(),
+    set(direct) {
+      if (this.direct === direct) return;
+      this.direct = direct;
+      Store.set('reach', { direct, at: Date.now() });
+      console.info('[relay] provider server ' + (direct ? 'reachable directly' : 'unreachable: using the relay'));
+    },
+    // Go through the relay for this address?
+    use(url) { return relayApps() && relayable(url) && this.direct === false; },
+  };
+  const relayed = url => Settings.relay.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(url);
+  function throughRelay(url) { return Reach.use(url) ? relayed(url) : url; }
   window.relayable = relayable;
+  window.Reach = Reach;
+  window.relayedUrl = relayed;
 
+  // A fetch that gives up: a server that doesn't answer must not keep the app waiting forever.
+  // The provider's server is tried directly first (8 s when it's not known to work); if it can't
+  // be reached at all (no answer, not an HTTP error) the same request goes through the relay.
   function getJson(url, ms) {
-    return Promise.race([
-      fetch(throughRelay(url), { cache: 'no-store' }).then(r => {
-        if (!r.ok) throw new Error('Server error ' + r.status);
+    const once = (u, t) => Promise.race([
+      fetch(u, { cache: 'no-store' }).then(r => {
+        if (!r.ok) throw Object.assign(new Error('Server error ' + r.status), { http: true });
         return r.json();
       }),
-      new Promise((resolve, reject) => setTimeout(() => reject(new Error('Failed to fetch')), ms)),
+      new Promise((resolve, reject) => setTimeout(() => reject(new Error('Failed to fetch')), t)),
     ]);
+    if (!relayApps() || !relayable(url) || Reach.direct === false) return once(throughRelay(url), ms);
+    return once(url, Reach.direct ? ms : Math.min(ms, 8000)).then(
+      d => { Reach.set(true); return d; },
+      e => {
+        if (e.http) { Reach.set(true); throw e; }
+        Reach.set(false);
+        return once(relayed(url), ms);
+      });
   }
+
 
   // The new download of a list against the saved copy, item by item (matched by id). Unchanged
   // items keep the saved object; `same` means nothing to save or redraw. The position number

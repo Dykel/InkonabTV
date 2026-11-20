@@ -338,7 +338,7 @@
         probeHelper().then(() => { if (this.item === item) this.play(item); });
         return;
       }
-      const url = item.url && !item.relay ? item.url : relay(item.rawUrl);
+      const url = item.url && !item.relay ? item.url : relay(item.rawUrl, item);
       this.el.classList.toggle('radio', !!item.radio);
       const art = this.el.querySelector('.p-radio img');
       if (item.radio && item.img) art.src = item.img; else art.removeAttribute('src');
@@ -1127,6 +1127,13 @@
       if (this.keeps()) return this.keepLive(detail);
       const mixed = (!this.item.url || this.item.relay) && webPage() && !helperOn && !Settings.relay;
       if (!mixed && this.retry()) { if (detail) console.warn('[player] retrying after', detail); return; }
+      // Samsung TV: a provider stream that failed directly is tried once more through the relay.
+      if (window.TizenTV && !this.item.viaRelay && (!this.item.url || this.item.relay) &&
+          window.relayable && window.relayable(this.item.rawUrl) && !(window.Reach && Reach.use(this.item.rawUrl))) {
+        console.warn('[player] trying the relay after', detail);
+        this.play({ ...this.item, viaRelay: true, tried: null });
+        return;
+      }
       // Windows app: connect the free VPN once and try again, like the Android app.
       if (window.Desktop && !this.item.vpnTried && (!this.item.url || this.item.relay)) {
         this.item.vpnTried = true;
@@ -1344,10 +1351,13 @@
   // apps play HTTP directly, and the relay only accepts the built-in provider.
   // Only the website needs this (HTTPS page, plain-HTTP video): the helper on this computer,
   // or a server relay if one is configured. The Samsung and Android apps play HTTP directly.
-  function relay(url) {
-    // Samsung TV: AVPlay plays plain HTTP, but the provider's server may be unreachable from the
-    // viewer's network, so its streams go through the relay when one is set.
-    if (window.TizenTV) return Settings.relay && window.relayable && window.relayable(url) ? Settings.relay.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(url) : url;
+  function relay(url, item) {
+    // Samsung TV: AVPlay plays plain HTTP directly. The relay is for when the provider's server
+    // can't be reached from this network (Reach, api.js), or after a stream failed directly.
+    if (window.TizenTV) {
+      const R = window.Reach;
+      return window.relayable && window.relayable(url) && (R && R.use(url) || item && item.viaRelay) ? window.relayedUrl(url) : url;
+    }
     if (!webPage()) return url;
     if (helperOn) return HELPER + '/?url=' + encodeURIComponent(url);
     if (!Settings.relay) return url;
