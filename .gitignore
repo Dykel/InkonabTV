@@ -11,3 +11,6 @@ beta-testers.csv
 
 # Hotel details (Wi-Fi password): not in the public repo
 hotel/hotel.json
+
+# Local Netlify folder
+.netlify

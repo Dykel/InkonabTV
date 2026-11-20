@@ -38,9 +38,9 @@
     Store.get('settings', {})
   );
   // An empty relay saved before one was configured must not hide the configured one.
-  // Earlier server relays (Cloudflare, then alwaysdata, Nov 2026) were retired for the local
-  // helper; settings saved while they ran still name them.
-  if (!Settings.relay || /workers\.dev|alwaysdata\.net\/relay/.test(Settings.relay)) Settings.relay = CFG.relay || '';
+  // The Cloudflare relay was retired (the provider refuses Cloudflare); settings saved while it
+  // ran still name it. alwaysdata, Netlify and Vercel relays work and are kept.
+  if (!Settings.relay || /workers\.dev/.test(Settings.relay)) Settings.relay = CFG.relay || '';
   // Adult categories are hidden again at every start (parental PIN); only the PIN is kept.
   Settings.showAdult = false;
   Settings.save = function () {
@@ -116,9 +116,18 @@
   const MAX_AGE = 6 * 3600e3;
 
   // A fetch that gives up: a server that doesn't answer must not keep the app waiting forever.
+  // Website with a server relay set: the built-in provider's server can't be reached from some
+  // networks (blocked), so its API, guide and playlists go through the relay too, not only the
+  // video. Only that server: the relays refuse every other host. Apps connect directly.
+  function throughRelay(url) {
+    if (!Settings.relay || !window.relayUrl || window.relayUrl(url) === url) return url;
+    try { if (new URL(url).hostname !== new URL(CFG.server).hostname) return url; } catch { return url; }
+    return Settings.relay.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(url);
+  }
+
   function getJson(url, ms) {
     return Promise.race([
-      fetch(url, { cache: 'no-store' }).then(r => {
+      fetch(throughRelay(url), { cache: 'no-store' }).then(r => {
         if (!r.ok) throw new Error('Server error ' + r.status);
         return r.json();
       }),
@@ -155,7 +164,7 @@
   // ids); a <channel> whose display name matches joins `want`, and found gets id → stream ids.
   // Compressed guides (.xml.gz) are unpacked on the way.
   async function readXmltv(url, want, names, found) {
-    const res = await fetch(url);
+    const res = await fetch(throughRelay(url));
     if (!res.ok) throw new Error('Guide ' + res.status);
     let body = res.body;
     if (body && body.getReader && window.DecompressionStream) {
@@ -903,7 +912,7 @@
       return err;
     },
     async load(url) {
-      const web = () => fetch(url, { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error('Playlist ' + r.status); return r.text(); });
+      const web = () => fetch(throughRelay(url), { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error('Playlist ' + r.status); return r.text(); });
       // Android app: read it natively when the site sends no CORS headers (the WebView then
       // refuses it, e.g. inkonabtv.alwaysdata.net/tv.m3u). App versions without fetchText fall back.
       const P = window.Native && Native.player;

@@ -1,0 +1,10 @@
+# Vercel deploys this proxy/ folder; upload only the relay function and the code it imports.
+/alwaysdata
+/pair
+/relay
+/worker.js
+/netlify/.netlify
+/netlify/public
+*.md
+.env*
+.vercel

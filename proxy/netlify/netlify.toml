@@ -1,0 +1,4 @@
+# InkonabTV HTTPS relay on Netlify (see README.md next to this file).
+[build]
+  publish = "public"
+  edge_functions = "netlify/edge-functions"

@@ -7,10 +7,12 @@ window.INKONAB_CONFIG = {
   // Xtream Codes server (HTTPS so it works from GitHub Pages).
   server: 'https://inkonabtv.ottb.xyz:443',
 
-  // HTTPS relay for video (optional). The website plays the provider's plain-HTTP video through
-  // the InkonabTV Helper on the viewer's computer (helper/), so no server relay is set. A relay
-  // (proxy/alwaysdata/index.php or proxy/worker.js) can still be set here or in Settings.
-  relay: '',
+  // HTTPS relay for the website (the apps don't use it). The provider's server can't be reached
+  // from some networks and sends video over plain HTTP, so sign-in, the playlists, the guide and
+  // the video all go through it. Others: https://inkonab-relay.netlify.app/relay and
+  // https://inkonab-relay.vercel.app/relay (README → Video playback over HTTPS); a viewer can
+  // pick one in Settings → HTTPS relay URL. '' turns it off (the InkonabTV Helper then plays video).
+  relay: 'https://inkonabtv.alwaysdata.net/relay',
 
   // Free playlists that are always available, signed in or not (TV and radio), as
   // { name, url } M3U links. None built in: people add theirs in Settings → Extra playlists.

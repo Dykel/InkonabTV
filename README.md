@@ -35,6 +35,19 @@ GitHub Pages always uses HTTPS. Logging in and browsing the catalog work over HT
 
 The relay only accepts your provider's host (`ALLOWED_HOSTS` in the worker), so strangers can't use it as an open proxy. Check that video streaming is allowed under Cloudflare's terms for your use.
 
+**Other free relays:** the provider's video server refuses Cloudflare, so use one of these
+(all three run the same relay logic and only accept the provider's own streams):
+
+| Relay | URL for Settings → HTTPS relay URL | Code / notes |
+| --- | --- | --- |
+| alwaysdata | `https://inkonabtv.alwaysdata.net/relay` | `proxy/alwaysdata/` (PHP) |
+| Netlify | `https://inkonab-relay.netlify.app/relay` | `proxy/netlify/` (Edge Function) |
+| Vercel | `https://inkonab-relay.vercel.app/relay` | `proxy/api/relay.js`, see `proxy/vercel.md` |
+
+When a relay is set (`config.js` uses the alwaysdata one by default), the website also sends
+sign-in, the playlists and the guide for the provider's server through it, because that server
+can't be reached from some networks. The apps don't use the relay.
+
 **No relay?** If you open the player from a plain-HTTP address (for example `http://localhost` on your own computer), the browser plays video directly without a relay.
 
 ## Configuration — `config.js`
