@@ -41,6 +41,14 @@
   // The Cloudflare relay was retired (the provider refuses Cloudflare); settings saved while it
   // ran still name it. alwaysdata, Netlify and Vercel relays work and are kept.
   if (!Settings.relay || /workers\.dev/.test(Settings.relay)) Settings.relay = CFG.relay || '';
+  // Settings store the default relay of the time. When config.js changes it, a viewer still on
+  // the old default follows it; a relay they picked themselves stays. (relayDefault came after
+  // the alwaysdata default of Nov 2026, so a saved alwaysdata relay without it was that default.)
+  if (CFG.relay && Settings.relayDefault !== CFG.relay &&
+      (Settings.relay === Settings.relayDefault || (!Settings.relayDefault && /alwaysdata\.net\/relay/.test(Settings.relay)))) {
+    Settings.relay = CFG.relay;
+  }
+  Settings.relayDefault = CFG.relay || '';
   // Adult categories are hidden again at every start (parental PIN); only the PIN is kept.
   Settings.showAdult = false;
   Settings.save = function () {

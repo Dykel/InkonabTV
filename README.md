@@ -44,7 +44,7 @@ The relay only accepts your provider's host (`ALLOWED_HOSTS` in the worker), so 
 | Netlify | `https://inkonab-relay.netlify.app/relay` | `proxy/netlify/` (Edge Function) |
 | Vercel | `https://inkonab-relay.vercel.app/relay` | `proxy/api/relay.js`, see `proxy/vercel.md` |
 
-When a relay is set (`config.js` uses the alwaysdata one by default), the website also sends
+When a relay is set (`config.js` uses the Netlify one by default), the website also sends
 sign-in, the playlists and the guide for the provider's server through it, because that server
 can't be reached from some networks. The apps don't use the relay.
 
