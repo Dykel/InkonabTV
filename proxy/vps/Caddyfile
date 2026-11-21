@@ -1,0 +1,11 @@
+# Caddy gets and renews the HTTPS certificate by itself. setup.sh fills in RELAY_NAME.
+RELAY_NAME {
+	# Video passes through as it arrives; no buffering, no compression (it's already compressed).
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+	log {
+		# Paths hold the viewer's login: log nothing but errors.
+		output discard
+	}
+}

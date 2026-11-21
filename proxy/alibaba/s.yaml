@@ -1,0 +1,43 @@
+# InkonabTV HTTPS relay on Alibaba Cloud Function Compute 3.0 (see README.md here).
+# Deployed by deploy.sh, which fills code/ and RELAY_SECRET.
+edition: 3.0.0
+name: inkonab-relay
+access: default
+
+resources:
+  relay:
+    component: fc3
+    props:
+      region: ap-southeast-1          # Singapore (no ICP licence needed, unlike mainland China)
+      functionName: inkonab-relay
+      description: InkonabTV HTTPS relay
+      runtime: custom.debian12
+      code: ./code
+      handler: index.handler
+      memorySize: 512
+      cpu: 0.35
+      diskSize: 512
+      instanceConcurrency: 50          # one instance serves many viewers at once
+      timeout: 3600                    # a live channel stays open for a long time
+      internetAccess: true
+      customRuntimeConfig:
+        command:
+          - /var/fc/lang/nodejs20/bin/node
+        args:
+          - server.mjs
+        port: 9000
+      environmentVariables:
+        HOST: 0.0.0.0
+        PORT: '9000'
+        PROTO: https
+        SECRET: ${env('RELAY_SECRET')}
+      triggers:
+        - triggerName: http
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
+            disableURLInternet: false
+            methods:
+              - GET
+              - HEAD
+              - OPTIONS

@@ -36,15 +36,16 @@ GitHub Pages always uses HTTPS. Logging in and browsing the catalog work over HT
 The relay only accepts your provider's host (`ALLOWED_HOSTS` in the worker), so strangers can't use it as an open proxy. Check that video streaming is allowed under Cloudflare's terms for your use.
 
 **Other free relays:** the provider's video server refuses Cloudflare, so use one of these
-(all three run the same relay logic and only accept the provider's own streams):
+(all of them run the same relay logic and only accept the provider's own streams):
 
 | Relay | URL for Settings → HTTPS relay URL | Code / notes |
 | --- | --- | --- |
+| **Kamatera (default)** | `https://185-229-224-187.sslip.io/relay` | rented server, `proxy/vps/` (see its README) |
 | alwaysdata | `https://inkonabtv.alwaysdata.net/relay` | `proxy/alwaysdata/` (PHP) |
 | Netlify | `https://inkonab-relay.netlify.app/relay` | `proxy/netlify/` (Edge Function) |
 | Vercel | `https://inkonab-relay.vercel.app/relay` | `proxy/api/relay.js`, see `proxy/vercel.md` |
 
-When a relay is set (`config.js` uses the Netlify one by default), the website and the Samsung TV
+When a relay is set (`config.js` uses the Kamatera one by default), the website and the Samsung TV
 app first try the provider's server directly, and switch sign-in, playlists, the guide (and on the
 TV, video) to the relay only when it can't be reached (it's blocked on some networks). The result is
 remembered for 30 minutes. The Android apps don't use the relay.

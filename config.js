@@ -9,13 +9,12 @@ window.INKONAB_CONFIG = {
 
   // HTTPS relay for the website and the Samsung TV app (the Android apps don't use it). It's used
   // only when the provider's server can't be reached directly (blocked on some networks); the
-  // website also always needs it for the provider's plain-HTTP video. Others:
-  // https://inkonabtv.alwaysdata.net/relay and https://inkonab-relay.vercel.app/relay (README →
-  // Video playback over HTTPS); a viewer can
-  // pick one in Settings → HTTPS relay URL. '' turns it off (the InkonabTV Helper then plays video).
-  // Netlify's free plan covers about 5–10 hours of HD a month, then the site is suspended until
-  // the next month: switch back to alwaysdata here if that happens.
-  relay: 'https://inkonab-relay.netlify.app/relay',
+  // website also always needs it for the provider's plain-HTTP video. Default: the rented
+  // Kamatera server (proxy/vps, 5 TB a month). Others, for Settings → HTTPS relay URL or as a
+  // fallback here: https://inkonab-relay.netlify.app/relay (about 5–10 h of HD a month),
+  // https://inkonabtv.alwaysdata.net/relay, https://inkonab-relay.vercel.app/relay
+  // (README → Video playback over HTTPS). '' turns it off (the InkonabTV Helper then plays video).
+  relay: 'https://185-229-224-187.sslip.io/relay',
   // The provider's server: the only host the relays accept, so only its addresses go through them.
   relayHosts: ['inkonabtv.ottb.xyz'],
 
