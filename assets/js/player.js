@@ -121,7 +121,7 @@
         if (pi && pi.kind === 'live' && pi.fmtOverride && pi.tried && pi.tried.size) { this.fmtPref = pi.fmtOverride; Store.set('fmtPref', pi.fmtOverride, true); }
         this.setState('playing');
         // Samsung TV: a provider stream played directly, so video needs no relay on this network.
-        if (window.TizenTV && pi && !pi.viaRelay && window.Reach && window.relayable && window.relayable(pi.rawUrl) && !Reach.useVideo(pi.rawUrl)) Reach.setVideo(true);
+        if ((window.TizenTV || window.Desktop) && pi && !pi.viaRelay && window.Reach && window.relayable && window.relayable(pi.rawUrl) && !Reach.useVideo(pi.rawUrl)) Reach.setVideo(true);
         this.renderAudio();
         this.renderSubs();
         const it = this.item;
@@ -241,7 +241,7 @@
       };
       payload = {
         live: true,
-        template: App.api ? App.api.streamUrl('live', '{id}', Settings.liveFormat) : '',
+        template: App.api ? nativeUrl(App.api.streamUrl('live', '{id}', Settings.liveFormat)) : '',
         groups: groups.map(g => ({ key: g.key, name: g.name, items: g.channels.map(add) })),
         group: gi,
         index: Math.max(0, groups[gi].channels.indexOf(cur)),
@@ -268,8 +268,8 @@
         // Its other versions (language, quality) follow: the player tries them before the VPN.
         const alts = it => (it.url ? [] : it.alts || []);
         const film = it => ({ title: it.title || '', subtitle: it.subtitle || '', img: it.img || '',
-          versions: [{ url: it.url || App.api.streamUrl(it.kind, it.id, it.ext || 'mp4'), label: it.kind === 'catchup' ? 'Replay' : alts(it).length ? it.label || '' : '' },
-            ...alts(it).map(a => ({ url: App.api.streamUrl(it.kind, a.id, a.ext || 'mp4'), label: a.label || '' }))] });
+          versions: [{ url: nativeUrl(it.url || App.api.streamUrl(it.kind, it.id, it.ext || 'mp4')), label: it.kind === 'catchup' ? 'Replay' : alts(it).length ? it.label || '' : '' },
+            ...alts(it).map(a => ({ url: nativeUrl(App.api.streamUrl(it.kind, a.id, a.ext || 'mp4')), label: a.label || '' }))] });
         payload = {
           live: false, group: 0, index: 0, version: 0, startAt: item.resumeAt > 5 ? item.resumeAt : 0, audioLang: item.audioLang || '',
           channels: [item, ...(item.queue || [])].map(film),
@@ -1128,10 +1128,10 @@
       if (!this.item) return;
       if (this.keeps()) return this.keepLive(detail);
       const mixed = (!this.item.url || this.item.relay) && webPage() && !helperOn && !(window.Relays && Relays.current());
-      // Samsung TV: a provider stream that failed directly goes through the relay straight away
+      // Samsung TV and Windows: a provider stream that failed directly goes through the relay straight away
       // (before other formats and copies, which would fail the same way when the stream host is
       // blocked), and the next streams too for 30 minutes (Reach.video, api.js).
-      if (window.TizenTV && !this.item.viaRelay && (!this.item.url || this.item.relay) &&
+      if ((window.TizenTV || window.Desktop) && !this.item.viaRelay && (!this.item.url || this.item.relay) &&
           window.relayable && window.relayable(this.item.rawUrl) && !(window.Reach && Reach.useVideo(this.item.rawUrl))) {
         console.warn('[player] trying the relay after', detail);
         if (window.Reach) Reach.setVideo(false);
@@ -1143,10 +1143,10 @@
       // formats already tried stay tried).
       const it = this.item, R = window.Relays;
       const relayed = (!it.url || it.relay) && R && R.list().length > 1 &&
-        (window.TizenTV ? it.viaRelay || (window.Reach && Reach.use(it.rawUrl)) : webPage() && !helperOn);
+        (window.TizenTV || window.Desktop ? it.viaRelay || (window.Reach && Reach.useVideo(it.rawUrl)) : webPage() && !helperOn);
       if (relayed && (it.relayTry || 0) < R.list().length - 1) {
         console.warn('[player] trying the next relay after', detail);
-        this.play({ ...it, relayTry: (it.relayTry || 0) + 1, viaRelay: !!window.TizenTV || it.viaRelay });
+        this.play({ ...it, relayTry: (it.relayTry || 0) + 1, viaRelay: !!(window.TizenTV || window.Desktop) || it.viaRelay });
         return;
       }
       // Windows app: connect the free VPN once and try again, like the Android app.
@@ -1363,9 +1363,9 @@
   };
 
   // The relay a stream goes through. Website: always (HTTPS page, plain-HTTP video), the helper on
-  // this computer first. Samsung TV: AVPlay plays plain HTTP directly, so only when the provider's
+  // this computer first. Samsung TV and Windows: they play plain HTTP, so only when the provider's
   // server can't be reached from this network (Reach, api.js) or after a stream failed directly.
-  // Android apps: never. item.relayTry picks the next relay in the list after one failed for
+  // Android: nativeUrl (ExoPlayer), when the provider can't be reached. item.relayTry picks the next relay in the list after one failed for
   // this stream (Relays, api.js).
   // Samsung TV video player: it can't look up some names the rest of the TV resolves (seen with
   // sslip.io on a home network), so a relay whose name carries its IP address (a-b-c-d.sslip.io,
@@ -1377,11 +1377,20 @@
     return m ? `http://${m[1]}.${m[2]}.${m[3]}.${m[4]}${m[5] || ''}` : r;
   }
 
+  // Android (ExoPlayer): the provider's streams go through the relay when its server can't be
+  // reached from this network. "{id}" in the live template stays as it is: the player fills it in.
+  function nativeUrl(url) {
+    const R = window.Relays;
+    if (!R || !window.relayable || !window.relayable(url) || !window.Reach.useVideo(url)) return url;
+    return R.wrap(url).replace(/%7Bid%7D/g, '{id}');
+  }
+
   function relay(url, item) {
     const R = window.Relays;
     const pick = () => R.at(item && item.relayTry || 0);
-    if (window.TizenTV) {
-      return R && window.relayable(url) && (window.Reach.useVideo(url) || item && item.viaRelay) ? R.wrap(url, tvRelay(pick())) : url;
+    if (window.TizenTV || window.Desktop) {
+      const r = window.TizenTV ? tvRelay(pick()) : pick();
+      return R && window.relayable(url) && (window.Reach.useVideo(url) || item && item.viaRelay) ? R.wrap(url, r) : url;
     }
     if (!webPage()) return url;
     if (helperOn) return HELPER + '/?url=' + encodeURIComponent(url);

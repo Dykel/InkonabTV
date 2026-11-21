@@ -156,7 +156,8 @@
   function relayable(url) {
     try { return !!Relays.current() && (CFG.relayHosts || []).includes(new URL(url).hostname); } catch { return false; }
   }
-  const relayApps = () => !!window.TizenTV || location.protocol === 'https:' && !window.Native && !window.Desktop;
+  // Every version uses a relay when one is set: website, Samsung TV, Android, Windows.
+  const relayApps = () => true;
   const Reach = {
     direct: (() => { const r = Store.get('reach', null); return r && Date.now() - r.at < 30 * 60e3 ? r.direct : null; })(),
     set(direct) {

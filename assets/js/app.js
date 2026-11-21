@@ -4034,7 +4034,7 @@
         </section>
         <section class="set-group">
           <h3>Playback</h3>
-          <div class="relay-set"${window.Native ? ' hidden' : ''}>
+          <div class="relay-set">
             <div class="kv link"><span>HTTPS relay</span><code id="relayNow">${Settings.relay ? esc(Settings.relay) : T('None')}</code></div>
             <p class="muted small-note">Used only when your server can’t be reached on this network. Set it from a phone.</p>
             <div class="set-row vpn-actions">${CFG.pairApi ? '<button class="btn ghost" id="relayPhone" type="button">Set from phone</button>' : ''}<button class="btn ghost" id="testRelay" type="button"${Settings.relay ? '' : ' hidden'}>Test</button><button class="btn ghost" id="relayClear" type="button"${Settings.relay ? '' : ' hidden'}>Remove</button></div>
