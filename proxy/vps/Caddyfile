@@ -30,3 +30,11 @@ RELAY_NAME {
 		output discard
 	}
 }
+
+# Plain http on the server's IP address, for Samsung TVs' video player: it can't always look up
+# the sslip.io name, and the app sends it here instead (tvRelay in assets/js/player.js).
+http://RELAY_IP {
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+}

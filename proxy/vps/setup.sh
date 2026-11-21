@@ -55,7 +55,7 @@ PrivateTmp=true
 WantedBy=multi-user.target
 EOF
 
-sed "s/RELAY_NAME/$NAME/" Caddyfile > /etc/caddy/Caddyfile
+sed -e "s/RELAY_NAME/$NAME/" -e "s/RELAY_IP/$IP/" Caddyfile > /etc/caddy/Caddyfile
 
 ufw allow OpenSSH >/dev/null
 ufw allow 80/tcp >/dev/null

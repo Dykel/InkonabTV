@@ -37,15 +37,25 @@ http.createServer(async (req, res) => {
     res.writeHead(502, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
     return res.end('Relay error: ' + e);
   }
-  // Which kind of client and the answer only (never the address: it holds the viewer's login).
+  // Which client, what kind of request, the answer and how much was sent; never the address
+  // (it holds the viewer's login).
   const ua = req.headers['user-agent'] || '';
   const client = /Tizen|SMART-TV|SmartTV/i.test(ua) ? 'samsung-tv' : /Android/i.test(ua) ? 'android' : 'browser';
-  console.log('client', client, req.method, out.status);
+  const target = new URL(url).searchParams.get('url') || '';
+  const kind = /player_api/.test(target) ? 'api' : /xmltv/.test(target) ? 'guide' : /get\.php/.test(target) ? 'm3u'
+    : /\.m3u8/.test(target) ? 'hls-playlist' : /\/live\//.test(target) ? 'live' : /\/movie\//.test(target) ? 'movie'
+    : /\/series\//.test(target) ? 'episode' : /\.ts(\?|$)/.test(target) ? 'segment' : 'other';
+  const t0 = Date.now();
+  let sent = 0;
+  const done = why => console.log('client', client, kind, req.method, out.status, (out.headers.get('content-type') || '-').split(';')[0],
+    Math.round(sent / 1024) + 'KB', ((Date.now() - t0) / 1000).toFixed(1) + 's', why);
   res.writeHead(out.status, Object.fromEntries(out.headers));
-  if (!out.body || req.method === 'HEAD') return res.end();
+  if (!out.body || req.method === 'HEAD') { done('no-body'); return res.end(); }
   // Destroying the stream cancels the provider download (a live channel never ends on its own).
   const body = Readable.fromWeb(out.body);
-  body.on('error', () => res.destroy());
-  res.on('close', () => body.destroy());
+  body.on('data', c => { sent += c.length; });
+  body.on('error', e => { done('upstream-error ' + (e.code || e.message)); res.destroy(); });
+  body.on('end', () => done('ended'));
+  res.on('close', () => { if (!body.readableEnded) done('viewer-closed'); body.destroy(); });
   body.pipe(res);
 }).listen(PORT, HOST, () => console.log(`InkonabTV relay on ${HOST}:${PORT}`));

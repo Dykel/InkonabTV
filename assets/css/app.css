@@ -1366,3 +1366,7 @@ img.broken { visibility: hidden; }
 .ms-eps .ep { text-align: left; }
 .ms-eps .ep-text p { margin: 4px 0 0; color: var(--muted, #9aa3ad); font-size: 14px; }
 @media (max-width: 860px) { .ms-series { grid-template-columns: 1fr; padding: 18px; } .ms-poster { width: 140px; } }
+
+/* Settings → HTTPS relay: address on its own line (read-only, set from a phone), buttons below. */
+.relay-set { padding: 6px 0 10px; }
+.relay-set .small-note { margin: 2px 0 0; }

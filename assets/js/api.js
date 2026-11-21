@@ -167,6 +167,17 @@
     },
     // Go through the relay for this address?
     use(url) { return relayApps() && relayable(url) && this.direct === false; },
+    // Video can come from another of the provider's servers than sign-in (a redirect to the
+    // stream host), blocked on its own: when a stream failed directly, video goes through the
+    // relay for 30 minutes even while sign-in still works directly.
+    video: (() => { const r = Store.get('reachVideo', null); return r && Date.now() - r.at < 30 * 60e3 ? r.direct : null; })(),
+    setVideo(direct) {
+      if (this.video === direct) return;
+      this.video = direct;
+      Store.set('reachVideo', { direct, at: Date.now() });
+      console.info('[relay] provider video ' + (direct ? 'plays directly' : 'blocked: video goes through the relay'));
+    },
+    useVideo(url) { return this.use(url) || (relayApps() && relayable(url) && this.video === false); },
   };
   function throughRelay(url) { return Reach.use(url) ? Relays.wrap(url) : url; }
   window.relayable = relayable;

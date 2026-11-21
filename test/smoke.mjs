@@ -178,6 +178,36 @@ await check('sign in → language choice → home', async () => {
   return `${await page.evaluate(() => document.querySelectorAll('#view .card').length)} cards`;
 });
 
+await check('relay: set from a phone only (Settings shows it, Remove clears it)', async () => {
+  assert(!(await page.$('#loginRelay')), 'no relay field on the sign-in screen');
+  await page.evaluate(() => App.openSettings());
+  await shown('#relayNow');
+  const row = () => page.evaluate(() => ({
+    now: document.getElementById('relayNow').textContent,
+    input: !!document.getElementById('setRelay'),
+    test: !document.getElementById('testRelay').hidden,
+    remove: !document.getElementById('relayClear').hidden,
+    phone: !!document.getElementById('relayPhone') === !!window.INKONAB_CONFIG.pairApi, // shown when phone setup exists
+  }));
+  let r = await row();
+  assert(!r.input && r.now === 'None' && !r.test && !r.remove && r.phone, 'read-only, empty: ' + JSON.stringify(r));
+  // What Settings → Set from phone does when the phone sends { r }.
+  await page.evaluate(() => { App.setRelay('https://relay.example/relay/'); });
+  await page.evaluate(() => { App.closeModal(); App.openSettings(); });
+  await shown('#relayNow');
+  r = await row();
+  assert(r.now === 'https://relay.example/relay' && r.test && r.remove, 'shows the relay: ' + JSON.stringify(r));
+  if (process.env.SMOKE_SHOTS) {
+    await page.evaluate(() => document.getElementById('relayNow').scrollIntoView({ block: 'center' }));
+    await page.screenshot({ path: process.env.SMOKE_SHOTS + '/settings-relay.png' });
+  }
+  await page.click('#relayClear'); await wait(200);
+  r = await row();
+  assert(r.now === 'None' && !r.remove, 'Remove clears it');
+  assert(await page.evaluate(() => Settings.relay === '' && JSON.parse(localStorage.getItem('itv.settings')).relay === ''), 'saved empty');
+  await page.evaluate(() => App.closeModal());
+});
+
 await check('provider down: starts from the saved playlist', async () => {
   providerDown = true;
   const t0 = Date.now();

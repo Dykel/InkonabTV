@@ -120,6 +120,8 @@
         const pi = this.item;
         if (pi && pi.kind === 'live' && pi.fmtOverride && pi.tried && pi.tried.size) { this.fmtPref = pi.fmtOverride; Store.set('fmtPref', pi.fmtOverride, true); }
         this.setState('playing');
+        // Samsung TV: a provider stream played directly, so video needs no relay on this network.
+        if (window.TizenTV && pi && !pi.viaRelay && window.Reach && window.relayable && window.relayable(pi.rawUrl) && !Reach.useVideo(pi.rawUrl)) Reach.setVideo(true);
         this.renderAudio();
         this.renderSubs();
         const it = this.item;
@@ -1126,14 +1128,17 @@
       if (!this.item) return;
       if (this.keeps()) return this.keepLive(detail);
       const mixed = (!this.item.url || this.item.relay) && webPage() && !helperOn && !(window.Relays && Relays.current());
-      if (!mixed && this.retry()) { if (detail) console.warn('[player] retrying after', detail); return; }
-      // Samsung TV: a provider stream that failed directly is tried once more through the relay.
+      // Samsung TV: a provider stream that failed directly goes through the relay straight away
+      // (before other formats and copies, which would fail the same way when the stream host is
+      // blocked), and the next streams too for 30 minutes (Reach.video, api.js).
       if (window.TizenTV && !this.item.viaRelay && (!this.item.url || this.item.relay) &&
-          window.relayable && window.relayable(this.item.rawUrl) && !(window.Reach && Reach.use(this.item.rawUrl))) {
+          window.relayable && window.relayable(this.item.rawUrl) && !(window.Reach && Reach.useVideo(this.item.rawUrl))) {
         console.warn('[player] trying the relay after', detail);
+        if (window.Reach) Reach.setVideo(false);
         this.play({ ...this.item, viaRelay: true, tried: null });
         return;
       }
+      if (!mixed && this.retry()) { if (detail) console.warn('[player] retrying after', detail); return; }
       // A stream that failed through one relay is tried through the next ones (once each: the
       // formats already tried stay tried).
       const it = this.item, R = window.Relays;
@@ -1362,11 +1367,21 @@
   // server can't be reached from this network (Reach, api.js) or after a stream failed directly.
   // Android apps: never. item.relayTry picks the next relay in the list after one failed for
   // this stream (Relays, api.js).
+  // Samsung TV video player: it can't look up some names the rest of the TV resolves (seen with
+  // sslip.io on a home network), so a relay whose name carries its IP address (a-b-c-d.sslip.io,
+  // a.b.c.d.nip.io) is reached at that IP over plain http, which the player plays anyway (the
+  // provider's own streams are plain http too). The relay server answers http on its IP
+  // (proxy/vps/Caddyfile). Other relays are used as set.
+  function tvRelay(r) {
+    const m = String(r).match(/^https?:\/\/(?:[a-z0-9-]+[.-])?(\d{1,3})[.-](\d{1,3})[.-](\d{1,3})[.-](\d{1,3})\.(?:sslip|nip)\.io(\/.*)?$/i);
+    return m ? `http://${m[1]}.${m[2]}.${m[3]}.${m[4]}${m[5] || ''}` : r;
+  }
+
   function relay(url, item) {
     const R = window.Relays;
     const pick = () => R.at(item && item.relayTry || 0);
     if (window.TizenTV) {
-      return R && window.relayable(url) && (window.Reach.use(url) || item && item.viaRelay) ? R.wrap(url, pick()) : url;
+      return R && window.relayable(url) && (window.Reach.useVideo(url) || item && item.viaRelay) ? R.wrap(url, tvRelay(pick())) : url;
     }
     if (!webPage()) return url;
     if (helperOn) return HELPER + '/?url=' + encodeURIComponent(url);

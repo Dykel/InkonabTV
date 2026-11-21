@@ -586,16 +586,14 @@
       return d.m ? { m: d.m } : { s: CFG.playerMode ? normServer(d.s) : undefined, u: d.u, p: d.p };
     },
 
-    // An HTTPS relay set at sign-in (screen or phone): used only when the provider's server can't
-    // be reached (Relays / Reach, api.js). '' removes it.
+    // The HTTPS relay, set only from a phone (Set up from phone, or Settings → Set from phone):
+    // used only when the provider's server can't be reached (Relays / Reach, api.js). '' removes it.
     setRelay(url) {
       url = String(url || '').trim();
       if (url && !/^https:\/\/[^\s]+$/i.test(url)) return false;
       Settings.relay = url.replace(/\/+$/, '');
       Settings.save();
       if (window.Relays) { Relays.idx = 0; Store.set('relayIdx', null); }
-      const f = $('#loginRelay');
-      if (f) f.value = Settings.relay;
       return true;
     },
 
@@ -700,7 +698,6 @@
         $('#loginModes').dataset.bound = '1';
         $('#loginModes').addEventListener('click', e => { const b = e.target.closest('.login-mode'); if (b) this.setLoginMode(b.dataset.mode, true); });
       }
-      $('#loginRelay').value = Settings.relay || '';
       const creds = Store.get('creds');
       if (creds) {
         if (creds.m) $('#loginM3u').value = creds.m;
@@ -747,7 +744,6 @@
       e.preventDefault();
       const c = this.formCreds();
       if (typeof c === 'string') { $('#loginError').textContent = c; return; }
-      if (!this.setRelay($('#loginRelay').value)) { $('#loginError').textContent = 'The relay address must start with https://'; return; }
       await this.signIn(c);
     },
 
@@ -4038,8 +4034,11 @@
         </section>
         <section class="set-group">
           <h3>Playback</h3>
-          <label class="set"${window.Native ? ' hidden' : ''}><span>HTTPS relay URL<small>Used only when your server can’t be reached on this network. Leave empty to connect directly.</small></span>
-            <span class="set-row"><input class="field" id="setRelay" type="url" placeholder="https://relay.example/relay" value="${esc(Settings.relay)}"><button class="btn ghost" id="testRelay">Test</button>${CFG.pairApi ? '<button class="btn ghost" id="relayPhone" type="button">Set from phone</button>' : ''}</span></label>
+          <div class="relay-set"${window.Native ? ' hidden' : ''}>
+            <div class="kv link"><span>HTTPS relay</span><code id="relayNow">${Settings.relay ? esc(Settings.relay) : T('None')}</code></div>
+            <p class="muted small-note">Used only when your server can’t be reached on this network. Set it from a phone.</p>
+            <div class="set-row vpn-actions">${CFG.pairApi ? '<button class="btn ghost" id="relayPhone" type="button">Set from phone</button>' : ''}<button class="btn ghost" id="testRelay" type="button"${Settings.relay ? '' : ' hidden'}>Test</button><button class="btn ghost" id="relayClear" type="button"${Settings.relay ? '' : ' hidden'}>Remove</button></div>
+          </div>
           <div class="pair" id="relayPair" hidden>
             <img class="pair-qr" alt="">
             <div class="pair-text"><p>On your phone or computer, open</p><b class="pair-url"></b><p>choose “Relay” and enter this code:</p>
@@ -4148,7 +4147,6 @@
       $('#setShift', m).addEventListener('change', e => save('catchupShift', Number(e.target.value)));
       const save = (k, v) => { Settings[k] = v; Settings.save(); };
       // A relay picked here is tried first again (Relays, api.js).
-      $('#setRelay', m).addEventListener('change', e => { if (!this.setRelay(e.target.value)) this.toast('The relay address must start with https://'); });
       $('#setFormat', m).addEventListener('change', e => save('liveFormat', e.target.value));
       const resetPicks = () => { delete this.data.moviePicks; delete this.data.seriesPicks; delete this.data.liveCatalog; };
       $('#setLang', m).addEventListener('change', e => { save('tmdbLang', e.target.value); TMDB.cache.clear(); resetPicks(); this.redrawLater = true; });
@@ -4260,6 +4258,11 @@
       });
       const pinChange = $('#pinChange', m);
       if (pinChange) pinChange.addEventListener('click', async () => { if (await this.askPin('change')) await this.askPin('create'); });
+      const showRelay = () => {
+        $('#relayNow', m).textContent = Settings.relay || T('None');
+        $('#testRelay', m).hidden = $('#relayClear', m).hidden = !Settings.relay;
+      };
+      $('#relayClear', m).addEventListener('click', () => { this.setRelay(''); showRelay(); this.toast('Relay removed'); });
       const relayPhone = $('#relayPhone', m);
       if (relayPhone) relayPhone.addEventListener('click', e => {
         e.preventDefault();
@@ -4270,13 +4273,12 @@
           onData: d => {
             box.hidden = true;
             if (!d.r) { this.toast('Send a relay address from the phone (Relay)'); return; }
-            if (this.setRelay(d.r)) { $('#setRelay', m).value = Settings.relay; this.toast('Relay set ✓'); }
+            if (this.setRelay(d.r)) { showRelay(); this.toast('Relay set ✓'); }
           },
         });
       });
       $('#testRelay', m).addEventListener('click', async () => {
-        save('relay', $('#setRelay', m).value.trim());
-        if (!Settings.relay) return this.toast('Enter a relay URL first');
+        if (!Settings.relay) return;
         try {
           const u = this.api.apiUrl ? this.api.apiUrl({}) : this.api.url;
           const r = await fetch(window.Relays ? Relays.wrap(u, Settings.relay.replace(/\/+$/, '')) : relayUrl(u));
