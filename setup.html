@@ -28,6 +28,7 @@
         <button type="button" class="login-mode active" data-mode="xtream">Xtream Codes</button>
         <button type="button" class="login-mode" data-mode="m3u">M3U playlist</button>
         <button type="button" class="login-mode" data-mode="extra">Extra playlist</button>
+        <button type="button" class="login-mode" data-mode="relay">Relay</button>
       </div>
       <p class="login-note" data-for="extra" hidden>Adds an M3U playlist next to the TV’s account (Settings → Extra playlists → Add from phone on the TV).</p>
       <label class="lf" data-for="extra" hidden><span>Name</span><input class="field" id="xname" maxlength="40" placeholder="My channels" spellcheck="false"></label>
@@ -35,6 +36,9 @@
       <label class="lf" data-for="xtream"><span>Username</span><input class="field" id="user" autocapitalize="none" spellcheck="false"></label>
       <label class="lf" data-for="xtream"><span>Password</span><input class="field" id="pass" type="password"></label>
       <label class="lf" data-for="m3u extra" hidden><span>Playlist link (M3U)</span><input class="field" id="m3u" type="url" inputmode="url" placeholder="https://example.com/playlist.m3u" autocapitalize="none" spellcheck="false"></label>
+      <p class="login-note" data-for="relay" hidden>Sets the HTTPS relay on a TV that’s already signed in (Settings → HTTPS relay URL → Set from phone on the TV).</p>
+      <label class="lf" data-for="xtream m3u relay"><span id="relayLabel">HTTPS relay (optional)</span><input class="field" id="relay" type="url" inputmode="url" placeholder="https://relay.example/relay" autocapitalize="none" spellcheck="false"></label>
+      <p class="login-note" data-for="xtream m3u">Only if the TV can’t reach the server on its network: the TV then goes through this relay.</p>
       <p class="login-error" id="err" role="alert"></p>
       <button class="btn primary wide-btn" id="send" type="submit">Send to TV</button>
       <p class="login-note">The account goes straight to the TV that shows this code and is deleted as soon as the TV receives it (at most 15 minutes later). InkonabTV is a media player: it doesn’t include or sell any channels or content.</p>
@@ -52,6 +56,7 @@
         mode = b.dataset.mode;
         document.querySelectorAll('.login-mode').forEach(x => x.classList.toggle('active', x === b));
         document.querySelectorAll('[data-for]').forEach(el => { el.hidden = !el.dataset.for.split(' ').includes(mode); });
+        $('#relayLabel').textContent = window.T(mode === 'relay' ? 'HTTPS relay' : 'HTTPS relay (optional)');
       }));
       // The TV's QR code opens this page as setup.html#ABC123.
       const fromHash = location.hash.slice(1).replace(/[^A-Za-z0-9]/g, '');
@@ -64,10 +69,16 @@
         if (!CFG.pairApi) return say('Remote setup isn’t available right now. Try again later.');
         const code = $('#code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
         if (code.length !== 6) return say('Enter the 6-character code shown on the TV.');
-        const body = mode === 'xtream'
+        const body = mode === 'relay' ? {} : mode === 'xtream'
           ? { s: $('#server').value.trim(), u: $('#user').value.trim(), p: $('#pass').value }
           : mode === 'extra' ? { m: $('#m3u').value.trim(), name: $('#xname').value.trim(), extra: true } : { m: $('#m3u').value.trim() };
-        if (mode === 'xtream' ? !(body.s && body.u && body.p) : !body.m) {
+        const relay = $('#relay').value.trim();
+        if (relay && mode !== 'extra') {
+          if (!/^https:\/\/\S+$/i.test(relay)) return say('The relay address must start with https://');
+          body.r = relay;
+        }
+        if (mode === 'relay' && !body.r) return say('Enter the relay address.');
+        if (mode !== 'relay' && (mode === 'xtream' ? !(body.s && body.u && body.p) : !body.m)) {
           return say(mode === 'xtream' ? 'Enter the server address, username and password.' : 'Enter the playlist link.');
         }
         const btn = $('#send');
@@ -80,7 +91,7 @@
           if (r.status === 204) {
             $('#setup').innerHTML = `<img class="login-logo" src="${CFG.logo}" alt="InkonabTV"><div class="setup-done"><b></b><p></p></div>`;
             $('.setup-done b').textContent = window.T('Sent to the TV ✓');
-            $('.setup-done p').textContent = window.T('The TV signs in by itself within a few seconds. You can close this page.');
+            $('.setup-done p').textContent = window.T(mode === 'relay' ? 'The TV uses this relay within a few seconds. You can close this page.' : 'The TV signs in by itself within a few seconds. You can close this page.');
             return;
           }
           say(r.status === 409 ? 'This code was already used. Ask for the new code on the TV.' : r.status === 404 ? 'This code is wrong or has expired. Check the code on the TV.' : 'Remote setup isn’t available right now. Try again later.');

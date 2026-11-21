@@ -1,7 +1,7 @@
 // InkonabTV remote setup (Cloudflare Worker + Durable Object, free plan).
 //
 //   TV     POST /pair                       → { code, token, ttl }   (shows the code on screen)
-//   phone  PUT  /pair/<code>  {s,u,p}|{m, name?, extra?}  → 204 (404: wrong/expired code, 409: already used)
+//   phone  PUT  /pair/<code>  {s,u,p,r?}|{m, name?, extra?, r?}|{r}  → 204 (404: wrong/expired code, 409: already used)
 //   TV     GET  /pair/<code>?token=<token>  → 204 while waiting, 200 + the account once sent
 //   app    PUT  /pair/<code>  {b}            → copy favourites/settings from another InkonabTV (no account)
 //
@@ -62,9 +62,13 @@ export default {
         return reply(r.status);
       }
       if (text.length > MAX_BODY) return reply(413, { error: 'too large' });
-      const data = d && typeof d.m === 'string' && d.m
+      // r: an optional HTTPS relay for the TV (only an https:// address, at most 200 characters).
+      const relay = d && typeof d.r === 'string' && /^https:\/\/\S+$/i.test(d.r) && d.r.length <= 200 ? { r: d.r } : {};
+      const data0 = d && typeof d.m === 'string' && d.m
         ? { m: d.m, ...(typeof d.name === 'string' && d.name ? { name: d.name.slice(0, 40) } : {}), ...(d.extra === true ? { extra: true } : {}) }
         : d && typeof d.u === 'string' && typeof d.p === 'string' && d.u && d.p ? { s: typeof d.s === 'string' ? d.s : '', u: d.u, p: d.p } : null;
+      // Relay only (Settings → Set from phone on a signed-in TV): just { r }.
+      const data = data0 && !data0.extra ? { ...data0, ...relay } : data0 || (relay.r ? relay : null);
       if (!data) return reply(400, { error: 'missing account' });
       const r = await room(code).fetch('https://do/data', { method: 'PUT', body: JSON.stringify(data) });
       return reply(r.status);

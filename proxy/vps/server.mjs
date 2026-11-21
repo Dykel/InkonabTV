@@ -37,6 +37,10 @@ http.createServer(async (req, res) => {
     res.writeHead(502, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
     return res.end('Relay error: ' + e);
   }
+  // Which kind of client and the answer only (never the address: it holds the viewer's login).
+  const ua = req.headers['user-agent'] || '';
+  const client = /Tizen|SMART-TV|SmartTV/i.test(ua) ? 'samsung-tv' : /Android/i.test(ua) ? 'android' : 'browser';
+  console.log('client', client, req.method, out.status);
   res.writeHead(out.status, Object.fromEntries(out.headers));
   if (!out.body || req.method === 'HEAD') return res.end();
   // Destroying the stream cancels the provider download (a live channel never ends on its own).

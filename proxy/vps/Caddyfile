@@ -1,5 +1,26 @@
-# Caddy gets and renews the HTTPS certificate by itself. setup.sh fills in RELAY_NAME.
+# Caddy gets and renews the HTTPS certificate by itself. setup.sh fills in the site name.
+{
+	# RSA, not Caddy's default ECDSA: Samsung TVs' video player refuses ECDSA certificates
+	# chained to Let's Encrypt's newer roots (Root YE / ISRG Root X2), while browsers accept them.
+	key_type rsa2048
+	# Relay addresses hold the viewer's login: Caddy's proxy warnings (e.g. a viewer closing a
+	# stream) would log them in full, so only errors are kept and the proxy logger is left out.
+	log default {
+		level ERROR
+		exclude http.handlers.reverse_proxy http.log.access
+	}
+}
+
 RELAY_NAME {
+	tls {
+		issuer acme {
+			# Let's Encrypt's classic chain, ending at ISRG Root X1 (trusted by TVs since 2018).
+			profile classic
+			preferred_chains {
+				root_common_name "ISRG Root X1"
+			}
+		}
+	}
 	# Video passes through as it arrives; no buffering, no compression (it's already compressed).
 	reverse_proxy 127.0.0.1:8080 {
 		flush_interval -1

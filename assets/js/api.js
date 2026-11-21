@@ -123,14 +123,38 @@
   const PERSIST = new Set(['get_live_streams', 'get_vod_streams', 'get_series', 'get_live_categories', 'get_vod_categories', 'get_series_categories']);
   const MAX_AGE = 6 * 3600e3;
 
-  // Server relay (Settings.relay) for the provider's own server (CFG.relayHosts: the only hosts
-  // the relays accept), used only when that server can't be reached directly from this network
-  // (it's blocked on some). Reach.direct: null = not known yet, true/false = last result; kept
-  // 30 minutes so the next start skips a failing direct try. Website and Samsung TV only: the
-  // Android apps connect directly. On the website the provider's plain-HTTP video always needs
-  // the relay or helper (an HTTPS page can't load it), whatever Reach says.
+  // Server relays for the provider's own server (CFG.relayHosts: the only hosts the relays
+  // accept), used only when that server can't be reached directly from this network (it's
+  // blocked on some). Reach.direct: null = not known yet, true/false = last result; kept 30
+  // minutes so the next start skips a failing direct try. Website and Samsung TV only: the
+  // Android apps connect directly. On the website the provider's plain-HTTP video always needs a
+  // relay or the helper (an HTTPS page can't load it), whatever Reach says.
+  //
+  // Relays: the one in Settings first, then CFG.relays in order. When one fails (no answer, or
+  // it says it can't reach the provider / is out of quota), requests move to the next one; the
+  // first one is tried again after 30 minutes.
+  const Relays = {
+    list() {
+      const all = [Settings.relay, ...(CFG.relays || [])].filter(Boolean).map(r => r.replace(/\/+$/, ''));
+      return [...new Set(all)];
+    },
+    idx: (() => { const r = Store.get('relayIdx', null); return r && Date.now() - r.at < 30 * 60e3 ? r.i : 0; })(),
+    current() { const l = this.list(); return l[Math.min(this.idx, l.length - 1)] || ''; },
+    at(i) { const l = this.list(); return l[(this.idx + i) % (l.length || 1)] || ''; },
+    // Move to the next relay after `failed` stopped working (once per failure, even when
+    // several requests fail together).
+    next(failed) {
+      const l = this.list();
+      if (failed !== this.current() || l.length < 2) return false;
+      this.idx = (this.idx + 1) % l.length;
+      Store.set('relayIdx', { i: this.idx, at: Date.now() });
+      console.info('[relay] ' + failed + ' failed: now using ' + this.current());
+      return true;
+    },
+    wrap(url, relay = this.current()) { return relay + '/?url=' + encodeURIComponent(url); },
+  };
   function relayable(url) {
-    try { return !!Settings.relay && (CFG.relayHosts || []).includes(new URL(url).hostname); } catch { return false; }
+    try { return !!Relays.current() && (CFG.relayHosts || []).includes(new URL(url).hostname); } catch { return false; }
   }
   const relayApps = () => !!window.TizenTV || location.protocol === 'https:' && !window.Native && !window.Desktop;
   const Reach = {
@@ -144,33 +168,49 @@
     // Go through the relay for this address?
     use(url) { return relayApps() && relayable(url) && this.direct === false; },
   };
-  const relayed = url => Settings.relay.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(url);
-  function throughRelay(url) { return Reach.use(url) ? relayed(url) : url; }
+  function throughRelay(url) { return Reach.use(url) ? Relays.wrap(url) : url; }
   window.relayable = relayable;
   window.Reach = Reach;
-  window.relayedUrl = relayed;
+  window.Relays = Relays;
+  window.relayedUrl = url => Relays.wrap(url);
 
   // A fetch that gives up: a server that doesn't answer must not keep the app waiting forever.
   // The provider's server is tried directly first (8 s when it's not known to work); if it can't
-  // be reached at all (no answer, not an HTTP error) the same request goes through the relay.
+  // be reached at all (no answer, not an HTTP error) the same request goes through the relays.
   function getJson(url, ms) {
     const once = (u, t) => Promise.race([
       fetch(u, { cache: 'no-store' }).then(r => {
-        if (!r.ok) throw Object.assign(new Error('Server error ' + r.status), { http: true });
+        if (!r.ok) throw Object.assign(new Error('Server error ' + r.status), { http: true, status: r.status });
         return r.json();
       }),
       new Promise((resolve, reject) => setTimeout(() => reject(new Error('Failed to fetch')), t)),
     ]);
-    if (!relayApps() || !relayable(url) || Reach.direct === false) return once(throughRelay(url), ms);
+    // Through the relays, the next one taking over when one is down: no answer, 5xx (it can't
+    // reach the provider, or is out of quota / suspended) or 403 (not set up for this provider).
+    // The provider's own answers (401, 404…) come back as they are.
+    const viaRelays = async () => {
+      const n = Relays.list().length;
+      for (let i = 0; ; i++) {
+        const relay = Relays.current();
+        try {
+          return await once(Relays.wrap(url, relay), ms);
+        } catch (e) {
+          const relayDown = !e.http || e.status >= 500 || e.status === 403;
+          if (!relayDown || i >= n - 1) throw e;
+          Relays.next(relay);
+        }
+      }
+    };
+    if (!relayApps() || !relayable(url)) return once(url, ms);
+    if (Reach.direct === false) return viaRelays();
     return once(url, Reach.direct ? ms : Math.min(ms, 8000)).then(
       d => { Reach.set(true); return d; },
       e => {
         if (e.http) { Reach.set(true); throw e; }
         Reach.set(false);
-        return once(relayed(url), ms);
+        return viaRelays();
       });
   }
-
 
   // The new download of a list against the saved copy, item by item (matched by id). Unchanged
   // items keep the saved object; `same` means nothing to save or redraw. The position number
