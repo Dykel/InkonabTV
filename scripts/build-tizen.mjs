@@ -114,7 +114,7 @@ writeFileSync(join(out, 'index.html'), page);
 // ---------- config.xml + icon ----------
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 writeFileSync(join(out, 'config.xml'), `<?xml version="1.0" encoding="UTF-8"?>
-<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://inkonab.tv/InkonabTV" version="${pkg.version}" viewmodes="maximized">
+<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://inkonab.tv/InkonabTV" version="${process.env.TIZEN_VERSION || pkg.version}" viewmodes="maximized">
     <tizen:application id="InkonabTV1.InkonabTV" package="InkonabTV1" required_version="2.3"/>
     <content src="index.html"/>
     <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>

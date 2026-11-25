@@ -625,6 +625,7 @@ public class NativePlayerPlugin extends Plugin {
                 out.put("fav", new JSObject(d.getStringExtra("fav")));
                 if (d.getStringExtra("remindOpen") != null) out.put("remindOpen", d.getStringExtra("remindOpen"));
                 if (d.getBooleanExtra("multi", false)) out.put("multi", true);
+                if (d.getBooleanExtra("relayUsed", false)) out.put("relayUsed", true);
             } catch (Exception ignored) {
             }
         }

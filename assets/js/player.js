@@ -175,7 +175,16 @@
 
     isOpen() { return !this.el.classList.contains('hidden'); },
     // A video is on screen, here or in the Android app's own player (isOpen() doesn't see that one).
-    busy() { return this.isOpen() || !!this.nativeOpen; },
+    busy() { return this.isOpen() || (!!this.nativeOpen && !this.nativeLost()); },
+    // The Android player's answer never came back (seen once in a long open/close test): it can't
+    // still be open when the app's own screen has had the focus for 5 s, so Play works again
+    // instead of doing nothing until the app restarts. A quick second OK stays ignored.
+    nativeLost() {
+      if (!this.nativeOpen || document.hidden || !document.hasFocus() || Date.now() - (this.nativeSince || 0) < 5000) return false;
+      console.warn('[native player] no answer from the player: it is not open any more');
+      this.nativeOpen = false;
+      return true;
+    },
 
     // item: {kind, id, ext, title, subtitle, img, resumeAt, list, index, onProgress, onEnded}
     open(item) {
@@ -193,8 +202,9 @@
     // group index lists) so the native channel list matches the app.
     async openNative(item) {
       // OK pressed twice, or Play again while the player opens: one player, not two playing at once.
-      if (this.nativeOpen) return;
+      if (this.nativeOpen && !this.nativeLost()) return;
       this.nativeOpen = true;
+      this.nativeSince = Date.now();
       try { return await this.openNativeNow(item); }
       catch (e) { this.nativeOpen = false; throw e; }
     },
@@ -241,7 +251,7 @@
       };
       payload = {
         live: true,
-        template: App.api ? nativeUrl(App.api.streamUrl('live', '{id}', Settings.liveFormat)) : '',
+        template: App.api ? App.api.streamUrl('live', '{id}', Settings.liveFormat) : '',
         groups: groups.map(g => ({ key: g.key, name: g.name, items: g.channels.map(add) })),
         group: gi,
         index: Math.max(0, groups[gi].channels.indexOf(cur)),
@@ -268,8 +278,8 @@
         // Its other versions (language, quality) follow: the player tries them before the VPN.
         const alts = it => (it.url ? [] : it.alts || []);
         const film = it => ({ title: it.title || '', subtitle: it.subtitle || '', img: it.img || '',
-          versions: [{ url: nativeUrl(it.url || App.api.streamUrl(it.kind, it.id, it.ext || 'mp4')), label: it.kind === 'catchup' ? 'Replay' : alts(it).length ? it.label || '' : '' },
-            ...alts(it).map(a => ({ url: nativeUrl(App.api.streamUrl(it.kind, a.id, a.ext || 'mp4')), label: a.label || '' }))] });
+          versions: [{ url: it.url || App.api.streamUrl(it.kind, it.id, it.ext || 'mp4'), label: it.kind === 'catchup' ? 'Replay' : alts(it).length ? it.label || '' : '' },
+            ...alts(it).map(a => ({ url: App.api.streamUrl(it.kind, a.id, a.ext || 'mp4'), label: a.label || '' }))] });
         payload = {
           live: false, group: 0, index: 0, version: 0, startAt: item.resumeAt > 5 ? item.resumeAt : 0, audioLang: item.audioLang || '',
           channels: [item, ...(item.queue || [])].map(film),
@@ -280,8 +290,10 @@
       const back = document.activeElement;
       let r = {};
       try {
+        Object.assign(payload, nativeRelay());
         await Native.player.stage({ payload: JSON.stringify(payload) });
         r = await Native.player.play({ staged: true });
+        if (r && r.relayUsed && window.Reach) Reach.setVideo(false);
       } catch (e) { App.toast('Can’t open the player'); console.warn('[native player]', e); }
       this.nativeOpen = false; // before onEnded below, which may open the next film
       if (item.kind !== 'live') {
@@ -1084,6 +1096,8 @@
       this.liveTries = (this.liveTries || 0) + 1;
       this.liveLast = Date.now();
       console.warn('[live] reopening', this.liveTries, why || '');
+      // Quiet at first (a short drop), then the viewer is told why the picture is waiting.
+      if (this.liveTries === 4 || (this.liveTries > 4 && this.liveTries % 6 === 0)) App.toast(T('The channel stopped · reconnecting…'));
       this.liveTimer = setTimeout(() => {
         this.liveTimer = 0;
         if (this.item !== it || !this.isOpen()) return;
@@ -1155,7 +1169,13 @@
         this.tryVpn(this.item, detail);
         return;
       }
-      const msg = !mixed
+      // TVs: no browser, no VLC to copy a link to: say what the viewer can do from the sofa.
+      const tv = document.documentElement.classList.contains('tv');
+      const msg = !mixed && tv
+        ? T(this.item && this.item.kind === 'live'
+          ? 'This channel can’t be played right now. It may be off the air, or your provider may be having trouble with it. Try again in a moment, or choose another channel.'
+          : 'This video can’t be played right now. Your provider may be having trouble with it. Try again in a moment.')
+        : !mixed
         ? 'The stream could not be played. It may be offline, or use a format your browser can’t decode (try the other live format in Settings, or open it in VLC).'
         : appleTouch
           ? 'On iPhone and iPad, your provider’s channels can’t play on the website yet. Watch them with the InkonabTV app on Android, Android TV, Fire TV or Samsung TV, or on a computer.'
@@ -1166,6 +1186,8 @@
         : typeof detail === 'string' ? detail : detail && (detail.type || detail.details) || '';
       this.el.querySelector('.p-error-msg').textContent = msg + (why ? ` [${why}]` : '');
       this.el.querySelector('[data-act="settings"]').classList.add('hidden');
+      const copy = this.el.querySelector('[data-act="copy"]');
+      if (copy) copy.classList.toggle('hidden', tv);
       this.setState('error');
       if (detail) console.warn('[player]', detail);
     },
@@ -1365,7 +1387,7 @@
   // The relay a stream goes through. Website: always (HTTPS page, plain-HTTP video), the helper on
   // this computer first. Samsung TV and Windows: they play plain HTTP, so only when the provider's
   // server can't be reached from this network (Reach, api.js) or after a stream failed directly.
-  // Android: nativeUrl (ExoPlayer), when the provider can't be reached. item.relayTry picks the next relay in the list after one failed for
+  // Android: PlayerActivity wraps them itself (nativeRelay). item.relayTry picks the next relay in the list after one failed for
   // this stream (Relays, api.js).
   // Samsung TV video player: it can't look up some names the rest of the TV resolves (seen with
   // sslip.io on a home network), so a relay whose name carries its IP address (a-b-c-d.sslip.io,
@@ -1377,12 +1399,14 @@
     return m ? `http://${m[1]}.${m[2]}.${m[3]}.${m[4]}${m[5] || ''}` : r;
   }
 
-  // Android (ExoPlayer): the provider's streams go through the relay when its server can't be
-  // reached from this network. "{id}" in the live template stays as it is: the player fills it in.
-  function nativeUrl(url) {
-    const R = window.Relays;
-    if (!R || !window.relayable || !window.relayable(url) || !window.Reach.useVideo(url)) return url;
-    return R.wrap(url).replace(/%7Bid%7D/g, '{id}');
+  // Android (ExoPlayer): the player wraps the provider's streams with the viewer's relay itself
+  // (PlayerActivity.relayed): from the start when the provider can't be reached here, or after a
+  // stream failed directly; it then reports relayUsed and video goes through the relay for 30 min.
+  function nativeRelay() {
+    const R = window.Relays, CFG = window.INKONAB_CONFIG || {};
+    const relay = R ? R.current() : '';
+    const sample = App.api && App.api.streamUrl ? App.api.streamUrl('live', '0', 'ts') : '';
+    return { relay, relayHosts: CFG.relayHosts || [], useRelay: !!(relay && window.Reach && sample && Reach.useVideo(sample)) };
   }
 
   function relay(url, item) {

@@ -1489,8 +1489,9 @@
     loadVod() { return this.data.vod || (this.data.vod = this.buildTitles(this.api.vodStreams(), 'movie', fromVod)); },
     loadSeries() { return this.data.series || (this.data.series = this.buildTitles(this.api.seriesList(), 'series', fromSeries)); },
     async buildTitles(listP, kind, from) {
-      const [list, langs] = await Promise.all([listP, this.catLangs(kind)]);
+      const [list, langs, adultCats] = await Promise.all([listP, this.catLangs(kind), this.adultCatIds(kind)]);
       const items = this.fillLang(await mapSlices(list, from), langs).sort((a, b) => b.added - a.added);
+      if (adultCats.size) for (const i of items) if (adultCats.has(i.cat)) i.adult = true;
       return this.group(items, true);
     },
     // One entry per title, adult titles left out unless allowed; kept per list (it only changes with the playlist).
@@ -1671,12 +1672,12 @@
     loadLive() {
       // Channels named "✶⋆✶ … ✶⋆✶" are the provider's section dividers, not real channels.
       // Copies of the same channel in other qualities share c.versions (best first).
-      return this.data.live || (this.data.live = this.api.liveStreams().then(async list => {
+      return this.data.live || (this.data.live = Promise.all([this.api.liveStreams(), this.adultCatIds('live')]).then(async ([list, adultCats]) => {
         const out = [];
         await eachSlice(list, c => {
           if (String(c.name || '').trim().startsWith('✶⋆✶')) return;
           const p = parseChannel(c.name);
-          out.push({ ...c, ...p, key: fold(c.name), gkey: fold(p.label), adult: Number(c.is_adult) === 1 });
+          out.push({ ...c, ...p, key: fold(c.name), gkey: fold(p.label), adult: Number(c.is_adult) === 1 || adultCats.has(String(c.category_id)) });
         });
         const groups = new Map();
         for (const c of out) { let g = groups.get(c.gkey); if (!g) groups.set(c.gkey, (g = [])); g.push(c); }
@@ -1687,14 +1688,27 @@
         return out;
       }));
     },
-    async loadCats(kind) {
-      const key = kind + 'Cats', api = this.api; // kept: the account may be signed out or expire meanwhile
-      if (!api) return [];
+    // All the provider's categories of a kind, asked once per playlist.
+    rawCats(kind) {
+      const key = kind + 'Cats';
       if (!this.data[key]) {
         const fn = { live: 'liveCategories', movie: 'vodCategories', series: 'seriesCategories' }[kind];
-        this.data[key] = api[fn]();
+        this.data[key] = this.api[fn]();
       }
-      let cats = await this.data[key];
+      return this.data[key];
+    },
+    // Categories named as adult ("XXX", "Adult", "18+"…): their titles and channels count as adult even
+    // when the provider doesn't flag them (is_adult), so they never show on Home, in "All", Latest or
+    // search unless adult content is unlocked.
+    async adultCatIds(kind) {
+      if (!this.api) return new Set();
+      const cats = await this.rawCats(kind).catch(() => []);
+      return new Set((cats || []).filter(c => ADULT.test(c.category_name || '')).map(c => String(c.category_id)));
+    },
+    async loadCats(kind) {
+      const api = this.api; // kept: the account may be signed out or expire meanwhile
+      if (!api) return [];
+      let cats = await this.rawCats(kind);
       if (api.langAllowed) cats = cats.filter(c => api.langAllowed(c.category_name));
       // Kids profile: kids and family categories only (never adult ones).
       if (Profiles.kids) return cats.filter(c => !ADULT.test(c.category_name) && Profiles.kidsCategory(c.category_name));
@@ -2021,7 +2035,7 @@
       this.remindTimer = setInterval(() => this.checkReminders(), 15000);
     },
     checkReminders() {
-      if (Player.nativeOpen) return;
+      if (Player.nativeOpen && !Player.nativeLost()) return;
       const now = Date.now(), fired = new Set(Store.get('remFired', []) || []);
       const due = this.reminders().find(r => r.start <= now + 30000 && r.start > now - 5 * 60000 && !fired.has(r.id));
       if (!due) return;

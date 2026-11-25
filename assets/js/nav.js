@@ -148,4 +148,34 @@
     document.documentElement.style.scrollPaddingTop = pad + 'px';
     next.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   });
+
+  // TV: something always has the focus. When the focused item disappears (a row drawn again after
+  // a film, a sheet closed), the remote would do nothing on OK and jump to the top on an arrow:
+  // the focus goes to the same item drawn again, or else to the first one on the screen.
+  let lastFocus = null;
+  document.addEventListener('focusin', e => { if (e.target !== document.body) lastFocus = e.target; });
+  const same = el => {
+    if (!el || !el.getAttribute) return '';
+    if (el.id) return '#' + CSS.escape(el.id);
+    for (const a of ['data-id', 'data-view', 'data-g', 'data-i', 'data-a', 'data-k']) {
+      const v = el.getAttribute(a);
+      if (v != null) return `${el.tagName.toLowerCase()}.${CSS.escape(el.classList[0] || '')}[${a}="${CSS.escape(v)}"]`.replace('.[', '[');
+    }
+    return '';
+  };
+  let lost = 0; // checks in a row with nothing focused: a list drawn again a moment later keeps its item
+  setInterval(() => {
+    if (!document.documentElement.classList.contains('tv') || document.hidden) return;
+    const a = document.activeElement;
+    if (a && a !== document.body && a.isConnected) { lost = 0; return; }
+    if (window.Player && (Player.busy ? Player.busy() : Player.isOpen())) return;
+    if (++lost < 2) return;
+    lost = 0;
+    const top = document.querySelector('#multi:not(.hidden)') || document.querySelector('#modal:not(.hidden)') || document.querySelector('#login:not(.hidden)');
+    const sel = same(lastFocus);
+    let el = sel ? [...(top || document).querySelectorAll(sel)].find(visible) : null;
+    if (!el) el = [...(top || document.getElementById('view') || document).querySelectorAll(FOCUSABLE)].find(visible)
+      || [...document.querySelectorAll('.topbar ' + FOCUSABLE.split(', ').join(', .topbar '))].find(visible);
+    if (el) el.focus({ preventScroll: true });
+  }, 700);
 })();

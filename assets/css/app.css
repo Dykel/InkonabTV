@@ -1333,6 +1333,8 @@ img.broken { visibility: hidden; }
 .sp-logo { position: relative; display: grid; place-items: center; width: 96px; height: 60px; border-radius: 10px; background: rgba(0,0,0,.35); overflow: hidden; }
 .sp-logo img { position: relative; z-index: 1; max-width: 84%; max-height: 80%; object-fit: contain; }
 .sp-logo .ph { position: absolute; font-size: 11px; color: var(--muted, #9aa3ad); text-align: center; padding: 4px; }
+/* A logo with see-through parts would show the channel name through it: the name is only for a missing or broken logo. */
+.sp-logo img:not(.broken) + .ph { visibility: hidden; }
 .sp-text { display: grid; gap: 4px; min-width: 0; }
 .sp-text b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sp-text small { color: var(--muted, #9aa3ad); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

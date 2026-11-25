@@ -87,6 +87,8 @@ import java.util.List;
  *     channels: [{ title, subtitle, img, num, radio, gkey, fav, versions: [{ url | id, label }] }],
  *     groups:   [{ key, name, items: [channel index…] }] }
  *   live extras: epg (guide link, {id}), catchup (replay link, {min} {start} {id}), tz, shift;
+ *   relay (the viewer's HTTPS relay, or ""), relayHosts (the provider hosts it accepts), useRelay
+ *   (the provider can't be reached directly: start through the relay);
  *   each channel: epgId (stream whose guide we read), cu (catch-up stream).
  * VOD sends one channel and no groups. Live remote (Apple-style, each panel closes with the
  * opposite arrow or Back): ▼ / OK info panel, ▲ channel strip (▲ again: every group),
@@ -109,6 +111,11 @@ public class PlayerActivity extends AppCompatActivity {
     private JSONArray channels;
     private final List<Group> groups = new ArrayList<>();
     private String template = "";
+    // HTTPS relay set by the viewer: the provider's streams go through it when its server can't be
+    // reached (useRelay from the app), or after a stream failed directly (relayTried).
+    private String relay = "";
+    private final java.util.Set<String> relayHosts = new java.util.HashSet<>();
+    private boolean useRelay, relayTried, relayUsed;
     private String audioLang = "";
     private int group, index, version;
     // The channel watched before this one (Previous channel), and the one shown now.
@@ -175,6 +182,10 @@ public class PlayerActivity extends AppCompatActivity {
             channels = p.getJSONArray("channels");
             live = p.optBoolean("live", false);
             template = p.optString("template", "");
+            relay = p.optString("relay", "").replaceAll("/+$", "");
+            JSONArray rh = p.optJSONArray("relayHosts");
+            if (rh != null) for (int i = 0; i < rh.length(); i++) relayHosts.add(rh.optString(i));
+            useRelay = p.optBoolean("useRelay", false) && !relay.isEmpty();
             audioLang = p.optString("audioLang", "");
             epgTpl = p.optString("epg", "");
             cuTpl = p.optString("catchup", "");
@@ -327,12 +338,52 @@ public class PlayerActivity extends AppCompatActivity {
 
     private String urlOf(JSONObject v) {
         String url = v.optString("url", "");
-        if (!url.isEmpty()) return url;
+        if (!url.isEmpty()) return relayed(url);
         String u = template.replace("{id}", v.optString("id"));
-        if (!altFormat) return u;
-        if (u.endsWith(".m3u8")) return u.substring(0, u.length() - 5) + ".ts";
-        if (u.endsWith(".ts")) return u.substring(0, u.length() - 3) + ".m3u8";
-        return u;
+        if (altFormat) {
+            if (u.endsWith(".m3u8")) u = u.substring(0, u.length() - 5) + ".ts";
+            else if (u.endsWith(".ts")) u = u.substring(0, u.length() - 3) + ".m3u8";
+        }
+        return relayed(u);
+    }
+
+    /**
+     * HLS by the link's ending: ".m3u8", or, through the relay (…/relay/?url=<stream>), the
+     * stream's own ending. Without it the player takes a relayed HLS channel for a plain file.
+     */
+    static boolean isHls(String url) {
+        try {
+            Uri u = Uri.parse(url);
+            String path = u.getPath(), inner = u.getQueryParameter("url");
+            if (inner != null && !inner.isEmpty()) path = Uri.parse(inner).getPath();
+            return path != null && path.toLowerCase().endsWith(".m3u8");
+        } catch (Exception e) { return false; }
+    }
+
+    /** A provider stream through the viewer's relay, when it's in use (other links stay as they are). */
+    private String relayed(String u) {
+        if (!useRelay || relay.isEmpty() || !relayable(u)) return u;
+        try { return relay + "/?url=" + java.net.URLEncoder.encode(u, "UTF-8"); } catch (Exception e) { return u; }
+    }
+
+    private boolean relayable(String u) {
+        try { return relayHosts.contains(Uri.parse(u).getHost()); } catch (Exception e) { return false; }
+    }
+
+    /** A provider stream that failed directly: once, straight to the relay (before other copies and the VPN). */
+    private boolean tryRelay() {
+        if (useRelay || relayTried || relay.isEmpty() || isFree(current())) return false;
+        JSONArray vs = current().optJSONArray("versions");
+        String u = replayUrl != null ? replayUrl : vs == null ? "" : template.isEmpty() ? vs.optJSONObject(0).optString("url", "")
+            : template.replace("{id}", vs.optJSONObject(0).optString("id"));
+        if (!relayable(u)) return false;
+        relayTried = true;
+        useRelay = relayUsed = true; // the next channels too, for this player and (via the app) 30 minutes
+        tried.clear();
+        altFormat = false;
+        Toast.makeText(this, "Trying through your relay…", Toast.LENGTH_SHORT).show();
+        load(live ? 0 : Math.max(player != null ? player.getCurrentPosition() : 0, filmStartMs));
+        return true;
     }
 
     // ---------- automatic recovery ----------
@@ -424,6 +475,7 @@ public class PlayerActivity extends AppCompatActivity {
             if (t - liveGood >= LIVE_NEW_ROUTE && t - liveLastRoute >= LIVE_NEW_ROUTE && vpn.state() != VpnManager.State.CONNECTING) {
                 liveLastRoute = t;
                 Log.i(LIVE_TAG, "trying another way in");
+                if (tryRelay()) return;
                 if (autoRetry()) return;
                 tried.clear();
                 altFormat = false;
@@ -463,6 +515,7 @@ public class PlayerActivity extends AppCompatActivity {
     private void onFail(String why) {
         main.removeCallbacks(watchdog);
         if (live && replayUrl == null && livePlayed) { keepLive(why); return; }
+        if (tryRelay()) return; // the provider's stream host may be blocked here: the relay first
         if (autoRetry()) return; // other copies of a channel, other versions of a film or episode
         if (tryVpn()) return;
         showError(live
@@ -510,6 +563,7 @@ public class PlayerActivity extends AppCompatActivity {
         vpnTried = false;
         vpnAttempts = 0;
         directTried = false;
+        relayTried = false;
     }
 
     // ---------- free VPN ----------
@@ -582,7 +636,7 @@ public class PlayerActivity extends AppCompatActivity {
         }
         Intent consent = vpn.consentIntent(this);
         if (consent != null) {
-            showInfo("Allow InkonabTV's VPN to play this channel");
+            showInfo("Allow InkonabTV's VPN to play this " + (live ? "channel" : "video"));
             startActivityForResult(consent, REQ_VPN);
         } else {
             connectVpn();
@@ -643,8 +697,7 @@ public class PlayerActivity extends AppCompatActivity {
     private MediaItem episodeItem(int at) {
         String url = urlOf(channelAt(groups.get(group).items[at]).optJSONArray("versions").optJSONObject(0));
         MediaItem.Builder b = new MediaItem.Builder().setUri(Uri.parse(url));
-        String path = Uri.parse(url).getPath();
-        if (path != null && path.toLowerCase().endsWith(".m3u8")) b.setMimeType(MimeTypes.APPLICATION_M3U8);
+        if (isHls(url)) b.setMimeType(MimeTypes.APPLICATION_M3U8);
         return b.build();
     }
 
@@ -825,7 +878,7 @@ public class PlayerActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQ_VPN) return;
         if (VpnManager.get().consentIntent(this) == null) connectVpn();
-        else showError("The VPN wasn't allowed, so this channel can't be retried through it.");
+        else showError("The VPN wasn't allowed, so this " + (live ? "channel" : "video") + " can't be retried through it.");
     }
 
     private void showInfo(String msg) {
@@ -1773,7 +1826,7 @@ public class PlayerActivity extends AppCompatActivity {
             JSONArray versions = ch.getJSONArray("versions");
             version = clamp(version, versions.length());
             JSONObject v = versions.getJSONObject(version);
-            String url = replayUrl != null ? replayUrl : urlOf(v);
+            String url = replayUrl != null ? relayed(replayUrl) : urlOf(v);
 
             titleView.setText(live && !ch.optString("num").isEmpty() ? ch.optString("num") + "  " + ch.optString("title") : ch.optString("title"));
             String gname = groups.get(group).name;
@@ -1804,8 +1857,7 @@ public class PlayerActivity extends AppCompatActivity {
                 .setTargetOffsetMs(25000).setMinPlaybackSpeed(1f).setMaxPlaybackSpeed(1f).build());
             freezes.clear();
             reconnects = 0;
-            String path = Uri.parse(url).getPath();
-            if (path != null && path.toLowerCase().endsWith(".m3u8")) item.setMimeType(MimeTypes.APPLICATION_M3U8);
+            if (isHls(url)) item.setMimeType(MimeTypes.APPLICATION_M3U8);
             readyOnce = false;
             main.removeCallbacks(watchdog);
             // Through the free VPN a provider can take 20 s just to answer: don't give up on a good server.
@@ -2258,6 +2310,7 @@ public class PlayerActivity extends AppCompatActivity {
         data.putExtra("fav", favChanges.toString());
         if (remindOpen != null) data.putExtra("remindOpen", remindOpen);
         if (multiOpen) data.putExtra("multi", true);
+        if (relayUsed) data.putExtra("relayUsed", true); // the app sends video through the relay for 30 minutes
         setResult(RESULT_OK, data);
         finish();
     }
