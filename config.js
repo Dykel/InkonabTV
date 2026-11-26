@@ -15,7 +15,7 @@ window.INKONAB_CONFIG = {
   // over HTTPS (proxy/vps, proxy/netlify, proxy/alwaysdata, proxy/api).
   relay: '',
   // The provider's server: the only host the relays accept, so only its addresses go through them.
-  relayHosts: ['inkonabtv.ottb.xyz', 'rvenv.khan349.com', 'rvenv.barond.cc'],
+  relayHosts: ['inkonabtv.ottb.xyz'],
 
   // Free playlists that are always available, signed in or not (TV and radio), as
   // { name, url } M3U links. None built in: people add theirs in Settings → Extra playlists.

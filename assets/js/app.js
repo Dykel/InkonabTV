@@ -585,7 +585,7 @@
     // What a phone sent through remote setup → sign-in details.
     pairCreds(d) {
       if (d.r) this.setRelay(d.r);
-      return d.m ? { m: d.m } : { s: CFG.playerMode ? normServer(d.s) : undefined, u: d.u, p: d.p };
+      return d.m ? { m: d.m } : { s: CFG.playerMode || d.s ? normServer(d.s) || undefined : undefined, u: d.u, p: d.p };
     },
 
     // The HTTPS relay, set only from a phone (Set up from phone, or Settings → Set from phone):
@@ -712,7 +712,16 @@
     setLoginMode(mode, fromClick) {
       this.loginMode = mode;
       $$('.login-mode').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
-      const show = { server: mode === 'xtream' && !!CFG.playerMode, xtream: mode === 'xtream', m3u: mode === 'm3u', remote: mode === 'remote', form: mode !== 'remote' };
+      // The server field shows in every version: in the InkonabTV service version (website,
+      // InkonabTV+) it is optional and left empty for the built-in server, so people with another
+      // provider can sign in too (it was hidden, and their login went to the built-in server).
+      const show = { server: mode === 'xtream', xtream: mode === 'xtream', m3u: mode === 'm3u', remote: mode === 'remote', form: mode !== 'remote' };
+      if (!CFG.playerMode && !$('#loginServer').dataset.optional) {
+        $('#loginServer').dataset.optional = '1';
+        $('#loginServer').placeholder = T('Leave empty for the InkonabTV server');
+        const lbl = $('#loginServer').closest('label').querySelector('span');
+        if (lbl) lbl.textContent = T('Server address (optional)');
+      }
       $$('#loginForm [data-for]').forEach(el => { el.hidden = !show[el.dataset.for]; });
       $('#loginForm').classList.toggle('has-pair', mode === 'remote');
       if (fromClick) $('#loginError').textContent = '';
@@ -737,7 +746,10 @@
         } catch { return 'Enter the playlist link.'; }
       }
       const u = $('#loginUser').value.trim(), p = $('#loginPass').value;
-      if (!CFG.playerMode) return u && p ? { u, p } : 'Enter your username and password.';
+      if (!CFG.playerMode) {
+        const own = $('#loginServer').value.trim() ? normServer($('#loginServer').value) : '';
+        return u && p ? (own ? { s: own, u, p } : { u, p }) : 'Enter your username and password.';
+      }
       const s = normServer($('#loginServer').value);
       return s && u && p ? { s, u, p } : 'Enter the server address, username and password.';
     },
@@ -752,8 +764,15 @@
     async signIn(c, attempt = 0) {
       this.cancelRetry();
       const btn = $('#loginBtn');
-      btn.disabled = true; btn.textContent = 'Signing in…';
       $('#loginError').textContent = '';
+      // Website (an https page): a provider on plain http can't be reached from a browser, and
+      // the relays are only for the InkonabTV server. Say so instead of retrying for ever.
+      if (c.s && /^http:/i.test(c.s) && location.protocol === 'https:' && !window.Native && !window.TizenTV && !window.Desktop &&
+          !(window.relayable && relayable(c.s.replace(/\/+$/, '') + '/player_api.php'))) {
+        $('#loginError').textContent = T('This provider can’t be used on the website: its server uses http, which browsers block. Use the InkonabTV app on your TV, phone or computer.');
+        return;
+      }
+      btn.disabled = true; btn.textContent = 'Signing in…';
       try {
         await this.connect(c);
         Store.del('creds');

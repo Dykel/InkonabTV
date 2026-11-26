@@ -13,7 +13,7 @@
  * relay can't be used as an open proxy. Install: see README.md next to this file.
  */
 
-const ALLOWED_HOSTS = ['inkonabtv.ottb.xyz', 'rvenv.khan349.com', 'rvenv.barond.cc'];
+const ALLOWED_HOSTS = ['inkonabtv.ottb.xyz'];
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');

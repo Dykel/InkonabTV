@@ -12,7 +12,7 @@
  * video server) are signed with the SECRET environment variable, so the relay can't be used
  * as an open proxy. Without a SECRET the relay refuses to run.
  */
-const ALLOWED_HOSTS = ['inkonabtv.ottb.xyz', 'rvenv.khan349.com', 'rvenv.barond.cc'];
+const ALLOWED_HOSTS = ['inkonabtv.ottb.xyz'];
 const UA = 'Mozilla/5.0 (InkonabTV Web)';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
