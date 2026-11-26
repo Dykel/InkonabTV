@@ -127,7 +127,7 @@
         const it = this.item;
         if (it && it.kind === 'live' && !appleTouch && this.liveOk !== it.title) { this.liveOk = it.title; this.liveGood = Date.now(); }
       });
-      setInterval(() => this.guardLive(), 2000);
+      setInterval(() => { this.guardLive(); this.guardVod(); }, 2000);
       // Sleep timer (Settings): no key or pointer for that long while a video plays → ask, then stop.
       this.lastInput = Date.now();
       for (const ev of ['keydown', 'pointerdown', 'pointermove', 'wheel']) document.addEventListener(ev, () => { this.lastInput = Date.now(); this.sleepCancel(); }, true);
@@ -1111,6 +1111,28 @@
       }, Math.min(5000, 500 * this.liveTries));
     },
 
+    // Films and episodes: a picture that stops with no error at all (seen on a Samsung TV at the
+    // very end of an episode: no "ended", a black screen until Back). At the end it counts as
+    // finished (the next episode follows); elsewhere the video opens again where it stopped, once
+    // every 3 minutes; stopping again sooner shows the error screen with Try again.
+    guardVod() {
+      const it = this.item, v = this.video, now = Date.now();
+      if (!it || it.kind === 'live' || !this.isOpen() || document.hidden || this.el.dataset.state !== 'playing' || v.paused) { this.vodSeen = null; return; }
+      const t = v.currentTime;
+      if (!this.vodSeen || this.vodSeen.item !== it || Math.abs(t - this.vodSeen.t) > 0.5) { this.vodSeen = { item: it, t, at: now }; return; }
+      if (now - this.vodSeen.at < 25000) return;
+      this.vodSeen = null;
+      const d = v.duration;
+      if (isFinite(d) && d > 0 && d - t < 20) { console.warn('[player] stopped at the end: counted as finished'); this.ended(); return; }
+      if (!it.vodReopenAt || now - it.vodReopenAt > 180000) {
+        console.warn('[player] picture stopped: opening again at', t);
+        App.toast(T('The video stopped · reconnecting…'));
+        this.play({ ...it, resumeAt: t, vodReopenAt: now, quiet: true });
+        return;
+      }
+      this.fail('stalled');
+    },
+
     guardLive() {
       const now = Date.now(), state = this.el.dataset.state;
       if (!this.keeps() || document.hidden || state === 'paused' || (state === 'playing' && this.video.paused)) { this.liveGood = now; return; }
@@ -1333,6 +1355,10 @@
           else if (this.mediaFocused()) { e.preventDefault(); v.currentTime += 10; } break;
         case ' ': case 'MediaPlayPause':
           if (this.mediaFocused() || e.key === 'MediaPlayPause') { e.preventDefault(); v.paused ? this.resume() : v.pause(); } break;
+        // Films and episodes: OK pauses / plays and shows the controls (many TV remotes have no
+        // play/pause button; OK on the picture did nothing).
+        case 'Enter':
+          if (!live && this.mediaFocused()) { e.preventDefault(); e.stopPropagation(); this.poke(); v.paused ? this.resume() : v.pause(); } break;
         case 'MediaPlay': e.preventDefault(); this.resume(); break;
         case 'MediaPause': e.preventDefault(); v.pause(); break;
         case 'MediaFastForward': if (!live) { e.preventDefault(); v.currentTime += 30; } break;

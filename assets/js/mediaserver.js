@@ -6,7 +6,7 @@
   const $ = (s, r = document) => r.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const T = s => (window.T ? window.T(s) : s);
-  const VERSION = '1.0.39';
+  const VERSION = '1.0.40';
 
   const deviceId = () => {
     let id = Store.get('msDevice', '');

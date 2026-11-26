@@ -362,6 +362,8 @@
 
       this.watchNetwork();
 
+      // Saved data lost by the device (see Backup, api.js): put back, then start again with it.
+      if (window.Backup && await Backup.restore()) { location.reload(); return; }
       const creds = Store.get('creds');
       // The tour shows the first time the app opens, before signing in; people already
       // signed in have used the app, so it is marked as seen (Settings → Help replays it).
@@ -1221,7 +1223,13 @@
       if (this.homeTimer && this.homeDue <= due) return;
       clearTimeout(this.homeTimer);
       this.homeDue = due;
-      this.homeTimer = setTimeout(() => { this.homeTimer = 0; this.pushHomeRows().catch(e => console.warn('[home rows]', e)); }, ms);
+      this.homeTimer = setTimeout(() => {
+        this.homeTimer = 0;
+        // Not while something plays: the first time, Android TV asks "Add the channel … to your
+        // home screen?" over the whole screen; it waits until the viewer is back in the app.
+        if ((window.Player && Player.busy()) || (window.Multi && Multi.nativeBusy)) return this.homeRowsLater(30000);
+        this.pushHomeRows().catch(e => console.warn('[home rows]', e));
+      }, ms);
     },
     homeLink(a) { return 'inkonabtv://open?a=' + encodeURIComponent(JSON.stringify(a)); },
     async homeRowsData() {

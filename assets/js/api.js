@@ -119,6 +119,44 @@
     clear() { return this.run('readwrite', st => st.clear()); },
   };
 
+  // A copy of the small saved data (account, settings, favourites, profiles…) in IndexedDB.
+  // Seen on a Samsung TV after many forced closes: the TV emptied localStorage completely while
+  // IndexedDB survived, and the viewer had to sign in again. At start, an empty localStorage with
+  // a copy here is put back (once, then the app starts again). Signing out clears the copy too.
+  const KEEP = 'ls.backup';
+  const Backup = {
+    timer: 0,
+    snapshot() {
+      const d = {};
+      try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('itv.')) d[k] = localStorage.getItem(k); } } catch {}
+      return d;
+    },
+    save() {
+      clearTimeout(this.timer); this.timer = 0;
+      const d = this.snapshot();
+      if (!d['itv.creds']) return Disk.run('readwrite', st => st.delete(KEEP)); // signed out: no copy
+      return Disk.run('readwrite', st => st.put({ t: Date.now(), d }, KEEP));
+    },
+    later() { if (!this.timer) this.timer = setTimeout(() => this.save(), 4000); },
+    // true when the saved data was put back (the caller starts the app again).
+    async restore() {
+      try {
+        if (localStorage.getItem('itv.creds') || localStorage.getItem('itv.tourSeen') || localStorage.getItem('itv.settings')) return false;
+        const b = await Disk.run('readonly', st => st.get(KEEP));
+        if (!b || !b.d || !b.d['itv.creds']) return false;
+        for (const [k, v] of Object.entries(b.d)) localStorage.setItem(k, v);
+        console.warn('[storage] saved data was empty: put back from the copy of', new Date(b.t).toISOString());
+        return true;
+      } catch { return false; }
+    },
+  };
+  // Copied a few seconds after a change, when the app goes to the background, and now and then.
+  const setItem0 = Store.set, del0 = Store.del;
+  Store.set = function (key, value, sessionOnly) { setItem0.call(Store, key, value, sessionOnly); if (!sessionOnly) Backup.later(); };
+  Store.del = function (key) { del0.call(Store, key); Backup.later(); };
+  try { document.addEventListener('visibilitychange', () => { if (document.hidden) Backup.save(); }); } catch {}
+  setInterval(() => Backup.later(), 120000);
+
   // Playlists kept on the device: shown at once on launch, refreshed in the background.
   const PERSIST = new Set(['get_live_streams', 'get_vod_streams', 'get_series', 'get_live_categories', 'get_vod_categories', 'get_series_categories']);
   const MAX_AGE = 6 * 3600e3;
@@ -1088,6 +1126,7 @@
   window.Xtream = Xtream;
   window.M3UPlaylist = M3UPlaylist;
   window.Disk = Disk;
+  window.Backup = Backup;
   window.TMDB = TMDB;
   window.M3U = M3U;
   window.asArray = asArray;
