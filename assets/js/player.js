@@ -345,6 +345,9 @@
         : item.kind === 'live' ? item.fmtOverride || this.fmtPref || Settings.liveFormat : item.ext || 'mp4';
       // iPhone and iPad play HLS themselves but not raw MPEG-TS.
       if (appleTouch && !item.url && item.kind === 'live' && ext === 'ts') ext = 'm3u8';
+      // Nor MKV / AVI films and episodes (a computer's browser plays them): the provider is asked
+      // for the same title as HLS first (most Xtream servers serve it), then the file as it is.
+      if (appleTouch && !item.url && item.kind !== 'live' && !item.iosFileTried && /^(mkv|avi|wmv|flv|mpg|mpeg|ts)$/.test(ext)) { item.iosFile = ext; ext = 'm3u8'; }
       item.fmt = ext;
       item.rawUrl = item.url || App.api.streamUrl(item.kind, item.id, ext);
       if (webPage() && !helperOn && !item.helperChecked && (!item.url || item.relay)) {
@@ -1174,6 +1177,12 @@
         this.play({ ...this.item, viaRelay: true, tried: null });
         return;
       }
+      // iPhone/iPad: the HLS copy of an MKV / AVI title failed: try the file itself once.
+      if (appleTouch && this.item.iosFile && this.item.fmt === 'm3u8' && !this.item.iosFileTried) {
+        console.warn('[player] HLS copy failed on iPhone/iPad, trying the', this.item.iosFile, 'file after', detail);
+        this.play({ ...this.item, ext: this.item.iosFile, iosFileTried: true });
+        return;
+      }
       if (!mixed && this.retry()) { if (detail) console.warn('[player] retrying after', detail); return; }
       // A stream that failed through one relay is tried through the next ones (once each: the
       // formats already tried stay tried).
@@ -1197,6 +1206,8 @@
         ? T(this.item && this.item.kind === 'live'
           ? 'This channel can’t be played right now. It may be off the air, or your provider may be having trouble with it. Try again in a moment, or choose another channel.'
           : 'This video can’t be played right now. Your provider may be having trouble with it. Try again in a moment.')
+        : !mixed && appleTouch && this.item && this.item.iosFile
+        ? T('On iPhone and iPad, browsers can’t play this video’s format ({f}), and your provider didn’t offer another one. Watch it with the InkonabTV app on Android, Android TV, Fire TV or Samsung TV, or on a computer.').replace('{f}', this.item.iosFile.toUpperCase())
         : !mixed
         ? 'The stream could not be played. It may be offline, or use a format your browser can’t decode (try the other live format in Settings, or open it in VLC).'
         : appleTouch
