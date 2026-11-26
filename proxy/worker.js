@@ -13,7 +13,7 @@
  * SECRET so the relay can't be used as an open proxy. Without a SECRET the
  * relay refuses to run: a default one would be public, readable in this file.
  */
-const ALLOWED_HOSTS = ['inkonabtv.ottb.xyz'];
+const ALLOWED_HOSTS = ['inkonabtv.ottb.xyz', 'rvenv.khan349.com', 'rvenv.barond.cc'];
 
 export default {
   async fetch(request, env) {

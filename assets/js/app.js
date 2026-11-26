@@ -1678,12 +1678,14 @@
     },
 
     loadLive() {
-      // Channels named "✶⋆✶ … ✶⋆✶" are the provider's section dividers, not real channels.
+      // Channels named "✶⋆✶ … ✶⋆✶" or starting with "#" ("##### FRANCE #####") are the provider's
+      // section dividers, not real channels.
       // Copies of the same channel in other qualities share c.versions (best first).
       return this.data.live || (this.data.live = Promise.all([this.api.liveStreams(), this.adultCatIds('live')]).then(async ([list, adultCats]) => {
         const out = [];
         await eachSlice(list, c => {
-          if (String(c.name || '').trim().startsWith('✶⋆✶')) return;
+          const nm = String(c.name || '').trim();
+          if (nm.startsWith('✶⋆✶') || nm.startsWith('#')) return;
           const p = parseChannel(c.name);
           out.push({ ...c, ...p, key: fold(c.name), gkey: fold(p.label), adult: Number(c.is_adult) === 1 || adultCats.has(String(c.category_id)) });
         });
