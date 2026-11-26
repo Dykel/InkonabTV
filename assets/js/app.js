@@ -712,16 +712,9 @@
     setLoginMode(mode, fromClick) {
       this.loginMode = mode;
       $$('.login-mode').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
-      // The server field shows in every version: in the InkonabTV service version (website,
-      // InkonabTV+) it is optional and left empty for the built-in server, so people with another
-      // provider can sign in too (it was hidden, and their login went to the built-in server).
+      // The server field shows in every version with its normal label. In the InkonabTV service
+      // version (website, InkonabTV+) an empty one still signs in to the built-in server.
       const show = { server: mode === 'xtream', xtream: mode === 'xtream', m3u: mode === 'm3u', remote: mode === 'remote', form: mode !== 'remote' };
-      if (!CFG.playerMode && !$('#loginServer').dataset.optional) {
-        $('#loginServer').dataset.optional = '1';
-        $('#loginServer').placeholder = T('Leave empty for the InkonabTV server');
-        const lbl = $('#loginServer').closest('label').querySelector('span');
-        if (lbl) lbl.textContent = T('Server address (optional)');
-      }
       $$('#loginForm [data-for]').forEach(el => { el.hidden = !show[el.dataset.for]; });
       $('#loginForm').classList.toggle('has-pair', mode === 'remote');
       if (fromClick) $('#loginError').textContent = '';

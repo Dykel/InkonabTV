@@ -1166,7 +1166,8 @@
     fail(detail) {
       if (!this.item) return;
       if (this.keeps()) return this.keepLive(detail);
-      const mixed = (!this.item.url || this.item.relay) && webPage() && !helperOn && !(window.Relays && Relays.current());
+      const mixed = (!this.item.url || this.item.relay) && webPage() && !helperOn && !(window.Relays && Relays.current()) &&
+        location.protocol === 'https:' && /^http:/i.test(this.item.rawUrl || ''); // an https provider isn't blocked
       // Samsung TV and Windows: a provider stream that failed directly goes through the relay straight away
       // (before other formats and copies, which would fail the same way when the stream host is
       // blocked), and the next streams too for 30 minutes (Reach.video, api.js).
