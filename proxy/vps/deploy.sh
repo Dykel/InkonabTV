@@ -7,7 +7,7 @@ IP="${1:?usage: deploy.sh <server-ip>}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-cp "$HERE/server.mjs" "$HERE/setup.sh" "$HERE/Caddyfile" "$HERE/../netlify/netlify/edge-functions/relay.js" "$TMP/"
+cp "$HERE/server.mjs" "$HERE/smooth.mjs" "$HERE/setup.sh" "$HERE/Caddyfile" "$HERE/../netlify/netlify/edge-functions/relay.js" "$TMP/"
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
 ssh "${SSH_OPTS[@]}" "root@$IP" 'mkdir -p /root/inkonab-relay'
 scp -q "${SSH_OPTS[@]}" "$TMP"/* "root@$IP:/root/inkonab-relay/"

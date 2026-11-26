@@ -14,12 +14,15 @@ import { readFileSync } from 'node:fs';
 const fileSecret = (() => { try { return readFileSync(new URL('./secret', import.meta.url), 'utf8').trim(); } catch { return ''; } })();
 globalThis.Netlify ??= { env: { get: name => process.env[name] || (name === 'SECRET' ? fileSecret : undefined) } };
 const { default: relay } = await import('./relay.js');
+// Smooth live TV: live channels asked as HLS get several qualities (smooth.mjs).
+const { relayLive, relayOther, serveSmooth } = await import('./smooth.mjs');
 
 const PORT = Number(process.env.FC_SERVER_PORT || process.env.FC_CUSTOM_LISTEN_PORT || process.env.PORT || (process.env.FC_FUNCTION_NAME ? 9000 : 8080));
 const HOST = process.env.HOST || (process.env.FC_FUNCTION_NAME ? '0.0.0.0' : '127.0.0.1');
 
 http.createServer(async (req, res) => {
   const path = (req.url || '/').split('?')[0];
+  if (path.startsWith('/smooth/')) return serveSmooth(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
   if (path !== '/relay' && path !== '/relay/') {
     res.writeHead(path === '/' ? 200 : 404, { 'Content-Type': 'text/plain' });
     return res.end('InkonabTV relay. The relay address is /relay on this site.');
@@ -29,6 +32,9 @@ http.createServer(async (req, res) => {
   const url = `${proto}://${req.headers.host}${req.url}`;
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers.set(k, v);
+
+  const target0 = new URL(url).searchParams.get('url') || '';
+  try { if (await relayLive(req, res, target0)) return; relayOther(target0); } catch (e) { console.log('smooth error', e.message); }
 
   let out;
   try {

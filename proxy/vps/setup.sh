@@ -13,7 +13,7 @@ NAME="${RELAY_NAME:-${IP//./-}.sslip.io}"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q ca-certificates curl gnupg debian-keyring debian-archive-keyring apt-transport-https ufw
+apt-get install -y -q ca-certificates curl gnupg debian-keyring debian-archive-keyring apt-transport-https ufw ffmpeg
 
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 22 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
@@ -27,7 +27,7 @@ fi
 
 id inkonab >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin inkonab
 install -d /opt/inkonab-relay
-install -m 644 server.mjs relay.js /opt/inkonab-relay/
+install -m 644 server.mjs smooth.mjs relay.js /opt/inkonab-relay/
 echo '{"type":"module"}' > /opt/inkonab-relay/package.json
 
 if [ ! -s /etc/inkonab-relay.env ]; then
@@ -50,6 +50,8 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+# Smooth live TV pieces (smooth.mjs), emptied at each start.
+CacheDirectory=inkonab-smooth
 
 [Install]
 WantedBy=multi-user.target
